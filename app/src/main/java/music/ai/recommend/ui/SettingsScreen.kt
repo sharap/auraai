@@ -206,6 +206,14 @@ fun SettingsScreen(viewModel: MusicViewModel) {
                             Text(stringResource(id = R.string.start_ai_scan))
                         }
                     }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = { viewModel.clearAiData() },
+                        modifier = Modifier.align(Alignment.Start)
+                    ) {
+                        Text("Clear AI Data", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }

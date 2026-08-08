@@ -77,4 +77,5 @@
     <string name="create_new_playlist">Create New Playlist</string>
     <string name="delete_from_device">Delete from Device</string>
     <string name="all_tracks">All Tracks</string>
+    <string name="favorites">Favorites</string>
 </resources>

@@ -49,8 +49,8 @@
     <string name="preset_name">Название пресета</string>
 
     <!-- Плеер и Очередь -->
-    <string name="playback_queue">Очередь воспроизведения</string>
-    <string name="save_queue">Сохранить очередь</string>
+    <string name="playback_queue">Очередь</string>
+    <string name="save_queue">Сохранить</string>
     <string name="save_queue_title">Сохранить очередь как плейлист</string>
     <string name="new_playlist">Новый плейлист</string>
     <string name="add_to_existing">Добавить в существующий</string>
@@ -77,4 +77,5 @@
     <string name="create_new_playlist">Создать новый плейлист</string>
     <string name="delete_from_device">Удалить с устройства</string>
     <string name="all_tracks">Все треки</string>
+    <string name="favorites">Избранное</string>
 </resources>

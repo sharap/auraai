@@ -29,8 +29,8 @@ class BpeTokenizer(context: Context) {
 
     fun tokenize(text: String, maxLength: Int = 77): LongArray {
         val tokens = mutableListOf<Long>()
-        // CLAP uses special tokens. Often 0 and 2 for <s> and </s>
-        tokens.add(vocab["<s>"]?.toLong() ?: 0L)
+        // CLIP/CLAP often use 49406 and 49407 for start/end
+        tokens.add(vocab["<|startoftext|>"]?.toLong() ?: 49406L)
 
         val cleanText = text.lowercase().replace(Regex("\\s+"), " ").trim()
         val words = cleanText.split(" ")
@@ -43,9 +43,9 @@ class BpeTokenizer(context: Context) {
             }
         }
 
-        tokens.add(vocab["</s>"]?.toLong() ?: 2L)
+        tokens.add(vocab["<|endoftext|>"]?.toLong() ?: 49407L)
         
-        val result = LongArray(maxLength) { 1L } // Pad with 1 (often <pad>)
+        val result = LongArray(maxLength) { 49407L } // Pad with end token
         for (i in 0 until minOf(tokens.size, maxLength)) {
             result[i] = tokens[i]
         }

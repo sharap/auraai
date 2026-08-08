@@ -241,7 +241,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 allSongs = result.flatMap { it.songs }
                 
                 // Add virtual "All Tracks" folder
-                val allTracksFolder = Folder("All Tracks", allSongs)
+                val allTracksFolder = Folder(getApplication<Application>().getString(R.string.all_tracks), allSongs)
                 _folders.value = listOf(allTracksFolder) + result
                 
                 viewModelScope.launch(Dispatchers.Main) {
@@ -524,7 +524,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Add virtual "Favorites" playlist
         val favoriteSongs = allSongs.filter { it.id in _favoriteSongIds.value }
         val finalPlaylists = if (favoriteSongs.isNotEmpty()) {
-            listOf(Playlist("Favorites", favoriteSongs)) + savedPlaylists
+            listOf(Playlist(getApplication<Application>().getString(R.string.favorites), favoriteSongs)) + savedPlaylists
         } else {
             savedPlaylists
         }
@@ -813,6 +813,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _isAiScanning.value = false
         _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_scan_stopped)
         refreshScannedIds()
+    }
+
+    fun clearAiData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            aiScanner.clearDatabase()
+            refreshScannedIds()
+            withContext(Dispatchers.Main) {
+                _aiScanStatus.value = "AI data cleared"
+            }
+        }
     }
 
     fun playSimilar(song: Song) {

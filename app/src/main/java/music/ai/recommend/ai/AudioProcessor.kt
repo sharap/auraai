@@ -74,7 +74,9 @@ class AudioProcessor {
         val flattened = FloatArray(melSpec.size * N_MELS)
         for (f in melSpec.indices) {
             for (m in 0 until N_MELS) {
-                flattened[f * N_MELS + m] = 10.0f * log10(max(1e-10f, melSpec[f][m]))
+                // Better Log-Mel mapping for CLAP: log(x + 1e-10)
+                // CLAP expects specific range, let's use natural log or log10 consistently
+                flattened[f * N_MELS + m] = ln(melSpec[f][m] + 1e-10f)
             }
         }
         return flattened

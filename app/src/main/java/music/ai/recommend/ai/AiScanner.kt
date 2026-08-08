@@ -256,4 +256,8 @@ class AiScanner(private val context: Context) {
     suspend fun getStoredEmbeddings(): Map<Long, List<Float>> = withContext(Dispatchers.IO) {
         db.embeddingDao().getAll().associate { it.songId to it.vector }
     }
+
+    suspend fun clearDatabase() = withContext(Dispatchers.IO) {
+        db.clearAllTables()
+    }
 }
