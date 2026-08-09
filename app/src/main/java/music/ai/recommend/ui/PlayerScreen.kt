@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
@@ -189,6 +191,10 @@ fun PlayerMainContent(
     onPlayPause: () -> Unit,
     onPlaySimilar: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+    var sliderPosition by remember { mutableStateOf<Float?>(null) }
+    val displayPosition = sliderPosition ?: currentPosition.toFloat()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -259,8 +265,12 @@ fun PlayerMainContent(
         Spacer(modifier = Modifier.height(32.dp))
 
         Slider(
-            value = currentPosition.toFloat(),
-            onValueChange = { onSeek(it.toLong()) },
+            value = displayPosition,
+            onValueChange = { sliderPosition = it },
+            onValueChangeFinished = {
+                sliderPosition?.let { onSeek(it.toLong()) }
+                sliderPosition = null
+            },
             valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
             modifier = Modifier.fillMaxWidth()
         )
@@ -268,7 +278,7 @@ fun PlayerMainContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = formatTime(currentPosition))
+            Text(text = formatTime(displayPosition.toLong()))
             Text(text = formatTime(duration))
         }
 
@@ -278,7 +288,10 @@ fun PlayerMainContent(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            IconButton(onClick = onToggleAiShuffle) {
+            IconButton(onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onToggleAiShuffle()
+            }) {
                 Icon(
                     imageVector = Icons.Default.AutoMode,
                     contentDescription = "AI Shuffle",
@@ -290,7 +303,10 @@ fun PlayerMainContent(
                 Icon(imageVector = Icons.Default.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(48.dp))
             }
             FloatingActionButton(
-                onClick = onPlayPause,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onPlayPause()
+                },
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             ) {
                 Icon(
@@ -302,7 +318,10 @@ fun PlayerMainContent(
             IconButton(onClick = onNext) {
                 Icon(imageVector = Icons.Default.SkipNext, contentDescription = "Next", modifier = Modifier.size(48.dp))
             }
-            IconButton(onClick = onToggleFavorite) {
+            IconButton(onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onToggleFavorite()
+            }) {
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
@@ -532,7 +551,7 @@ fun QueueList(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            itemsIndexed(queue) { index, song ->
+            itemsIndexed(queue, key = { _, song -> song.id }) { index, song ->
                 val isCurrent = song.id == currentSong?.id
                 val backgroundColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
                 val textColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface

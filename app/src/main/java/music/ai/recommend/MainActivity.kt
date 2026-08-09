@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -22,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -124,9 +126,10 @@ class MainActivity : ComponentActivity() {
                             AsyncImage(
                                 model = backgroundImageUri,
                                 contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                alpha = backgroundAlpha
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer { alpha = backgroundAlpha },
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
                             )
                         }
 
@@ -170,7 +173,14 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxSize()
                                 ) { page ->
                                     when (page) {
-                                        0 -> NavHost(navController = playlistNavController, startDestination = "playlist_list") {
+                                        0 -> NavHost(
+                                            navController = playlistNavController,
+                                            startDestination = "playlist_list",
+                                            enterTransition = { fadeIn() + slideInHorizontally { it / 2 } },
+                                            exitTransition = { fadeOut() + slideOutHorizontally { -it / 2 } },
+                                            popEnterTransition = { fadeIn() + slideInHorizontally { -it / 2 } },
+                                            popExitTransition = { fadeOut() + slideOutHorizontally { it / 2 } }
+                                        ) {
                                             composable("playlist_list") {
                                                 PlaylistListScreen(
                                                     viewModel = viewModel,
@@ -193,7 +203,14 @@ class MainActivity : ComponentActivity() {
                                                 )
                                             }
                                         }
-                                        1 -> NavHost(navController = folderNavController, startDestination = "folder_list") {
+                                        1 -> NavHost(
+                                            navController = folderNavController,
+                                            startDestination = "folder_list",
+                                            enterTransition = { fadeIn() + slideInHorizontally { it / 2 } },
+                                            exitTransition = { fadeOut() + slideOutHorizontally { -it / 2 } },
+                                            popEnterTransition = { fadeIn() + slideInHorizontally { -it / 2 } },
+                                            popExitTransition = { fadeOut() + slideOutHorizontally { it / 2 } }
+                                        ) {
                                             composable("folder_list") {
                                                 FolderListScreen(
                                                     viewModel = viewModel,
@@ -234,9 +251,10 @@ class MainActivity : ComponentActivity() {
                                             AsyncImage(
                                                 model = backgroundImageUri,
                                                 contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                                alpha = backgroundAlpha
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .graphicsLayer { alpha = backgroundAlpha },
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                             )
                                         }
                                         PlayerScreen(

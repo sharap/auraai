@@ -2,6 +2,9 @@ package music.ai.recommend.model
 
 import android.net.Uri
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Song(
     val id: Long,
     val title: String,

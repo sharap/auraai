@@ -1,5 +1,7 @@
 package music.ai.recommend.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -79,7 +81,7 @@ fun SongListScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp)
             ) {
-                itemsIndexed(songs) { _, song ->
+                itemsIndexed(songs, key = { _, song -> song.id }) { _, song ->
                     val isActive = song.id == currentSong?.id
                     val isScanned = song.id in scannedIds
                     val isFavorite = song.id in favoriteIds
@@ -188,12 +190,16 @@ fun SongItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                }
             )
             .padding(vertical = 8.dp)
             .background(

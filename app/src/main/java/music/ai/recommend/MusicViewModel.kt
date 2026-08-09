@@ -729,9 +729,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         progressJob = viewModelScope.launch {
             while (true) {
                 controller?.let {
-                    _currentPosition.value = it.currentPosition
+                    if (it.isPlaying) {
+                        _currentPosition.value = it.currentPosition
+                    }
                 }
-                delay(1000)
+                delay(500)
             }
         }
     }
