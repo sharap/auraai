@@ -16,6 +16,17 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
 class PlaybackService : MediaSessionService() {
+
+    companion object {
+        const val COMMAND_SET_EQ_ENABLED = "SET_EQ_ENABLED"
+
+        /** Shared with MusicViewModel, which is the only other writer. */
+        const val PREFS = "music_prefs"
+        const val KEY_EQ_ENABLED = "eq_enabled"
+
+        private const val TAG = "PlaybackService"
+    }
+
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
     private var equalizer: Equalizer? = null
@@ -23,15 +34,21 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val exoPlayer = ExoPlayer.Builder(this).build()
+        val exoPlayer = ExoPlayer.Builder(this)
+            // Pause when the headphones come out, rather than switching to the speaker.
+            .setHandleAudioBecomingNoisy(true)
+            .build()
         player = exoPlayer
 
         try {
             equalizer = Equalizer(0, exoPlayer.audioSessionId).apply {
-                enabled = true
+                // Read straight from preferences rather than waiting for the controller to connect,
+                // so a user who turned the equalizer off does not hear it applied for a moment on
+                // every start.
+                enabled = isEqualizerEnabled()
             }
         } catch (e: Exception) {
-            Log.e("PlaybackService", "Failed to create Equalizer", e)
+            Log.e(TAG, "Failed to create Equalizer", e)
         }
 
         val intent = Intent(this, MainActivity::class.java).apply {
@@ -57,6 +74,7 @@ class PlaybackService : MediaSessionService() {
                     val availableSessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
                         .add(SessionCommand("GET_EQ_PARAMS", Bundle.EMPTY))
                         .add(SessionCommand("SET_EQ_BAND", Bundle.EMPTY))
+                        .add(SessionCommand(COMMAND_SET_EQ_ENABLED, Bundle.EMPTY))
                         .build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(availableSessionCommands)
@@ -84,8 +102,18 @@ class PlaybackService : MediaSessionService() {
                                 
                                 val levels = IntArray(eq.numberOfBands.toInt()) { i -> eq.getBandLevel(i.toShort()).toInt() }
                                 resultBundle.putIntArray("band_levels", levels)
+                                resultBundle.putBoolean("enabled", eq.enabled)
                             }
                             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, resultBundle))
+                        }
+                        COMMAND_SET_EQ_ENABLED -> {
+                            val enabled = args.getBoolean("enabled", true)
+                            // Band levels are kept either way, so switching back on restores the
+                            // curve the user had set.
+                            runCatching { equalizer?.enabled = enabled }
+                                .onFailure { Log.e(TAG, "Could not toggle the equalizer", it) }
+                            setEqualizerEnabled(enabled)
+                            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                         }
                         "SET_EQ_BAND" -> {
                             val band = args.getInt("band", -1)
@@ -100,6 +128,14 @@ class PlaybackService : MediaSessionService() {
                 }
             })
             .build()
+    }
+
+    private fun preferences() = getSharedPreferences(PREFS, MODE_PRIVATE)
+
+    private fun isEqualizerEnabled(): Boolean = preferences().getBoolean(KEY_EQ_ENABLED, true)
+
+    private fun setEqualizerEnabled(enabled: Boolean) {
+        preferences().edit().putBoolean(KEY_EQ_ENABLED, enabled).apply()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {

@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import music.ai.recommend.MusicViewModel
+import music.ai.recommend.ui.theme.LocalMutedOnSurface
 
 @Composable
 fun PlayerOverlay(
@@ -50,15 +51,19 @@ fun PlayerOverlay(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    // Colours are set explicitly rather than inherited: the ambient content colour
+                    // here resolved to a light grey that measured 1.14:1 against the bar.
                     Text(
                         text = song.title,
                         style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = song.artist,
                             style = MaterialTheme.typography.bodySmall,
+                            color = LocalMutedOnSurface.current,
                             maxLines = 1,
                             modifier = Modifier.weight(1f, fill = false)
                         )
@@ -79,11 +84,16 @@ fun PlayerOverlay(
                 }) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play"
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
                 IconButton(onClick = { viewModel.next() }) {
-                    Icon(imageVector = Icons.Default.SkipNext, contentDescription = "Next")
+                    Icon(
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = "Next",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
 

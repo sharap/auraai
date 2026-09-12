@@ -34,6 +34,9 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import music.ai.recommend.ui.*
 import music.ai.recommend.ui.theme.AiMusicTheme
+import music.ai.recommend.ui.theme.BackgroundTone
+import music.ai.recommend.ui.theme.LocalSurfaceScrim
+import music.ai.recommend.ui.theme.LocalWallpaperScrim
 
 class MainActivity : ComponentActivity() {
     private var openPlayerAction by mutableStateOf(false)
@@ -44,12 +47,20 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         enableEdgeToEdge()
         setContent {
-            AiMusicTheme {
-                val viewModel: MusicViewModel = viewModel()
+            // Resolved before the theme: the wallpaper and its opacity decide what colours are
+            // legible, so the theme has to be built from them.
+            val viewModel: MusicViewModel = viewModel()
+            val backgroundImageUri by viewModel.backgroundImageUri.collectAsState()
+            val backgroundAlpha by viewModel.backgroundAlpha.collectAsState()
+            val backgroundTone by viewModel.backgroundTone.collectAsState()
+            val hasWallpaper = backgroundImageUri != null
+
+            AiMusicTheme(
+                backgroundTone = if (hasWallpaper) backgroundTone else BackgroundTone.Unknown,
+                backgroundAlpha = if (hasWallpaper) backgroundAlpha else 0f
+            ) {
                 val folders by viewModel.folders.collectAsState()
                 val playlists by viewModel.playlists.collectAsState()
-                val backgroundImageUri by viewModel.backgroundImageUri.collectAsState()
-                val backgroundAlpha by viewModel.backgroundAlpha.collectAsState()
 
                 val folderNavController = rememberNavController()
                 val playlistNavController = rememberNavController()
@@ -128,7 +139,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                     NavigationBar(
                                         containerColor = MaterialTheme.colorScheme.surface.copy(
-                                            alpha = backgroundAlpha.coerceAtLeast(0.4f)
+                                            alpha = LocalSurfaceScrim.current
                                         )
                                     ) {
                                         NavigationBarItem(
@@ -281,4 +292,15 @@ private fun AppBackground(uri: String?, alpha: Float) {
         contentScale = ContentScale.Crop,
         alpha = alpha
     )
+    // Only drawn when the image swings too much for a single text colour to cover — a half-black,
+    // half-white wallpaper has no readable text colour until its range is compressed. Flat or faint
+    // wallpapers get no scrim at all.
+    val scrim = LocalWallpaperScrim.current
+    if (scrim > 0f) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background.copy(alpha = scrim))
+        )
+    }
 }

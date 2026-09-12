@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
+import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
@@ -85,7 +86,7 @@ fun PlayerScreen(
                     Icon(
                         imageVector = Icons.Default.Timer,
                         contentDescription = "Sleep Timer",
-                        tint = if (sleepTimerRemaining != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        tint = if (sleepTimerRemaining != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
                     )
                 }
             }
@@ -232,7 +233,7 @@ fun PlayerMainContent(
         Text(
             text = currentSong.artist,
             style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -254,7 +255,7 @@ fun PlayerMainContent(
                 Icon(
                     imageVector = Icons.Default.AutoMode,
                     contentDescription = "AI Shuffle",
-                    tint = if (aiShuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    tint = if (aiShuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -284,7 +285,7 @@ fun PlayerMainContent(
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
-                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -301,7 +302,7 @@ fun PlayerMainContent(
                 Icon(
                     imageVector = Icons.Default.Shuffle,
                     contentDescription = "Shuffle",
-                    tint = if (shuffleModeEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (shuffleModeEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
                 )
             }
 
@@ -310,7 +311,7 @@ fun PlayerMainContent(
                     imageVector = if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
                     contentDescription = "Repeat",
                     tint = if (repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onBackground
                 )
             }
 
@@ -561,7 +562,7 @@ private fun QueueRow(
     onMoveDown: () -> Unit
 ) {
     val backgroundColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val textColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val textColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onBackground
 
     Row(
         modifier = Modifier
@@ -594,7 +595,7 @@ private fun QueueRow(
                     text = song.artist,
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
-                    else MaterialTheme.colorScheme.onSurface,
+                    else LocalMutedOnBackground.current,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)

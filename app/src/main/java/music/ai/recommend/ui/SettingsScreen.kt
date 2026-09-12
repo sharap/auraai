@@ -23,6 +23,8 @@ import music.ai.recommend.MusicViewModel
 import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.R
+import music.ai.recommend.ui.theme.LocalMutedOnSurface
+import music.ai.recommend.ui.theme.LocalSurfaceScrim
 
 @Composable
 fun SettingsScreen(viewModel: MusicViewModel) {
@@ -158,7 +160,7 @@ private fun SectionTitle(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.onSurface
+        color = MaterialTheme.colorScheme.onBackground
     )
     Spacer(modifier = Modifier.height(8.dp))
 }
@@ -168,7 +170,9 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+            // Opacity comes from the theme rather than a constant: a bright or busy wallpaper at
+            // high opacity needs more covering before text on the card reads.
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = LocalSurfaceScrim.current)
         ),
         content = content
     )
@@ -216,7 +220,7 @@ private fun AiModelsCard(viewModel: MusicViewModel) {
                     else R.string.model_variant_full_hint
                 ),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = LocalMutedOnSurface.current
             )
 
             // Worth mentioning, not worth alarming over: the two exports were measured to agree
@@ -226,7 +230,7 @@ private fun AiModelsCard(viewModel: MusicViewModel) {
                 Text(
                     text = stringResource(id = R.string.model_variant_mismatch),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = LocalMutedOnSurface.current
                 )
             }
 
@@ -446,6 +450,7 @@ fun EqualizerControl(viewModel: MusicViewModel) {
     val eqBands by viewModel.eqBands.collectAsState()
     val eqRange by viewModel.eqRange.collectAsState()
     val eqPresets by viewModel.eqPresets.collectAsState()
+    val eqEnabled by viewModel.eqEnabled.collectAsState()
 
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var newPresetName by remember { mutableStateOf("") }
@@ -458,6 +463,23 @@ fun EqualizerControl(viewModel: MusicViewModel) {
     Column {
         SettingsCard {
             Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stringResource(id = R.string.eq_enabled),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Switch(
+                        checked = eqEnabled,
+                        onCheckedChange = { viewModel.setEqEnabled(it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -479,6 +501,7 @@ fun EqualizerControl(viewModel: MusicViewModel) {
                                 value = band.level.toFloat(),
                                 onValueChange = { viewModel.setEqBandLevel(band.index, it.toInt()) },
                                 valueRange = eqRange.first.toFloat()..eqRange.last.toFloat(),
+                                enabled = eqEnabled,
                                 modifier = Modifier.weight(1f)
                             )
                             Text(
@@ -497,10 +520,10 @@ fun EqualizerControl(viewModel: MusicViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Button(onClick = { viewModel.resetEqualizer() }) {
+                    Button(onClick = { viewModel.resetEqualizer() }, enabled = eqEnabled) {
                         Text(stringResource(id = R.string.reset))
                     }
-                    Button(onClick = { showSavePresetDialog = true }) {
+                    Button(onClick = { showSavePresetDialog = true }, enabled = eqEnabled) {
                         Icon(Icons.Default.Save, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(stringResource(id = R.string.save_preset))
@@ -524,6 +547,7 @@ fun EqualizerControl(viewModel: MusicViewModel) {
             items(eqPresets, key = { it.name }) { preset ->
                 InputChip(
                     selected = false,
+                    enabled = eqEnabled,
                     onClick = { viewModel.applyEqPreset(preset) },
                     label = { Text(preset.name) },
                     trailingIcon = {
@@ -577,6 +601,7 @@ fun VerticalSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f
 ) {
     Box(
@@ -604,6 +629,7 @@ fun VerticalSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth()
         )
     }

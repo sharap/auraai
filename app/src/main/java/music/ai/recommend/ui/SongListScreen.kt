@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.R
 import music.ai.recommend.model.Song
@@ -64,7 +65,7 @@ fun SongListScreen(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -211,14 +212,14 @@ fun SongItem(
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = song.artist,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = LocalMutedOnBackground.current,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -247,7 +248,7 @@ fun SongItem(
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Toggle Favorite",
-                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
                 )
             }
         }

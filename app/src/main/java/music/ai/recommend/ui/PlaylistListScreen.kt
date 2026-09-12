@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
@@ -32,7 +33,7 @@ fun PlaylistListScreen(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = stringResource(id = R.string.no_playlists_yet),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onBackground
             )
         }
     } else {
@@ -84,13 +85,13 @@ fun PlaylistItem(playlist: Playlist, scannedCount: Int, onClick: () -> Unit, onD
             Text(
                 text = playlist.name,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onBackground
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(id = R.string.songs_count, playlist.songs.size),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = LocalMutedOnBackground.current
                 )
                 if (scannedCount > 0) {
                     Spacer(modifier = Modifier.width(8.dp))

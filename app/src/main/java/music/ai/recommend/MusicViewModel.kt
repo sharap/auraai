@@ -44,6 +44,8 @@ import music.ai.recommend.ai.ScanStage
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
 import music.ai.recommend.scanner.MusicScanner
+import music.ai.recommend.ui.theme.BackgroundTone
+import music.ai.recommend.ui.theme.measureBackgroundTone
 import java.lang.reflect.Type
 
 class UriAdapter : JsonSerializer<Uri>, JsonDeserializer<Uri> {
@@ -107,6 +109,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _backgroundAlpha = MutableStateFlow(0.3f)
     val backgroundAlpha: StateFlow<Float> = _backgroundAlpha.asStateFlow()
 
+    /** Brightness of the wallpaper, so the theme can pick content colours that read against it. */
+    private val _backgroundTone = MutableStateFlow(BackgroundTone.Unknown)
+    val backgroundTone: StateFlow<BackgroundTone> = _backgroundTone.asStateFlow()
+
     private val _eqBands = MutableStateFlow<List<EqBand>>(emptyList())
     val eqBands: StateFlow<List<EqBand>> = _eqBands.asStateFlow()
 
@@ -115,6 +121,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _eqPresets = MutableStateFlow<List<EqPreset>>(emptyList())
     val eqPresets: StateFlow<List<EqPreset>> = _eqPresets.asStateFlow()
+
+    private val _eqEnabled = MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_EQ_ENABLED, true))
+    val eqEnabled: StateFlow<Boolean> = _eqEnabled.asStateFlow()
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
@@ -222,6 +231,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // put it squarely on the main thread in front of the first frame.
         _backgroundImageUri.value = prefs.getString("background_uri", null)
         _backgroundAlpha.value = prefs.getFloat("background_alpha", 0.3f)
+        refreshBackgroundTone()
         initializeController()
         refreshScannedIds()
         observeScan()
@@ -637,6 +647,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         _backgroundImageUri.value = uri?.toString()
         prefs.edit().putString("background_uri", uri?.toString()).apply()
+        refreshBackgroundTone()
+    }
+
+    private fun refreshBackgroundTone() {
+        val uri = _backgroundImageUri.value
+        if (uri == null) {
+            _backgroundTone.value = BackgroundTone.Unknown
+            return
+        }
+        viewModelScope.launch {
+            _backgroundTone.value = measureBackgroundTone(getApplication(), uri) ?: BackgroundTone.Unknown
+        }
     }
 
     fun setBackgroundAlpha(alpha: Float) {
@@ -658,6 +680,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _eqRange.value = extras.getInt("min_level", -1500)..extras.getInt("max_level", 1500)
             val bands = List(numBands) { i -> EqBand(i, freqs.getOrElse(i) { 0 }, levels.getOrElse(i) { 0 }) }
             _eqBands.value = bands
+
+            // The service is the authority on whether the effect is actually on.
+            _eqEnabled.value = extras.getBoolean("enabled", _eqEnabled.value)
 
             val savedJson = prefs.getString("current_eq_levels", null) ?: return@addListener
             val type = object : TypeToken<List<Int>>() {}.type
@@ -685,6 +710,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             delay(PERSIST_DEBOUNCE_MS)
             prefs.edit().putString("current_eq_levels", gson.toJson(updatedBands.map { it.level })).apply()
         }
+    }
+
+    /**
+     * Turns the effect on or off without discarding the curve, so switching back on restores what
+     * the user had.
+     */
+    fun setEqEnabled(enabled: Boolean) {
+        if (_eqEnabled.value == enabled) return
+        _eqEnabled.value = enabled
+        prefs.edit().putBoolean(PlaybackService.KEY_EQ_ENABLED, enabled).apply()
+        controller?.sendCustomCommand(
+            SessionCommand(PlaybackService.COMMAND_SET_EQ_ENABLED, Bundle.EMPTY),
+            Bundle().apply { putBoolean("enabled", enabled) }
+        )
     }
 
     fun resetEqualizer() {

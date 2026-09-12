@@ -108,4 +108,5 @@
     <string name="model_variant_full_hint">Full-precision model: the most accurate recommendations, but a larger download and a slower scan.</string>
     <string name="model_variant_mismatch">Your library was analysed with the other model. Measured difference between the two is tiny, so re-scanning is optional.</string>
     <string name="analysis_reset">Audio processing was corrected, so the previous analysis no longer applies. Run the scan again.</string>
+    <string name="eq_enabled">Equalizer enabled</string>
 </resources>

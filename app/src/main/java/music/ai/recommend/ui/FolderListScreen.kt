@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.R
 import music.ai.recommend.model.Folder
@@ -107,7 +108,7 @@ fun FolderListScreen(
                             Text(
                                 text = stringResource(id = R.string.ai_search_needs_model),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = LocalMutedOnBackground.current
                             )
                         }
                     }
@@ -265,7 +266,7 @@ fun FolderItem(
             Icon(
                 imageVector = Icons.Default.Folder,
                 contentDescription = null,
-                tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.size(48.dp)
             )
         }
@@ -275,13 +276,13 @@ fun FolderItem(
             Text(
                 text = folder.name,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onBackground
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(id = R.string.songs_count, folder.songs.size),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = LocalMutedOnBackground.current
                 )
                 if (scannedCount > 0) {
                     Spacer(modifier = Modifier.width(8.dp))
