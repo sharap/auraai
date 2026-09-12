@@ -23,7 +23,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -49,41 +50,36 @@ class MainActivity : ComponentActivity() {
                 val playlists by viewModel.playlists.collectAsState()
                 val backgroundImageUri by viewModel.backgroundImageUri.collectAsState()
                 val backgroundAlpha by viewModel.backgroundAlpha.collectAsState()
-                
+
                 val folderNavController = rememberNavController()
                 val playlistNavController = rememberNavController()
                 var showPlayer by remember { mutableStateOf(false) }
                 val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
                 val scope = rememberCoroutineScope()
 
-                val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    arrayOf(
-                        Manifest.permission.READ_MEDIA_AUDIO,
-                        Manifest.permission.POST_NOTIFICATIONS,
-                        Manifest.permission.RECORD_AUDIO
-                    )
-                } else {
-                    arrayOf(
-                        Manifest.permission.READ_EXTERNAL_STORAGE,
-                        Manifest.permission.RECORD_AUDIO
-                    )
+                val permissions = remember {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        arrayOf(
+                            Manifest.permission.READ_MEDIA_AUDIO,
+                            Manifest.permission.POST_NOTIFICATIONS,
+                            Manifest.permission.RECORD_AUDIO
+                        )
+                    } else {
+                        arrayOf(
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.RECORD_AUDIO
+                        )
+                    }
                 }
 
                 var permissionsGranted by remember {
-                    mutableStateOf(
-                        permissions.all {
-                            checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
-                        }
-                    )
+                    mutableStateOf(permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED })
                 }
 
                 val launcher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
                 ) { results ->
                     permissionsGranted = results.values.all { it }
-                    if (permissionsGranted) {
-                        viewModel.loadMusic()
-                    }
                 }
 
                 LaunchedEffect(openPlayerAction) {
@@ -94,15 +90,11 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(permissionsGranted) {
-                    if (permissionsGranted) {
-                        viewModel.loadMusic()
-                    }
+                    if (permissionsGranted) viewModel.loadMusic()
                 }
 
                 if (!permissionsGranted) {
-                    StartScreen(onGrantPermissions = {
-                        launcher.launch(permissions)
-                    })
+                    StartScreen(onGrantPermissions = { launcher.launch(permissions) })
 
                     DisposableEffect(Unit) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -116,22 +108,14 @@ class MainActivity : ComponentActivity() {
                         onDispose { lifecycle.removeObserver(observer) }
                     }
                 } else {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Surface(
-                            modifier = Modifier.fillMaxSize(),
-                            color = MaterialTheme.colorScheme.background
-                        ) {}
-
-                        if (backgroundImageUri != null) {
-                            AsyncImage(
-                                model = backgroundImageUri,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer { alpha = backgroundAlpha },
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
-                        }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // Replaces an empty full-screen Surface that existed only to paint this
+                            // colour, which cost a full-screen overdraw on every frame.
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        AppBackground(backgroundImageUri, backgroundAlpha)
 
                         Scaffold(
                             modifier = Modifier.fillMaxSize(),
@@ -143,23 +127,25 @@ class MainActivity : ComponentActivity() {
                                         onClick = { showPlayer = true }
                                     )
                                     NavigationBar(
-                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = backgroundAlpha.coerceAtLeast(0.4f))
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(
+                                            alpha = backgroundAlpha.coerceAtLeast(0.4f)
+                                        )
                                     ) {
                                         NavigationBarItem(
                                             icon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null) },
-                                            label = { Text(androidx.compose.ui.res.stringResource(id = R.string.nav_playlists)) },
+                                            label = { Text(stringResource(id = R.string.nav_playlists)) },
                                             selected = pagerState.currentPage == 0,
                                             onClick = { scope.launch { pagerState.animateScrollToPage(0) } }
                                         )
                                         NavigationBarItem(
                                             icon = { Icon(Icons.Default.LibraryMusic, contentDescription = null) },
-                                            label = { Text(androidx.compose.ui.res.stringResource(id = R.string.nav_music)) },
+                                            label = { Text(stringResource(id = R.string.nav_music)) },
                                             selected = pagerState.currentPage == 1,
                                             onClick = { scope.launch { pagerState.animateScrollToPage(1) } }
                                         )
                                         NavigationBarItem(
                                             icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                            label = { Text(androidx.compose.ui.res.stringResource(id = R.string.nav_settings)) },
+                                            label = { Text(stringResource(id = R.string.nav_settings)) },
                                             selected = pagerState.currentPage == 2,
                                             onClick = { scope.launch { pagerState.animateScrollToPage(2) } }
                                         )
@@ -194,11 +180,13 @@ class MainActivity : ComponentActivity() {
                                                 arguments = listOf(navArgument("playlistName") { type = NavType.StringType })
                                             ) { backStackEntry ->
                                                 val name = backStackEntry.arguments?.getString("playlistName") ?: ""
-                                                val playlist = playlists.find { it.name == name }
+                                                val songs = remember(playlists, name) {
+                                                    playlists.find { it.name == name }?.songs ?: emptyList()
+                                                }
                                                 SongListScreen(
                                                     viewModel = viewModel,
                                                     title = name,
-                                                    songs = playlist?.songs ?: emptyList(),
+                                                    songs = songs,
                                                     onBack = { playlistNavController.popBackStack() }
                                                 )
                                             }
@@ -224,11 +212,13 @@ class MainActivity : ComponentActivity() {
                                                 arguments = listOf(navArgument("folderName") { type = NavType.StringType })
                                             ) { backStackEntry ->
                                                 val name = backStackEntry.arguments?.getString("folderName") ?: ""
-                                                val folder = folders.find { it.name == name }
+                                                val songs = remember(folders, name) {
+                                                    folders.find { it.name == name }?.songs ?: emptyList()
+                                                }
                                                 SongListScreen(
                                                     viewModel = viewModel,
                                                     title = name,
-                                                    songs = folder?.songs ?: emptyList(),
+                                                    songs = songs,
                                                     onBack = { folderNavController.popBackStack() }
                                                 )
                                             }
@@ -247,16 +237,7 @@ class MainActivity : ComponentActivity() {
                                     dragHandle = null
                                 ) {
                                     Box(modifier = Modifier.fillMaxSize()) {
-                                        if (backgroundImageUri != null) {
-                                            AsyncImage(
-                                                model = backgroundImageUri,
-                                                contentDescription = null,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .graphicsLayer { alpha = backgroundAlpha },
-                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                            )
-                                        }
+                                        AppBackground(backgroundImageUri, backgroundAlpha)
                                         PlayerScreen(
                                             viewModel = viewModel,
                                             onClose = { showPlayer = false }
@@ -281,4 +262,23 @@ class MainActivity : ComponentActivity() {
             openPlayerAction = true
         }
     }
+}
+
+/**
+ * Full-screen wallpaper.
+ *
+ * Alpha is handed to the image painter rather than applied through `graphicsLayer { alpha = ... }`.
+ * A layer alpha below 1 forces the whole screen-sized image into an offscreen buffer that has to be
+ * allocated and composited every frame; the painter applies it while drawing instead.
+ */
+@Composable
+private fun AppBackground(uri: String?, alpha: Float) {
+    if (uri == null) return
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop,
+        alpha = alpha
+    )
 }

@@ -1,26 +1,21 @@
 package music.ai.recommend.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import android.content.ContentUris
-import android.net.Uri
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
@@ -31,7 +26,7 @@ fun PlaylistListScreen(
     onPlaylistClick: (String) -> Unit
 ) {
     val playlists by viewModel.playlists.collectAsState()
-    val scannedIds by viewModel.scannedSongIds.collectAsState()
+    val scanCounts by viewModel.playlistScanCounts.collectAsState()
 
     if (playlists.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -45,11 +40,10 @@ fun PlaylistListScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp)
         ) {
-            items(playlists) { playlist ->
-                val scannedCount = playlist.songs.count { it.id in scannedIds }
+            items(playlists, key = { it.name }) { playlist ->
                 PlaylistItem(
                     playlist = playlist,
-                    scannedCount = scannedCount,
+                    scannedCount = scanCounts[playlist.name] ?: 0,
                     onClick = { onPlaylistClick(playlist.name) },
                     onDelete = { viewModel.deletePlaylist(playlist) }
                 )
@@ -69,26 +63,12 @@ fun PlaylistItem(playlist: Playlist, scannedCount: Int, onClick: () -> Unit, onD
     ) {
         val firstSong = playlist.songs.firstOrNull()
         if (firstSong != null) {
-            val albumArtUri = ContentUris.withAppendedId(
-                Uri.parse("content://media/external/audio/albumart"),
-                firstSong.albumId
-            )
-            SubcomposeAsyncImage(
-                model = albumArtUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                error = {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(8.dp)
-                    )
-                }
+            AlbumArt(
+                albumId = firstSong.albumId,
+                size = 48.dp,
+                iconPadding = 8.dp,
+                fallbackIcon = Icons.AutoMirrored.Filled.PlaylistPlay,
+                fallbackTint = MaterialTheme.colorScheme.primary
             )
         } else {
             Icon(
@@ -98,7 +78,7 @@ fun PlaylistItem(playlist: Playlist, scannedCount: Int, onClick: () -> Unit, onD
                 modifier = Modifier.size(48.dp)
             )
         }
-        
+
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(

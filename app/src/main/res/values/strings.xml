@@ -78,4 +78,34 @@
     <string name="delete_from_device">Delete from Device</string>
     <string name="all_tracks">All Tracks</string>
     <string name="favorites">Favorites</string>
+
+    <!-- AI models -->
+    <string name="ai_models">AI Models</string>
+    <string name="model_audio">Audio model</string>
+    <string name="model_text">Text model (search)</string>
+    <string name="model_state_bundled">In app</string>
+    <string name="model_state_downloaded">Downloaded</string>
+    <string name="model_state_missing">Not downloaded</string>
+    <string name="models_ready">All weights are on the device</string>
+    <string name="model_download_hint">%1$s will be downloaded from Hugging Face. Wi-Fi recommended.</string>
+    <string name="model_downloading_file">Downloading %1$s — %2$s of %3$s</string>
+    <string name="model_download_failed">Download failed. Check the connection and try again.</string>
+    <string name="download_models">Download</string>
+    <string name="cancel_download">Cancel</string>
+    <string name="delete_downloaded_models">Delete downloaded weights</string>
+    <string name="ai_model_downloading">Downloading AI model…</string>
+    <string name="model_error_space">not enough free space</string>
+    <string name="model_error_download">could not download the model</string>
+    <string name="clear_ai_data">Clear AI Data</string>
+    <string name="ai_data_cleared">AI data cleared</string>
+    <string name="ai_search_needs_model">AI search needs the text model. Download it in Settings → AI Models.</string>
+    <string name="scan_channel_name">AI Analysis</string>
+    <string name="scan_notification_title">Analyzing your library</string>
+    <string name="model_variant_title">Analysis model</string>
+    <string name="model_variant_fast">Fast · %1$s</string>
+    <string name="model_variant_full">Full · %1$s</string>
+    <string name="model_variant_fast_hint">Quantised model: a quarter of the download and a somewhat faster scan. Measured against the full model, embeddings match to a cosine of 0.9985.</string>
+    <string name="model_variant_full_hint">Full-precision model: the most accurate recommendations, but a larger download and a slower scan.</string>
+    <string name="model_variant_mismatch">Your library was analysed with the other model. Measured difference between the two is tiny, so re-scanning is optional.</string>
+    <string name="analysis_reset">Audio processing was corrected, so the previous analysis no longer applies. Run the scan again.</string>
 </resources>

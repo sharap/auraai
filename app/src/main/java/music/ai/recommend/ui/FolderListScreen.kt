@@ -7,28 +7,19 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import android.content.ContentUris
-import android.net.Uri
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.R
 import music.ai.recommend.model.Folder
-import music.ai.recommend.model.Song
 
 @Composable
 fun FolderListScreen(
@@ -39,9 +30,13 @@ fun FolderListScreen(
     val playlists by viewModel.playlists.collectAsState()
     val currentSong by viewModel.currentSong.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
+    val scanCounts by viewModel.folderScanCounts.collectAsState()
     val aiSearchResults by viewModel.aiSearchResults.collectAsState()
     val regularSearchResults by viewModel.regularSearchResults.collectAsState()
+    val isAiSearching by viewModel.isAiSearching.collectAsState()
+    val aiSearchNeedsModel by viewModel.aiSearchNeedsModel.collectAsState()
     val activeFolderName = currentSong?.folderName
+    val currentSongId = currentSong?.id
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFolderForMenu by remember { mutableStateOf<Folder?>(null) }
@@ -52,7 +47,7 @@ fun FolderListScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { 
+            onValueChange = {
                 searchQuery = it
                 viewModel.aiSearch(it)
             },
@@ -62,8 +57,10 @@ fun FolderListScreen(
             placeholder = { Text(stringResource(id = R.string.search_hint)) },
             leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
             trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { 
+                if (isAiSearching) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = {
                         searchQuery = ""
                         viewModel.aiSearch("")
                     }) {
@@ -78,14 +75,14 @@ fun FolderListScreen(
         Box(modifier = Modifier.weight(1f)) {
             val results = aiSearchResults
             val regResults = regularSearchResults
-            
+
             if (results != null || regResults != null) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp)
                 ) {
                     if (!regResults.isNullOrEmpty()) {
-                        item {
+                        item(key = "header_plain") {
                             Text(
                                 text = stringResource(id = R.string.search_results),
                                 style = MaterialTheme.typography.titleSmall,
@@ -93,19 +90,30 @@ fun FolderListScreen(
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
                         }
-                        items(regResults) { song ->
+                        items(regResults, key = { "plain_${it.id}" }) { song ->
                             SongItem(
                                 song = song,
-                                isActive = song.id == currentSong?.id,
+                                isActive = song.id == currentSongId,
                                 isScanned = song.id in scannedIds,
                                 onClick = { viewModel.playSong(song, regResults) },
-                                onLongClick = { /* Menu */ }
+                                onLongClick = { }
+                            )
+                        }
+                    }
+
+                    if (aiSearchNeedsModel) {
+                        item(key = "ai_needs_model") {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = stringResource(id = R.string.ai_search_needs_model),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
                     if (!results.isNullOrEmpty()) {
-                        item {
+                        item(key = "header_ai") {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = stringResource(id = R.string.ai_recommendations),
@@ -114,14 +122,14 @@ fun FolderListScreen(
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
                         }
-                        items(results) { scoredSong ->
+                        items(results, key = { "ai_${it.song.id}" }) { scoredSong ->
                             SongItem(
                                 song = scoredSong.song,
-                                isActive = scoredSong.song.id == currentSong?.id,
+                                isActive = scoredSong.song.id == currentSongId,
                                 isScanned = true,
                                 score = scoredSong.score,
                                 onClick = { viewModel.playSong(scoredSong.song, results.map { it.song }) },
-                                onLongClick = { /* Menu */ }
+                                onLongClick = { }
                             )
                         }
                     }
@@ -131,13 +139,11 @@ fun FolderListScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp)
                 ) {
-                    items(folders) { folder ->
-                        val scannedCount = folder.songs.count { it.id in scannedIds }
-                        val localizedName = if (folder.name == "All Tracks") stringResource(id = R.string.all_tracks) else folder.name
+                    items(folders, key = { it.name }) { folder ->
                         FolderItem(
-                            folder = folder.copy(name = localizedName),
+                            folder = folder,
                             isActive = folder.name == activeFolderName,
-                            scannedCount = scannedCount,
+                            scannedCount = scanCounts[folder.name] ?: 0,
                             onClick = { onFolderClick(folder.name) },
                             onLongClick = { selectedFolderForMenu = folder }
                         )
@@ -147,16 +153,17 @@ fun FolderListScreen(
         }
     }
 
-    if (selectedFolderForMenu != null) {
+    selectedFolderForMenu?.let { selected ->
         FolderContextMenu(
-            folder = selectedFolderForMenu!!,
+            folder = selected,
             onDismiss = { selectedFolderForMenu = null },
             onPlayNext = {
-                selectedFolderForMenu!!.songs.asReversed().forEach { viewModel.playNext(it) }
+                // One batched controller call instead of one round trip per song.
+                viewModel.playAllNext(selected.songs)
                 selectedFolderForMenu = null
             },
             onAddToQueue = {
-                selectedFolderForMenu!!.songs.forEach { viewModel.addToEndOfQueue(it) }
+                viewModel.addAllToEndOfQueue(selected.songs)
                 selectedFolderForMenu = null
             },
             onCreatePlaylist = { showNewPlaylistDialog = true },
@@ -178,14 +185,20 @@ fun FolderListScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (newPlaylistName.isNotBlank()) {
-                        viewModel.createPlaylistWithSongs(newPlaylistName, selectedFolderForMenu!!.songs)
+                    val selected = selectedFolderForMenu
+                    if (newPlaylistName.isNotBlank() && selected != null) {
+                        viewModel.createPlaylistWithSongs(newPlaylistName, selected.songs)
                         showNewPlaylistDialog = false
                         selectedFolderForMenu = null
                         newPlaylistName = ""
                     }
                 }) {
                     Text(stringResource(id = R.string.create))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewPlaylistDialog = false }) {
+                    Text(stringResource(id = R.string.cancel))
                 }
             }
         )
@@ -197,11 +210,11 @@ fun FolderListScreen(
             title = { Text(stringResource(id = R.string.add_to_playlist)) },
             text = {
                 LazyColumn {
-                    items(playlists) { playlist ->
+                    items(playlists, key = { it.name }) { playlist ->
                         ListItem(
                             headlineContent = { Text(playlist.name) },
                             modifier = Modifier.clickable {
-                                viewModel.addSongsToPlaylist(playlist.name, selectedFolderForMenu!!.songs)
+                                selectedFolderForMenu?.let { viewModel.addSongsToPlaylist(playlist.name, it.songs) }
                                 showPlaylistPicker = false
                                 selectedFolderForMenu = null
                             }
@@ -220,44 +233,33 @@ fun FolderListScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FolderItem(folder: Folder, isActive: Boolean, scannedCount: Int, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun FolderItem(
+    folder: Folder,
+    isActive: Boolean,
+    scannedCount: Int,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(vertical = 12.dp)
             .background(
                 if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                else androidx.compose.ui.graphics.Color.Transparent
+                else Color.Transparent
             )
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val firstSong = folder.songs.firstOrNull()
         if (firstSong != null) {
-            val albumArtUri = ContentUris.withAppendedId(
-                Uri.parse("content://media/external/audio/albumart"),
-                firstSong.albumId
-            )
-            SubcomposeAsyncImage(
-                model = albumArtUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                error = {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = null,
-                        tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(8.dp)
-                    )
-                }
+            AlbumArt(
+                albumId = firstSong.albumId,
+                size = 48.dp,
+                iconPadding = 8.dp,
+                fallbackIcon = Icons.Default.Folder,
+                fallbackTint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
             Icon(
@@ -267,7 +269,7 @@ fun FolderItem(folder: Folder, isActive: Boolean, scannedCount: Int, onClick: ()
                 modifier = Modifier.size(48.dp)
             )
         }
-        
+
         Spacer(modifier = Modifier.width(16.dp))
         Column {
             Text(

@@ -1,7 +1,5 @@
 package music.ai.recommend.ui
 
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -9,7 +7,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,14 +16,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import android.content.ContentUris
-import android.net.Uri
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.R
 import music.ai.recommend.model.Song
@@ -42,18 +37,18 @@ fun SongListScreen(
     val scannedIds by viewModel.scannedSongIds.collectAsState()
     val favoriteIds by viewModel.favoriteSongIds.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
-    
+
     val listState = rememberLazyListState()
     var selectedSongForMenu by remember { mutableStateOf<Song?>(null) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
-    LaunchedEffect(currentSong) {
-        val index = songs.indexOfFirst { it.id == currentSong?.id }
-        if (index >= 0) {
-            listState.animateScrollToItem(index)
-        }
+    val currentSongId = currentSong?.id
+    LaunchedEffect(currentSongId) {
+        if (currentSongId == null) return@LaunchedEffect
+        val index = songs.indexOfFirst { it.id == currentSongId }
+        if (index >= 0) listState.animateScrollToItem(index)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -64,60 +59,53 @@ fun SongListScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(id = R.string.back))
             }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis
             )
         }
 
-        Box(modifier = Modifier.weight(1f)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp)
-            ) {
-                itemsIndexed(songs, key = { _, song -> song.id }) { _, song ->
-                    val isActive = song.id == currentSong?.id
-                    val isScanned = song.id in scannedIds
-                    val isFavorite = song.id in favoriteIds
-                    SongItem(
-                        song = song,
-                        isActive = isActive,
-                        isScanned = isScanned,
-                        isFavorite = isFavorite,
-                        onToggleFavorite = { viewModel.toggleFavorite(song.id) },
-                        onClick = { viewModel.playSong(song, songs) },
-                        onLongClick = { selectedSongForMenu = song }
-                    )
-                }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(songs, key = { it.id }) { song ->
+                SongItem(
+                    song = song,
+                    isActive = song.id == currentSongId,
+                    isScanned = song.id in scannedIds,
+                    isFavorite = song.id in favoriteIds,
+                    onToggleFavorite = { viewModel.toggleFavorite(song.id) },
+                    onClick = { viewModel.playSong(song, songs) },
+                    onLongClick = { selectedSongForMenu = song }
+                )
             }
         }
 
-        if (selectedSongForMenu != null) {
+        selectedSongForMenu?.let { selected ->
             SongContextMenu(
-                song = selectedSongForMenu!!,
+                song = selected,
                 onDismiss = { selectedSongForMenu = null },
                 onPlayNext = {
-                    viewModel.playNext(selectedSongForMenu!!)
+                    viewModel.playNext(selected)
                     selectedSongForMenu = null
                 },
                 onAddToQueue = {
-                    viewModel.addToEndOfQueue(selectedSongForMenu!!)
+                    viewModel.addToEndOfQueue(selected)
                     selectedSongForMenu = null
                 },
-                onAddToPlaylist = {
-                    showPlaylistPicker = true
-                },
-                onCreatePlaylist = {
-                    showNewPlaylistDialog = true
-                },
+                onAddToPlaylist = { showPlaylistPicker = true },
+                onCreatePlaylist = { showNewPlaylistDialog = true },
                 onDelete = {
-                    viewModel.deleteSong(selectedSongForMenu!!)
+                    viewModel.deleteSong(selected)
                     selectedSongForMenu = null
                 }
             )
@@ -129,11 +117,11 @@ fun SongListScreen(
                 title = { Text(stringResource(id = R.string.add_to_playlist)) },
                 text = {
                     LazyColumn {
-                        items(playlists) { playlist ->
+                        items(playlists, key = { it.name }) { playlist ->
                             ListItem(
                                 headlineContent = { Text(playlist.name) },
                                 modifier = Modifier.clickable {
-                                    viewModel.addSongToPlaylist(playlist.name, selectedSongForMenu!!)
+                                    selectedSongForMenu?.let { viewModel.addSongToPlaylist(playlist.name, it) }
                                     showPlaylistPicker = false
                                     selectedSongForMenu = null
                                 }
@@ -163,8 +151,9 @@ fun SongListScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        if (newPlaylistName.isNotBlank()) {
-                            viewModel.createPlaylistWithSongs(newPlaylistName, listOf(selectedSongForMenu!!))
+                        val selected = selectedSongForMenu
+                        if (newPlaylistName.isNotBlank() && selected != null) {
+                            viewModel.createPlaylistWithSongs(newPlaylistName, listOf(selected))
                             showNewPlaylistDialog = false
                             selectedSongForMenu = null
                             newPlaylistName = ""
@@ -209,28 +198,14 @@ fun SongItem(
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val albumArtUri = ContentUris.withAppendedId(
-            Uri.parse("content://media/external/audio/albumart"),
-            song.albumId
+        AlbumArt(
+            albumId = song.albumId,
+            size = 48.dp,
+            iconPadding = 8.dp,
+            fallbackIcon = if (isActive) Icons.Default.PlayArrow else Icons.Default.MusicNote,
+            fallbackTint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
         )
-        SubcomposeAsyncImage(
-            model = albumArtUri,
-            contentDescription = null,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-            error = {
-                Icon(
-                    imageVector = if (isActive) Icons.Default.PlayArrow else Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.padding(8.dp)
-                )
-            }
-        )
-        
+
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -238,17 +213,17 @@ fun SongItem(
                 style = MaterialTheme.typography.titleMedium,
                 color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = song.artist,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis
             )
         }
-        
+
         if (score != null) {
             Text(
                 text = "${(score * 100).toInt()}%",

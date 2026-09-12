@@ -78,4 +78,34 @@
     <string name="delete_from_device">Удалить с устройства</string>
     <string name="all_tracks">Все треки</string>
     <string name="favorites">Избранное</string>
+
+    <!-- AI модели -->
+    <string name="ai_models">AI модели</string>
+    <string name="model_audio">Аудио-модель</string>
+    <string name="model_text">Текстовая модель (поиск)</string>
+    <string name="model_state_bundled">В приложении</string>
+    <string name="model_state_downloaded">Загружена</string>
+    <string name="model_state_missing">Не загружена</string>
+    <string name="models_ready">Все веса на устройстве</string>
+    <string name="model_download_hint">Будет загружено %1$s с Hugging Face. Рекомендуется Wi-Fi.</string>
+    <string name="model_downloading_file">Загрузка %1$s — %2$s из %3$s</string>
+    <string name="model_download_failed">Не удалось загрузить. Проверьте соединение и повторите.</string>
+    <string name="download_models">Загрузить</string>
+    <string name="cancel_download">Отменить</string>
+    <string name="delete_downloaded_models">Удалить загруженные веса</string>
+    <string name="ai_model_downloading">Загрузка AI модели…</string>
+    <string name="model_error_space">недостаточно свободного места</string>
+    <string name="model_error_download">не удалось загрузить модель</string>
+    <string name="clear_ai_data">Очистить данные AI</string>
+    <string name="ai_data_cleared">Данные AI очищены</string>
+    <string name="ai_search_needs_model">Для AI-поиска нужна текстовая модель. Загрузите её в Настройках → AI модели.</string>
+    <string name="scan_channel_name">AI анализ</string>
+    <string name="scan_notification_title">Анализ библиотеки</string>
+    <string name="model_variant_title">Модель анализа</string>
+    <string name="model_variant_fast">Быстрая · %1$s</string>
+    <string name="model_variant_full">Полная · %1$s</string>
+    <string name="model_variant_fast_hint">Квантованная модель: вчетверо меньше загрузка и немного быстрее сканирование. В замерах эмбеддинги совпадают с полной моделью до косинуса 0.9985.</string>
+    <string name="model_variant_full_hint">Модель полной точности: самые точные рекомендации, но больше загрузка и медленнее сканирование.</string>
+    <string name="model_variant_mismatch">Библиотека проанализирована другой моделью. Разница между ними измеримо мала, так что пересканировать необязательно.</string>
+    <string name="analysis_reset">Обработка звука исправлена, прежний анализ больше не действителен. Запустите сканирование заново.</string>
 </resources>

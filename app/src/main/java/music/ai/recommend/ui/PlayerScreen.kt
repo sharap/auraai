@@ -10,10 +10,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,15 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
-import android.content.ContentUris
-import android.net.Uri
-import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
@@ -40,10 +35,11 @@ fun PlayerScreen(
     viewModel: MusicViewModel,
     onClose: () -> Unit
 ) {
+    // Deliberately no currentPosition/duration here: collecting the 500 ms position tick at this
+    // level recomposed the pager, the queue list, the 240 dp artwork and the visualizer twice a
+    // second. Position is read inside SeekControls instead.
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
-    val currentPosition by viewModel.currentPosition.collectAsState()
-    val duration by viewModel.duration.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
@@ -65,7 +61,6 @@ fun PlayerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color.Transparent) 
             .padding(top = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -77,11 +72,11 @@ fun PlayerScreen(
             IconButton(onClick = onClose) {
                 Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = "Close")
             }
-            
+
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (sleepTimerRemaining != null) {
+                sleepTimerRemaining?.let { remaining ->
                     Text(
-                        text = formatTime(sleepTimerRemaining!!),
+                        text = formatTime(remaining),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -102,18 +97,16 @@ fun PlayerScreen(
         ) { page ->
             if (page == 0) {
                 PlayerMainContent(
+                    viewModel = viewModel,
                     currentSong = song,
                     isPlaying = isPlaying,
-                    currentPosition = currentPosition,
-                    duration = duration,
                     shuffleModeEnabled = shuffleModeEnabled,
                     repeatMode = repeatMode,
                     audioSessionId = audioSessionId,
-                    scannedIds = scannedIds,
+                    isScanned = song.id in scannedIds,
                     aiShuffleEnabled = aiShuffleEnabled,
                     isFavorite = song.id in favoriteIds,
                     onToggleFavorite = { viewModel.toggleFavorite(song.id) },
-                    onSeek = { viewModel.seekTo(it) },
                     onToggleShuffle = { viewModel.toggleShuffle() },
                     onToggleAiShuffle = { viewModel.toggleAiShuffle() },
                     onNextRepeatMode = { viewModel.nextRepeatMode() },
@@ -138,7 +131,6 @@ fun PlayerScreen(
             }
         }
 
-        // Pager Indicators
         Row(
             Modifier
                 .height(50.dp)
@@ -147,7 +139,8 @@ fun PlayerScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             repeat(2) { iteration ->
-                val color = if (pagerState.currentPage == iteration) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                val color = if (pagerState.currentPage == iteration) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outlineVariant
                 Box(
                     modifier = Modifier
                         .padding(4.dp)
@@ -171,18 +164,16 @@ fun PlayerScreen(
 
 @Composable
 fun PlayerMainContent(
+    viewModel: MusicViewModel,
     currentSong: Song,
     isPlaying: Boolean,
-    currentPosition: Long,
-    duration: Long,
     shuffleModeEnabled: Boolean,
     repeatMode: Int,
     audioSessionId: Int?,
-    scannedIds: Set<Long>,
+    isScanned: Boolean,
     aiShuffleEnabled: Boolean,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
-    onSeek: (Long) -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleAiShuffle: () -> Unit,
     onNextRepeatMode: () -> Unit,
@@ -192,8 +183,6 @@ fun PlayerMainContent(
     onPlaySimilar: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    var sliderPosition by remember { mutableStateOf<Float?>(null) }
-    val displayPosition = sliderPosition ?: currentPosition.toFloat()
 
     Column(
         modifier = Modifier
@@ -205,26 +194,12 @@ fun PlayerMainContent(
         Spacer(modifier = Modifier.weight(1f))
 
         Box(contentAlignment = Alignment.Center) {
-            val albumArtUri = ContentUris.withAppendedId(
-                Uri.parse("content://media/external/audio/albumart"),
-                currentSong.albumId
-            )
-            SubcomposeAsyncImage(
-                model = albumArtUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(240.dp)
-                    .clip(MaterialTheme.shapes.large)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                error = {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        modifier = Modifier.size(120.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    )
-                }
+            AlbumArt(
+                albumId = currentSong.albumId,
+                size = 240.dp,
+                shape = MaterialTheme.shapes.large,
+                iconPadding = 60.dp,
+                fallbackTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
             )
             BarVisualizer(
                 audioSessionId = audioSessionId,
@@ -244,7 +219,7 @@ fun PlayerMainContent(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false)
             )
-            if (currentSong.id in scannedIds) {
+            if (isScanned) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
@@ -264,23 +239,7 @@ fun PlayerMainContent(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Slider(
-            value = displayPosition,
-            onValueChange = { sliderPosition = it },
-            onValueChangeFinished = {
-                sliderPosition?.let { onSeek(it.toLong()) }
-                sliderPosition = null
-            },
-            valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = formatTime(displayPosition.toLong()))
-            Text(text = formatTime(duration))
-        }
+        SeekControls(viewModel)
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -347,20 +306,12 @@ fun PlayerMainContent(
             }
 
             IconButton(onClick = onNextRepeatMode) {
-                val icon = when (repeatMode) {
-                    Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
-                    Player.REPEAT_MODE_ALL -> Icons.Default.Repeat
-                    else -> Icons.Default.Repeat
-                }
-                val tint = if (repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = "Repeat",
-                        tint = tint
-                    )
-                }
+                Icon(
+                    imageVector = if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                    contentDescription = "Repeat",
+                    tint = if (repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             IconButton(onClick = onPlaySimilar) {
@@ -373,6 +324,39 @@ fun PlayerMainContent(
         }
 
         Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+/**
+ * The only part of the player that follows the position tick, so the recomposition it triggers
+ * every 500 ms stays confined to a slider and two labels.
+ */
+@Composable
+private fun SeekControls(viewModel: MusicViewModel) {
+    val currentPosition by viewModel.currentPosition.collectAsState()
+    val duration by viewModel.duration.collectAsState()
+
+    // Non-null only while the user is dragging; the thumb then follows the finger rather than the
+    // player, which would otherwise fight it on every tick.
+    var sliderPosition by remember { mutableStateOf<Float?>(null) }
+    val displayPosition = sliderPosition ?: currentPosition.toFloat()
+
+    Slider(
+        value = displayPosition,
+        onValueChange = { sliderPosition = it },
+        onValueChangeFinished = {
+            sliderPosition?.let { viewModel.seekTo(it.toLong()) }
+            sliderPosition = null
+        },
+        valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = formatTime(displayPosition.toLong()))
+        Text(text = formatTime(duration))
     }
 }
 
@@ -396,9 +380,8 @@ fun SleepTimerDialog(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                 }
-                
-                val options = listOf(15, 30, 45, 60)
-                options.forEach { mins ->
+
+                listOf(15, 30, 45, 60).forEach { mins ->
                     ListItem(
                         headlineContent = { Text(stringResource(id = R.string.minutes, mins)) },
                         modifier = Modifier.clickable {
@@ -443,13 +426,15 @@ fun QueueList(
     val listState = rememberLazyListState()
     var showSaveDialog by remember { mutableStateOf(false) }
     var playlistName by remember { mutableStateOf("") }
-    var saveMode by remember { mutableStateOf("new") } 
+    var saveMode by remember { mutableStateOf("new") }
 
-    LaunchedEffect(currentSong) {
-        val index = queue.indexOfFirst { it.id == currentSong?.id }
-        if (index >= 0) {
-            listState.animateScrollToItem(index)
-        }
+    // Key on the id alone. Keying on the Song object re-ran the scroll on any unrelated change, and
+    // keying on the queue would yank the list away from the user every time AI shuffle reorders it.
+    val currentSongId = currentSong?.id
+    LaunchedEffect(currentSongId) {
+        if (currentSongId == null) return@LaunchedEffect
+        val index = queue.indexOfFirst { it.id == currentSongId }
+        if (index >= 0) listState.animateScrollToItem(index)
     }
 
     Column(
@@ -481,21 +466,19 @@ fun QueueList(
                 title = { Text(stringResource(id = R.string.save_queue_title)) },
                 text = {
                     Column {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveMode = "new" }) {
-                                RadioButton(selected = saveMode == "new", onClick = { saveMode = "new" })
-                                Text(stringResource(id = R.string.new_playlist))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveMode = "add" }) {
-                                RadioButton(selected = saveMode == "add", onClick = { saveMode = "add" })
-                                Text(stringResource(id = R.string.add_to_existing))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveMode = "overwrite" }) {
-                                RadioButton(selected = saveMode == "overwrite", onClick = { saveMode = "overwrite" })
-                                Text(stringResource(id = R.string.overwrite_existing))
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveMode = "new" }) {
+                            RadioButton(selected = saveMode == "new", onClick = { saveMode = "new" })
+                            Text(stringResource(id = R.string.new_playlist))
                         }
-                        
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveMode = "add" }) {
+                            RadioButton(selected = saveMode == "add", onClick = { saveMode = "add" })
+                            Text(stringResource(id = R.string.add_to_existing))
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { saveMode = "overwrite" }) {
+                            RadioButton(selected = saveMode == "overwrite", onClick = { saveMode = "overwrite" })
+                            Text(stringResource(id = R.string.overwrite_existing))
+                        }
+
                         Spacer(modifier = Modifier.height(16.dp))
 
                         if (saveMode == "new") {
@@ -508,15 +491,12 @@ fun QueueList(
                             )
                         } else {
                             LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                                items(playlists) { playlist ->
+                                items(playlists, key = { it.name }) { playlist ->
                                     ListItem(
                                         headlineContent = { Text(playlist.name) },
                                         modifier = Modifier.clickable {
-                                            if (saveMode == "add") {
-                                                onAddToExisting(playlist.name)
-                                            } else {
-                                                onOverwriteExisting(playlist.name)
-                                            }
+                                            if (saveMode == "add") onAddToExisting(playlist.name)
+                                            else onOverwriteExisting(playlist.name)
                                             showSaveDialog = false
                                         }
                                     )
@@ -552,104 +532,96 @@ fun QueueList(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(queue, key = { _, song -> song.id }) { index, song ->
-                val isCurrent = song.id == currentSong?.id
-                val backgroundColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-                val textColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
-                        .background(backgroundColor)
-                        .clickable { onSongClick(song) }
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val albumArtUri = ContentUris.withAppendedId(
-                        Uri.parse("content://media/external/audio/albumart"),
-                        song.albumId
-                    )
-                    SubcomposeAsyncImage(
-                        model = albumArtUri,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        error = {
-                            Icon(
-                                imageVector = if (isCurrent) Icons.Default.PlayArrow else Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(4.dp)
-                            )
-                        }
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = song.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                            color = textColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = song.artist,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (song.id in scannedIds) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                    }
-                    
-                    IconButton(onClick = { onRemove(index) }) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Remove",
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    
-                    Column {
-                        IconButton(
-                            onClick = { if (index > 0) onMove(index, index - 1) },
-                            enabled = index > 0,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(Icons.Default.ArrowDropUp, contentDescription = "Move Up")
-                        }
-                        IconButton(
-                            onClick = { if (index < queue.size - 1) onMove(index, index + 1) },
-                            enabled = index < queue.size - 1,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Move Down")
-                        }
-                    }
-                }
+                QueueRow(
+                    song = song,
+                    isCurrent = song.id == currentSongId,
+                    isScanned = song.id in scannedIds,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < queue.size - 1,
+                    onClick = { onSongClick(song) },
+                    onRemove = { onRemove(index) },
+                    onMoveUp = { onMove(index, index - 1) },
+                    onMoveDown = { onMove(index, index + 1) }
+                )
             }
         }
     }
 }
 
-private fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%02d:%02d".format(minutes, seconds)
+@Composable
+private fun QueueRow(
+    song: Song,
+    isCurrent: Boolean,
+    isScanned: Boolean,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit
+) {
+    val backgroundColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+    val textColor = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(backgroundColor)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AlbumArt(
+            albumId = song.albumId,
+            size = 32.dp,
+            iconPadding = 6.dp,
+            fallbackIcon = if (isCurrent) Icons.Default.PlayArrow else Icons.Default.MusicNote,
+            fallbackTint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isCurrent) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (isScanned) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+        }
+
+        IconButton(onClick = onRemove) {
+            Icon(imageVector = Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(20.dp))
+        }
+
+        Column {
+            IconButton(onClick = onMoveUp, enabled = canMoveUp, modifier = Modifier.size(24.dp)) {
+                Icon(Icons.Default.ArrowDropUp, contentDescription = "Move Up")
+            }
+            IconButton(onClick = onMoveDown, enabled = canMoveDown, modifier = Modifier.size(24.dp)) {
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "Move Down")
+            }
+        }
+    }
 }

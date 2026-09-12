@@ -26,16 +26,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import music.ai.recommend.ai.AiScanner
+import music.ai.recommend.ai.AiScanState
+import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ClapTextEncoder
+import music.ai.recommend.ai.EmbeddingStore
+import music.ai.recommend.ai.ModelAsset
+import music.ai.recommend.ai.ModelProgress
+import music.ai.recommend.ai.ModelRepository
+import music.ai.recommend.ai.ScanStage
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
 import music.ai.recommend.scanner.MusicScanner
-import music.ai.recommend.R
 import java.lang.reflect.Type
 
 class UriAdapter : JsonSerializer<Uri>, JsonDeserializer<Uri> {
@@ -48,21 +56,39 @@ class UriAdapter : JsonSerializer<Uri>, JsonDeserializer<Uri> {
     }
 }
 
+@androidx.compose.runtime.Immutable
 data class Playlist(val name: String, val songs: List<Song>)
 data class EqBand(val index: Int, val freq: Int, val level: Int)
 data class EqPreset(val name: String, val levels: List<Int>)
 data class ScoredSong(val song: Song, val score: Float)
 
+/** What the settings screen needs to know about the on-device weights. */
+data class ModelStatus(
+    val variant: AudioModelVariant,
+    val audioReady: Boolean,
+    val textReady: Boolean,
+    val audioBundled: Boolean,
+    val textBundled: Boolean,
+    val quantizedReady: Boolean,
+    val fullReady: Boolean,
+    val quantizedBundled: Boolean,
+    val fullBundled: Boolean,
+    val pendingBytes: Long
+)
+
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val scanner = MusicScanner()
-    private val aiScanner by lazy { AiScanner(application) }
-    private val textEncoder by lazy { ClapTextEncoder(application) }
+    // Shared with AiScanService: it writes embeddings and drives downloads while this ViewModel
+    // renders them, so both sides must see the same cache and the same progress flow.
+    private val modelRepository = ModelRepository.getInstance(application)
+    private val embeddings = EmbeddingStore.getInstance(application)
+    private val textEncoder by lazy { ClapTextEncoder(modelRepository) }
     private val gson = GsonBuilder()
         .registerTypeAdapter(Uri::class.java, UriAdapter())
         .create()
     private val prefs = application.getSharedPreferences("music_prefs", Context.MODE_PRIVATE)
-    
+
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
 
@@ -99,8 +125,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _aiScanStatus = MutableStateFlow("")
     val aiScanStatus: StateFlow<String> = _aiScanStatus.asStateFlow()
 
-    private val _isAiScanning = MutableStateFlow(false)
-    val isAiScanning: StateFlow<Boolean> = _isAiScanning.asStateFlow()
+    /** Owned by AiScanService, which outlives this ViewModel. */
+    val isAiScanning: StateFlow<Boolean> = AiScanState.running
 
     private val _scannedSongIds = MutableStateFlow<Set<Long>>(emptySet())
     val scannedSongIds: StateFlow<Set<Long>> = _scannedSongIds.asStateFlow()
@@ -110,6 +136,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _regularSearchResults = MutableStateFlow<List<Song>?>(null)
     val regularSearchResults: StateFlow<List<Song>?> = _regularSearchResults.asStateFlow()
+
+    private val _isAiSearching = MutableStateFlow(false)
+    val isAiSearching: StateFlow<Boolean> = _isAiSearching.asStateFlow()
+
+    /** Set when embeddings from an older, incorrect analysis had to be discarded. */
+    private val _analysisReset = MutableStateFlow(false)
+    val analysisReset: StateFlow<Boolean> = _analysisReset.asStateFlow()
+
+    /** Set when AI search was asked for but the text weights are not on the device yet. */
+    private val _aiSearchNeedsModel = MutableStateFlow(false)
+    val aiSearchNeedsModel: StateFlow<Boolean> = _aiSearchNeedsModel.asStateFlow()
 
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -141,20 +178,59 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _sleepTimerRemaining = MutableStateFlow<Long?>(null) // ms
     val sleepTimerRemaining: StateFlow<Long?> = _sleepTimerRemaining.asStateFlow()
 
+    /** Progress of an in-flight weights download. */
+    val modelProgress: StateFlow<ModelProgress> = modelRepository.progress
+
+    /** Non-null and different from the selection when the library needs re-analysing. */
+    val embeddingsVariant: StateFlow<AudioModelVariant?> = modelRepository.embeddingsVariant
+
+    private val _modelStatus = MutableStateFlow(readModelStatus())
+    val modelStatus: StateFlow<ModelStatus> = _modelStatus.asStateFlow()
+
+    /**
+     * Analysed-song counts per folder and per playlist.
+     *
+     * The list items used to derive these inline, so every badge repaint walked the folder's whole
+     * song list — and the virtual "All Tracks" folder holds the entire library. Computing them once
+     * off the main thread keeps scrolling cheap no matter how large the library is.
+     */
+    val folderScanCounts: StateFlow<Map<String, Int>> =
+        combine(_folders, _scannedSongIds) { folders, scanned ->
+            if (scanned.isEmpty()) emptyMap()
+            else folders.associate { folder -> folder.name to folder.songs.count { it.id in scanned } }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    val playlistScanCounts: StateFlow<Map<String, Int>> =
+        combine(_playlists, _scannedSongIds) { playlists, scanned ->
+            if (scanned.isEmpty()) emptyMap()
+            else playlists.associate { playlist -> playlist.name to playlist.songs.count { it.id in scanned } }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     private var progressJob: Job? = null
-    private var aiScanJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var searchJob: Job? = null
+    private var saveQueueJob: Job? = null
+    private var saveEqJob: Job? = null
+    private var downloadJob: Job? = null
+    private var savedPlaylists: List<Playlist> = emptyList()
     private var playlistSongs: List<Song> = emptyList()
     private var allSongs: List<Song> = emptyList()
 
     init {
-        loadFavorites()
-        loadPlaylists()
-        loadEqPresets()
-        refreshScannedIds()
+        // Two cheap scalar reads; everything else is a SharedPreferences read plus a Gson parse,
+        // and the playlists blob grows with the library. Doing that during ViewModel construction
+        // put it squarely on the main thread in front of the first frame.
         _backgroundImageUri.value = prefs.getString("background_uri", null)
         _backgroundAlpha.value = prefs.getFloat("background_alpha", 0.3f)
         initializeController()
+        refreshScannedIds()
+        observeScan()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            loadFavorites()
+            loadEqPresets()
+            loadPlaylists()
+        }
     }
 
     @OptIn(UnstableApi::class)
@@ -167,35 +243,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         controllerFuture?.addListener({
             val c = controllerFuture?.get() ?: return@addListener
             controller = c
-            
-            // Sync initial state
+
             _isPlaying.value = c.isPlaying
             _duration.value = c.duration
             _currentPosition.value = c.currentPosition
             _shuffleModeEnabled.value = c.shuffleModeEnabled
             _repeatMode.value = c.repeatMode
-            
+
             c.sessionExtras.let { extras ->
                 val sessionId = extras.getInt("AUDIO_SESSION_ID", -1)
                 if (sessionId != -1) {
                     _audioSessionId.value = sessionId
                 }
             }
-            
+
             fetchEqParams()
-            
             syncCurrentMediaItem(c)
-            
+
             if (c.isPlaying) startProgressUpdate()
 
             c.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
-                    if (isPlaying) {
-                        startProgressUpdate()
-                    } else {
-                        stopProgressUpdate()
-                    }
+                    if (isPlaying) startProgressUpdate() else stopProgressUpdate()
                 }
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -204,8 +274,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _currentSong.value = song
                     _duration.value = c.duration
                     saveCurrentQueue()
-                    
-                    Log.d("MusicViewModel", "Transition to ${song?.title}, reason: $reason, aiShuffle: ${_aiShuffleEnabled.value}")
+
                     if (_aiShuffleEnabled.value && song != null) {
                         applySmartShuffle(song)
                     }
@@ -225,7 +294,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _repeatMode.value = repeatMode
                 }
             })
-            
+
             if (c.mediaItemCount == 0) {
                 restoreQueue()
             }
@@ -235,24 +304,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun loadMusic() {
         if (_isScanning.value) return
         _isScanning.value = true
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
-                val result = scanner.scanMusic(getApplication())
+                val result = withContext(Dispatchers.IO) { scanner.scanMusic(getApplication()) }
                 allSongs = result.flatMap { it.songs }
-                
-                // Add virtual "All Tracks" folder
+
                 val allTracksFolder = Folder(getApplication<Application>().getString(R.string.all_tracks), allSongs)
                 _folders.value = listOf(allTracksFolder) + result
-                
-                viewModelScope.launch(Dispatchers.Main) {
-                    loadPlaylists() // Ensure Favorites virtual playlist is updated
-                }
-                
-                controller?.let {
-                    viewModelScope.launch(Dispatchers.Main) {
-                        syncCurrentMediaItem(it)
-                    }
-                }
+
+                rebuildPlaylists() // Favorites is derived from allSongs, which just changed.
+                controller?.let { syncCurrentMediaItem(it) }
             } finally {
                 _isScanning.value = false
             }
@@ -264,12 +325,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (mediaId != null) {
             val song = playlistSongs.find { it.id == mediaId } ?: allSongs.find { it.id == mediaId }
             _currentSong.value = song
-            
+
             if (song != null && playlistSongs.isEmpty()) {
-                val items = mutableListOf<Song>()
+                val byId = allSongs.associateBy { it.id }
+                val items = ArrayList<Song>(c.mediaItemCount)
                 for (i in 0 until c.mediaItemCount) {
                     val mId = c.getMediaItemAt(i).mediaId.toLongOrNull()
-                    allSongs.find { it.id == mId }?.let { items.add(it) }
+                    byId[mId]?.let { items.add(it) }
                 }
                 if (items.isNotEmpty()) {
                     playlistSongs = items
@@ -284,7 +346,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _queue.value = playlist
         val mediaItems = playlist.map { createMediaItem(it) }
         val index = playlist.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
-        
+
         controller?.apply {
             setMediaItems(mediaItems, index, 0L)
             prepare()
@@ -295,7 +357,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pause() {
         controller?.pause()
-        saveCurrentQueue()
+        saveCurrentQueue(immediate = true)
     }
 
     fun resume() {
@@ -312,6 +374,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun seekTo(position: Long) {
         controller?.seekTo(position)
+        _currentPosition.value = position
     }
 
     fun toggleShuffle() {
@@ -323,7 +386,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleAiShuffle() {
         _aiShuffleEnabled.value = !_aiShuffleEnabled.value
-        Log.d("MusicViewModel", "AI Shuffle toggled: ${_aiShuffleEnabled.value}")
         if (_aiShuffleEnabled.value) {
             controller?.shuffleModeEnabled = false
             _currentSong.value?.let { applySmartShuffle(it) }
@@ -334,84 +396,60 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val c = controller ?: return
         val currentIndex = c.currentMediaItemIndex
         val mediaItemCount = c.mediaItemCount
-        val upcomingIds = mutableListOf<Pair<Int, Long>>()
-        
-        for (i in (currentIndex + 1) until mediaItemCount) {
-            c.getMediaItemAt(i).mediaId.toLongOrNull()?.let { 
-                upcomingIds.add(i to it)
-            }
-        }
+        val upcomingIds = ArrayList<Pair<Int, Long>>()
 
+        for (i in (currentIndex + 1) until mediaItemCount) {
+            c.getMediaItemAt(i).mediaId.toLongOrNull()?.let { upcomingIds.add(i to it) }
+        }
         if (upcomingIds.isEmpty()) return
 
-        viewModelScope.launch(Dispatchers.Default) {
+        viewModelScope.launch {
             try {
-                val embeddings = aiScanner.getStoredEmbeddings()
-                val currentEmbedding = embeddings[currentSong.id]
-                
-                if (currentEmbedding == null) {
-                    Log.d("MusicViewModel", "Current song not scanned, skipping smart shuffle")
-                    return@launch
+                val stored = embeddings.all()
+                val currentEmbedding = stored[currentSong.id] ?: return@launch
+
+                val ranked = withContext(Dispatchers.Default) {
+                    upcomingIds
+                        .map { (index, mediaId) ->
+                            val embedding = stored[mediaId]
+                            index to (embedding?.let { cosineSimilarity(currentEmbedding, it) } ?: -1f)
+                        }
+                        .sortedByDescending { it.second }
+                        .take(5)
                 }
-                
-                val remainingItems = mutableListOf<Pair<Int, Float>>()
-                for ((originalIndex, mediaId) in upcomingIds) {
-                    val embedding = embeddings[mediaId]
-                    val similarity = if (embedding != null) {
-                        calculateCosineSimilarity(currentEmbedding, embedding)
-                    } else {
-                        -1f 
-                    }
-                    remainingItems.add(originalIndex to similarity)
-                }
-                
-                val sortedRemaining = remainingItems.sortedByDescending { it.second }
-                
-                withContext(Dispatchers.Main) {
-                    val topMatches = sortedRemaining.take(5)
-                    
-                    // Move the top 5 matches to the next positions (in reverse order to stack correctly)
-                    topMatches.asReversed().forEach { (originalIdx, score) ->
-                        val mediaIdToFind = upcomingIds.find { it.first == originalIdx }?.second?.toString() ?: return@forEach
-                        
-                        // Search for the current position of the item (it might have shifted)
-                        for (j in 0 until c.mediaItemCount) {
-                            if (c.getMediaItemAt(j).mediaId == mediaIdToFind) {
-                                val currentIdx = c.currentMediaItemIndex
-                                if (j > currentIdx && j != currentIdx + 1) {
-                                    val trackName = c.getMediaItemAt(j).mediaMetadata.title
-                                    Log.d("MusicViewModel", "Smart Shuffle: Moving '$trackName' (Score: $score) to next position")
-                                    c.moveMediaItem(j, currentIdx + 1)
-                                    
-                                    // Update local state to keep UI in sync
-                                    val q = _queue.value.toMutableList()
-                                    if (j < q.size && (currentIdx + 1) < q.size) {
-                                        val item = q.removeAt(j)
-                                        q.add(currentIdx + 1, item)
-                                        _queue.value = q
-                                        playlistSongs = q
-                                    }
+
+                // Stack the best matches directly after the current track, furthest first.
+                ranked.asReversed().forEach { (originalIdx, _) ->
+                    val mediaIdToFind = upcomingIds.find { it.first == originalIdx }?.second?.toString() ?: return@forEach
+                    for (j in 0 until c.mediaItemCount) {
+                        if (c.getMediaItemAt(j).mediaId == mediaIdToFind) {
+                            val currentIdx = c.currentMediaItemIndex
+                            if (j > currentIdx && j != currentIdx + 1) {
+                                c.moveMediaItem(j, currentIdx + 1)
+                                val q = _queue.value.toMutableList()
+                                if (j < q.size && (currentIdx + 1) < q.size) {
+                                    q.add(currentIdx + 1, q.removeAt(j))
+                                    _queue.value = q
+                                    playlistSongs = q
                                 }
-                                break
                             }
+                            break
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.e("MusicViewModel", "Smart shuffle failed", e)
+                Log.e(TAG, "Smart shuffle failed", e)
             }
         }
     }
 
     fun nextRepeatMode() {
         controller?.let {
-            val nextMode = when (it.repeatMode) {
+            it.repeatMode = when (it.repeatMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
                 Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_OFF
                 else -> Player.REPEAT_MODE_OFF
             }
-            it.repeatMode = nextMode
         }
     }
 
@@ -430,8 +468,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         controller?.moveMediaItem(from, to)
         val currentList = _queue.value.toMutableList()
         if (from in currentList.indices && to in currentList.indices) {
-            val item = currentList.removeAt(from)
-            currentList.add(to, item)
+            currentList.add(to, currentList.removeAt(from))
             _queue.value = currentList
             playlistSongs = currentList
             saveCurrentQueue()
@@ -439,8 +476,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addToEndOfQueue(song: Song) {
-        val mediaItem = createMediaItem(song)
-        controller?.addMediaItem(mediaItem)
+        controller?.addMediaItem(createMediaItem(song))
         val currentList = _queue.value.toMutableList()
         currentList.add(song)
         _queue.value = currentList
@@ -451,15 +487,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun playNext(song: Song) {
         val currentIndex = controller?.currentMediaItemIndex ?: -1
         val nextIndex = if (currentIndex == -1) 0 else currentIndex + 1
-        val mediaItem = createMediaItem(song)
-        controller?.addMediaItem(nextIndex, mediaItem)
-        
+        controller?.addMediaItem(nextIndex, createMediaItem(song))
+
         val currentList = _queue.value.toMutableList()
-        if (nextIndex <= currentList.size) {
-            currentList.add(nextIndex, song)
-        } else {
-            currentList.add(song)
-        }
+        if (nextIndex <= currentList.size) currentList.add(nextIndex, song) else currentList.add(song)
+        _queue.value = currentList
+        playlistSongs = currentList
+        saveCurrentQueue()
+    }
+
+    /** Adds many songs in one controller call instead of one round trip per song. */
+    fun addAllToEndOfQueue(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        controller?.addMediaItems(songs.map { createMediaItem(it) })
+        val currentList = _queue.value.toMutableList()
+        currentList.addAll(songs)
+        _queue.value = currentList
+        playlistSongs = currentList
+        saveCurrentQueue()
+    }
+
+    fun playAllNext(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val currentIndex = controller?.currentMediaItemIndex ?: -1
+        val nextIndex = if (currentIndex == -1) 0 else currentIndex + 1
+        controller?.addMediaItems(nextIndex, songs.map { createMediaItem(it) })
+
+        val currentList = _queue.value.toMutableList()
+        currentList.addAll(nextIndex.coerceAtMost(currentList.size), songs)
         _queue.value = currentList
         playlistSongs = currentList
         saveCurrentQueue()
@@ -483,53 +538,53 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 getApplication<Application>().contentResolver.delete(song.uri, null, null)
-                loadMusic()
+                withContext(Dispatchers.Main) { loadMusic() }
             } catch (e: Exception) {
-                Log.e("MusicViewModel", "Failed to delete file", e)
+                Log.e(TAG, "Failed to delete file", e)
             }
         }
     }
 
     private fun loadFavorites() {
-        val json = prefs.getString("favorite_ids", null)
-        if (json != null) {
-            val type = object : TypeToken<Set<Long>>() {}.type
-            _favoriteSongIds.value = gson.fromJson(json, type)
-        }
+        val json = prefs.getString("favorite_ids", null) ?: return
+        val type = object : TypeToken<Set<Long>>() {}.type
+        _favoriteSongIds.value = runCatching { gson.fromJson<Set<Long>>(json, type) }.getOrNull() ?: emptySet()
     }
 
     fun toggleFavorite(songId: Long) {
         val current = _favoriteSongIds.value.toMutableSet()
-        if (songId in current) {
-            current.remove(songId)
-        } else {
-            current.add(songId)
-        }
+        if (!current.remove(songId)) current.add(songId)
         _favoriteSongIds.value = current
-        prefs.edit().putString("favorite_ids", gson.toJson(current)).apply()
-        
-        // Refresh virtual "Favorites" playlist
-        loadPlaylists() 
+        persistAsync("favorite_ids", current)
+        rebuildPlaylists()
     }
 
+    /** Parses the stored playlists. Only needed at startup — afterwards [savedPlaylists] is current. */
     private fun loadPlaylists() {
         val json = prefs.getString("playlists", null)
-        val savedPlaylists: List<Playlist> = if (json != null) {
+        savedPlaylists = if (json != null) {
             val type = object : TypeToken<List<Playlist>>() {}.type
-            gson.fromJson(json, type)
+            runCatching { gson.fromJson<List<Playlist>>(json, type) }.getOrNull() ?: emptyList()
         } else {
             emptyList()
         }
-        
-        // Add virtual "Favorites" playlist
-        val favoriteSongs = allSongs.filter { it.id in _favoriteSongIds.value }
-        val finalPlaylists = if (favoriteSongs.isNotEmpty()) {
+        rebuildPlaylists()
+    }
+
+    /**
+     * Recomputes the visible list: the virtual Favorites entry in front of the stored playlists.
+     *
+     * Separate from [loadPlaylists] because tapping a heart only changes which songs are favourite —
+     * re-reading and re-parsing the whole playlists blob on every tap was pure waste.
+     */
+    private fun rebuildPlaylists() {
+        val favoriteIds = _favoriteSongIds.value
+        val favoriteSongs = if (favoriteIds.isEmpty()) emptyList() else allSongs.filter { it.id in favoriteIds }
+        _playlists.value = if (favoriteSongs.isNotEmpty()) {
             listOf(Playlist(getApplication<Application>().getString(R.string.favorites), favoriteSongs)) + savedPlaylists
         } else {
             savedPlaylists
         }
-        
-        _playlists.value = finalPlaylists
     }
 
     fun savePlaylist(name: String) {
@@ -537,61 +592,51 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createPlaylistWithSongs(name: String, songs: List<Song>) {
-        val newPlaylist = Playlist(name, songs)
-        val currentPlaylists = _playlists.value.toMutableList()
-        currentPlaylists.add(newPlaylist)
-        updatePlaylists(currentPlaylists)
+        updatePlaylists(_playlists.value + Playlist(name, songs))
     }
 
     fun addSongsToPlaylist(playlistName: String, songs: List<Song>) {
-        val currentPlaylists = _playlists.value.map {
-            if (it.name == playlistName) {
-                val newSongs = songs.filter { newSong -> 
-                    it.songs.none { existingSong -> existingSong.id == newSong.id }
-                }
-                it.copy(songs = it.songs + newSongs)
-            } else it
+        val updated = _playlists.value.map { playlist ->
+            if (playlist.name == playlistName) {
+                val existing = playlist.songs.mapTo(HashSet()) { it.id }
+                playlist.copy(songs = playlist.songs + songs.filter { it.id !in existing })
+            } else playlist
         }
-        updatePlaylists(currentPlaylists)
+        updatePlaylists(updated)
     }
 
     fun overwritePlaylist(playlistName: String, songs: List<Song>) {
-        val currentPlaylists = _playlists.value.map {
-            if (it.name == playlistName) {
-                it.copy(songs = songs)
-            } else it
-        }
-        updatePlaylists(currentPlaylists)
+        updatePlaylists(_playlists.value.map { if (it.name == playlistName) it.copy(songs = songs) else it })
     }
 
     fun addSongToPlaylist(playlistName: String, song: Song) {
         addSongsToPlaylist(playlistName, listOf(song))
     }
-    
+
     private fun updatePlaylists(newPlaylists: List<Playlist>) {
-        _playlists.value = newPlaylists
-        prefs.edit().putString("playlists", gson.toJson(newPlaylists)).apply()
+        // The Favorites entry is virtual and rebuilt from favorite_ids, so it is not persisted.
+        val favoritesName = getApplication<Application>().getString(R.string.favorites)
+        savedPlaylists = newPlaylists.filterNot { it.name == favoritesName }
+        rebuildPlaylists()
+        persistAsync("playlists", savedPlaylists)
     }
-    
+
     fun deletePlaylist(playlist: Playlist) {
-        val currentPlaylists = _playlists.value.filter { it.name != playlist.name }
-        updatePlaylists(currentPlaylists)
+        updatePlaylists(_playlists.value.filter { it.name != playlist.name })
     }
 
     fun setBackgroundImage(uri: Uri?) {
-        val uriString = uri?.toString()
         if (uri != null) {
             try {
                 getApplication<Application>().contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             } catch (e: Exception) {
-                Log.e("MusicViewModel", "Failed to take persistable permission", e)
+                Log.e(TAG, "Failed to take persistable permission", e)
             }
         }
-        _backgroundImageUri.value = uriString
-        prefs.edit().putString("background_uri", uriString).apply()
+        _backgroundImageUri.value = uri?.toString()
+        prefs.edit().putString("background_uri", uri?.toString()).apply()
     }
 
     fun setBackgroundAlpha(alpha: Float) {
@@ -600,38 +645,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun fetchEqParams() {
-        controller?.let { c ->
-            val future = c.sendCustomCommand(SessionCommand("GET_EQ_PARAMS", Bundle.EMPTY), Bundle.EMPTY)
-            future.addListener({
-                val result = future.get()
-                if (result.resultCode == SessionResult.RESULT_SUCCESS) {
-                    val extras = result.extras
-                    val numBands = extras.getInt("num_bands", 0)
-                    val minLevel = extras.getInt("min_level", -1500)
-                    val maxLevel = extras.getInt("max_level", 1500)
-                    val freqs = extras.getIntArray("center_freqs") ?: IntArray(0)
-                    val levels = extras.getIntArray("band_levels") ?: IntArray(0)
-                    
-                    _eqRange.value = minLevel..maxLevel
-                    val bands = List(numBands) { i ->
-                        EqBand(i, freqs.getOrElse(i) { 0 }, levels.getOrElse(i) { 0 })
-                    }
-                    _eqBands.value = bands
+        val c = controller ?: return
+        val future = c.sendCustomCommand(SessionCommand("GET_EQ_PARAMS", Bundle.EMPTY), Bundle.EMPTY)
+        future.addListener({
+            val result = future.get()
+            if (result.resultCode != SessionResult.RESULT_SUCCESS) return@addListener
+            val extras = result.extras
+            val numBands = extras.getInt("num_bands", 0)
+            val freqs = extras.getIntArray("center_freqs") ?: IntArray(0)
+            val levels = extras.getIntArray("band_levels") ?: IntArray(0)
 
-                    // Apply persisted EQ levels if they exist
-                    val savedJson = prefs.getString("current_eq_levels", null)
-                    if (savedJson != null) {
-                        val type = object : TypeToken<List<Int>>() {}.type
-                        val savedLevels: List<Int> = gson.fromJson(savedJson, type)
-                        savedLevels.forEachIndexed { index, level ->
-                            if (index < bands.size) {
-                                setEqBandLevel(index, level)
-                            }
-                        }
-                    }
-                }
-            }, MoreExecutors.directExecutor())
-        }
+            _eqRange.value = extras.getInt("min_level", -1500)..extras.getInt("max_level", 1500)
+            val bands = List(numBands) { i -> EqBand(i, freqs.getOrElse(i) { 0 }, levels.getOrElse(i) { 0 }) }
+            _eqBands.value = bands
+
+            val savedJson = prefs.getString("current_eq_levels", null) ?: return@addListener
+            val type = object : TypeToken<List<Int>>() {}.type
+            val savedLevels: List<Int> = runCatching { gson.fromJson<List<Int>>(savedJson, type) }.getOrNull() ?: return@addListener
+            savedLevels.forEachIndexed { index, level ->
+                if (index < bands.size) setEqBandLevel(index, level)
+            }
+        }, MoreExecutors.directExecutor())
     }
 
     fun setEqBandLevel(band: Int, level: Int) {
@@ -640,87 +674,97 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putInt("level", level)
         }
         controller?.sendCustomCommand(SessionCommand("SET_EQ_BAND", Bundle.EMPTY), args)
-        
-        // Update local state
-        val updatedBands = _eqBands.value.map {
-            if (it.index == band) it.copy(level = level) else it
-        }
+
+        val updatedBands = _eqBands.value.map { if (it.index == band) it.copy(level = level) else it }
         _eqBands.value = updatedBands
-        
-        // Persist current EQ state
-        val levels = updatedBands.map { it.level }
-        prefs.edit().putString("current_eq_levels", gson.toJson(levels)).apply()
+
+        // A slider drag fires dozens of these per second; only the resting value needs to survive a
+        // restart, so the Gson encode and the SharedPreferences write are coalesced.
+        saveEqJob?.cancel()
+        saveEqJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(PERSIST_DEBOUNCE_MS)
+            prefs.edit().putString("current_eq_levels", gson.toJson(updatedBands.map { it.level })).apply()
+        }
     }
 
     fun resetEqualizer() {
-        _eqBands.value.forEach { band ->
-            setEqBandLevel(band.index, 0)
-        }
+        _eqBands.value.forEach { setEqBandLevel(it.index, 0) }
     }
 
     private fun loadEqPresets() {
-        val json = prefs.getString("eq_presets", null)
-        if (json != null) {
-            val type = object : TypeToken<List<EqPreset>>() {}.type
-            _eqPresets.value = gson.fromJson(json, type)
-        }
+        val json = prefs.getString("eq_presets", null) ?: return
+        val type = object : TypeToken<List<EqPreset>>() {}.type
+        _eqPresets.value = runCatching { gson.fromJson<List<EqPreset>>(json, type) }.getOrNull() ?: emptyList()
     }
 
     fun saveEqPreset(name: String) {
-        val levels = _eqBands.value.map { it.level }
-        val newPreset = EqPreset(name, levels)
-        val current = _eqPresets.value.toMutableList()
-        current.add(newPreset)
-        _eqPresets.value = current
-        prefs.edit().putString("eq_presets", gson.toJson(current)).apply()
+        val updated = _eqPresets.value + EqPreset(name, _eqBands.value.map { it.level })
+        _eqPresets.value = updated
+        persistAsync("eq_presets", updated)
     }
 
     fun applyEqPreset(preset: EqPreset) {
         preset.levels.forEachIndexed { index, level ->
-            if (index < _eqBands.value.size) {
-                setEqBandLevel(index, level)
-            }
+            if (index < _eqBands.value.size) setEqBandLevel(index, level)
         }
     }
 
     fun deleteEqPreset(preset: EqPreset) {
-        val current = _eqPresets.value.filter { it.name != preset.name }
-        _eqPresets.value = current
-        prefs.edit().putString("eq_presets", gson.toJson(current)).apply()
+        val updated = _eqPresets.value.filter { it.name != preset.name }
+        _eqPresets.value = updated
+        persistAsync("eq_presets", updated)
     }
 
-    private fun saveCurrentQueue() {
-        val json = gson.toJson(_queue.value)
-        prefs.edit().putString("current_queue", json).apply()
-        _currentSong.value?.let {
-            prefs.edit().putLong("last_song_id", it.id).apply()
+    /** Gson encoding of a potentially large structure, off the main thread. */
+    private fun persistAsync(key: String, value: Any) {
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.edit().putString(key, gson.toJson(value)).apply()
         }
-        controller?.let {
-            prefs.edit().putLong("last_position", it.currentPosition).apply()
+    }
+
+    /**
+     * Persists the queue.
+     *
+     * This runs on every track transition and every queue edit, and the queue can hold thousands of
+     * songs — encoding it on the main thread showed up as a stutter at exactly the moment a new
+     * track started. Writes are debounced and moved to IO; [immediate] skips the debounce for
+     * moments where the process may be about to go away.
+     */
+    private fun saveCurrentQueue(immediate: Boolean = false) {
+        val snapshot = _queue.value
+        val songId = _currentSong.value?.id
+        val position = controller?.currentPosition ?: 0L
+
+        saveQueueJob?.cancel()
+        saveQueueJob = viewModelScope.launch(Dispatchers.IO) {
+            if (!immediate) delay(PERSIST_DEBOUNCE_MS)
+            val editor = prefs.edit().putString("current_queue", gson.toJson(snapshot))
+            songId?.let { editor.putLong("last_song_id", it) }
+            editor.putLong("last_position", position)
+            editor.apply()
         }
     }
 
     private fun restoreQueue() {
-        val json = prefs.getString("current_queue", null)
-        if (json != null) {
-            val type = object : TypeToken<List<Song>>() {}.type
-            val restoredQueue: List<Song> = gson.fromJson(json, type)
-            if (restoredQueue.isNotEmpty()) {
-                playlistSongs = restoredQueue
-                _queue.value = restoredQueue
-                
-                val lastSongId = prefs.getLong("last_song_id", -1)
-                val lastPosition = prefs.getLong("last_position", 0L)
-                val index = restoredQueue.indexOfFirst { it.id == lastSongId }.coerceAtLeast(0)
-                if (index >= 0 && index < restoredQueue.size) {
-                    _currentSong.value = restoredQueue[index]
-                }
-                
-                val mediaItems = restoredQueue.map { createMediaItem(it) }
-                controller?.setMediaItems(mediaItems, index, lastPosition)
-                controller?.prepare()
-                _currentPosition.value = lastPosition
+        viewModelScope.launch {
+            val json = prefs.getString("current_queue", null) ?: return@launch
+            val restoredQueue: List<Song> = withContext(Dispatchers.IO) {
+                val type = object : TypeToken<List<Song>>() {}.type
+                runCatching { gson.fromJson<List<Song>>(json, type) }.getOrNull() ?: emptyList()
             }
+            if (restoredQueue.isEmpty()) return@launch
+
+            playlistSongs = restoredQueue
+            _queue.value = restoredQueue
+
+            val lastSongId = prefs.getLong("last_song_id", -1)
+            val lastPosition = prefs.getLong("last_position", 0L)
+            val index = restoredQueue.indexOfFirst { it.id == lastSongId }.coerceAtLeast(0)
+            _currentSong.value = restoredQueue[index]
+
+            controller?.setMediaItems(restoredQueue.map { createMediaItem(it) }, index, lastPosition)
+            controller?.prepare()
+            _currentPosition.value = lastPosition
         }
     }
 
@@ -728,25 +772,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         progressJob?.cancel()
         progressJob = viewModelScope.launch {
             while (true) {
-                controller?.let {
-                    if (it.isPlaying) {
-                        _currentPosition.value = it.currentPosition
-                    }
-                }
-                delay(500)
+                val c = controller ?: break
+                if (c.isPlaying) _currentPosition.value = c.currentPosition
+                delay(PROGRESS_INTERVAL_MS)
             }
         }
     }
 
     private fun stopProgressUpdate() {
         progressJob?.cancel()
+        progressJob = null
     }
 
     fun startSleepTimer(minutes: Int) {
         sleepTimerJob?.cancel()
         val durationMs = minutes * 60 * 1000L
         _sleepTimerRemaining.value = durationMs
-        
+
         sleepTimerJob = viewModelScope.launch {
             var remaining = durationMs
             while (remaining > 0) {
@@ -764,172 +806,338 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _sleepTimerRemaining.value = null
     }
 
-    fun startAiScan() {
-        if (_isAiScanning.value) return
-        if (allSongs.isEmpty()) {
-            _aiScanStatus.value = getApplication<Application>().getString(R.string.no_songs_to_scan)
-            return
+    // ---------------------------------------------------------------- models
+
+    private fun readModelStatus(): ModelStatus {
+        val variant = modelRepository.audioVariant.value
+        val needed = variant.assets + ModelAsset.forText
+        return ModelStatus(
+            variant = variant,
+            audioReady = modelRepository.isAvailable(variant.assets),
+            textReady = modelRepository.isAvailable(ModelAsset.forText),
+            audioBundled = modelRepository.isBundled(variant.asset),
+            textBundled = modelRepository.isBundled(ModelAsset.TEXT_MODEL),
+            quantizedReady = modelRepository.isAvailable(ModelAsset.AUDIO_MODEL_QUANTIZED),
+            fullReady = modelRepository.isAvailable(ModelAsset.AUDIO_MODEL),
+            quantizedBundled = modelRepository.isBundled(ModelAsset.AUDIO_MODEL_QUANTIZED),
+            fullBundled = modelRepository.isBundled(ModelAsset.AUDIO_MODEL),
+            // Only what the chosen variant needs; the other export is not a pending download.
+            pendingBytes = modelRepository.pendingDownloadBytes(needed)
+        )
+    }
+
+    /** Switching export invalidates nothing on disk, but the stored embeddings no longer match. */
+    fun selectAudioVariant(variant: AudioModelVariant) {
+        modelRepository.selectAudioVariant(variant)
+        refreshModelStatus()
+    }
+
+    fun refreshModelStatus() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val status = readModelStatus()
+            withContext(Dispatchers.Main) { _modelStatus.value = status }
         }
-        _isAiScanning.value = true
-        aiScanJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                aiScanner.scanSongs(allSongs) { progress, status, index, etr ->
-                    _aiScanProgress.value = progress
-                    if (etr < 0) {
-                        _aiScanStatus.value = status
-                    } else {
-                        val formattedProgress = getApplication<Application>().getString(
-                            R.string.scan_progress, index, allSongs.size, formatEtr(etr)
-                        )
-                        _aiScanStatus.value = "${getApplication<Application>().getString(R.string.scanning_track, status)}\n$formattedProgress"
-                    }
-                    if (index % 5 == 0) refreshScannedIds()
+    }
+
+    /** Fetches every missing weight file up front, rather than waiting for the first scan. */
+    fun downloadModels() {
+        if (downloadJob?.isActive == true) return
+        downloadJob = viewModelScope.launch {
+            modelRepository.ensure(modelRepository.audioVariant.value.assets + ModelAsset.forText)
+            refreshModelStatus()
+        }
+    }
+
+    fun cancelModelDownload() {
+        downloadJob?.cancel()
+        downloadJob = null
+        refreshModelStatus()
+    }
+
+    fun deleteDownloadedModels() {
+        viewModelScope.launch {
+            // Releasing touches the lazily built scanner and encoder, so a fault in either would
+            // otherwise reach an uncaught coroutine and take the process down. Freeing the space is
+            // worth attempting even if closing a session misbehaves.
+            // The scanner's own session belongs to the service; stopping it releases that.
+            if (isAiScanning.value) AiScanService.stop(getApplication())
+            runCatching { textEncoder.release() }
+                .onFailure { Log.e(TAG, "Releasing the text session failed", it) }
+            runCatching { modelRepository.deleteDownloaded() }
+                .onFailure { Log.e(TAG, "Deleting downloaded weights failed", it) }
+            refreshModelStatus()
+        }
+    }
+
+    // ---------------------------------------------------------------- ai
+
+    fun startAiScan() {
+        if (isAiScanning.value) return
+        AiScanService.start(getApplication())
+    }
+
+    /**
+     * Mirrors the service's progress into the settings screen. Collected for as long as this
+     * ViewModel lives; the scan itself keeps going regardless.
+     */
+    private fun observeScan() {
+        viewModelScope.launch {
+            var lastRefreshedAt = 0
+            AiScanState.stage.collect { stage ->
+                applyScanStage(stage)
+                if (stage is ScanStage.Scanning && stage.done - lastRefreshedAt >= SCAN_REFRESH_EVERY) {
+                    lastRefreshedAt = stage.done
+                    refreshScannedIds()
                 }
-            } catch (e: Exception) {
-                Log.e("MusicViewModel", "AI Scan failed", e)
-                _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_scan_error, e.message ?: "Unknown")
-            } finally {
-                refreshScannedIds()
-                _isAiScanning.value = false
-                if (_aiScanStatus.value.contains("Scanning") || _aiScanStatus.value.contains("Сканирование")) {
-                    _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_scan_complete)
+            }
+        }
+        viewModelScope.launch {
+            AiScanState.running.collect { running ->
+                if (!running) {
+                    refreshScannedIds()
+                    refreshModelStatus()
+                }
+            }
+        }
+        viewModelScope.launch {
+            // A 280 MB fetch would otherwise look like a frozen bar to anyone who never opens the
+            // AI Models card.
+            modelRepository.progress.collect { download ->
+                if (download.running && isAiScanning.value) {
+                    _aiScanProgress.value = download.fraction
+                    _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_model_downloading)
                 }
             }
         }
     }
 
+    private fun applyScanStage(stage: ScanStage) {
+        val context = getApplication<Application>()
+        when (stage) {
+            is ScanStage.Idle -> Unit
+
+            is ScanStage.DownloadingModel -> {
+                _aiScanProgress.value = stage.progress.fraction
+                _aiScanStatus.value = context.getString(R.string.ai_model_downloading)
+            }
+
+            is ScanStage.PreparingModel -> {
+                _aiScanProgress.value = 0f
+                _aiScanStatus.value = context.getString(R.string.ai_engine_init)
+            }
+
+            is ScanStage.Scanning -> {
+                _aiScanProgress.value = if (stage.total == 0) 0f else stage.done.toFloat() / stage.total
+                _aiScanStatus.value = if (stage.title.isEmpty()) {
+                    context.getString(R.string.ai_scan_complete)
+                } else {
+                    val progress = context.getString(R.string.scan_progress, stage.done, stage.total, formatEtr(stage.etrSeconds))
+                    "${context.getString(R.string.scanning_track, stage.title)}\n$progress"
+                }
+            }
+
+            is ScanStage.Failed -> {
+                _aiScanStatus.value = context.getString(R.string.ai_scan_error, describeError(stage.reason))
+            }
+        }
+    }
+
+    private fun describeError(reason: String): String {
+        val context = getApplication<Application>()
+        return when (reason) {
+            "not_enough_space" -> context.getString(R.string.model_error_space)
+            "download_failed", "model_missing" -> context.getString(R.string.model_error_download)
+            AiScanService.REASON_NO_SONGS -> context.getString(R.string.no_songs_to_scan)
+            else -> reason
+        }
+    }
+
     private fun refreshScannedIds() {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
-                val ids = aiScanner.getStoredEmbeddings().keys
-                _scannedSongIds.value = ids
+                _scannedSongIds.value = embeddings.ids()
+                _analysisReset.value = embeddings.analysisWasReset
             } catch (e: Exception) {
-                Log.e("MusicViewModel", "Failed to refresh scanned IDs", e)
+                Log.e(TAG, "Failed to refresh scanned IDs", e)
             }
         }
     }
 
     fun stopAiScan() {
-        aiScanner.stop()
-        aiScanJob?.cancel()
-        _isAiScanning.value = false
+        AiScanService.stop(getApplication())
         _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_scan_stopped)
         refreshScannedIds()
     }
 
     fun clearAiData() {
-        viewModelScope.launch(Dispatchers.IO) {
-            aiScanner.clearDatabase()
+        viewModelScope.launch {
+            embeddings.clear()
+            modelRepository.forgetEmbeddingsVariant()
             refreshScannedIds()
-            withContext(Dispatchers.Main) {
-                _aiScanStatus.value = "AI data cleared"
-            }
+            _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_data_cleared)
         }
     }
 
     fun playSimilar(song: Song) {
-        viewModelScope.launch(Dispatchers.Default) {
+        viewModelScope.launch {
             try {
-                val embeddings = aiScanner.getStoredEmbeddings()
-                val currentEmbedding = embeddings[song.id] ?: run {
-                    withContext(Dispatchers.Main) {
-                        _aiScanStatus.value = getApplication<Application>().getString(R.string.song_not_analyzed)
-                    }
+                val stored = embeddings.all()
+                val currentEmbedding = stored[song.id] ?: run {
+                    _aiScanStatus.value = getApplication<Application>().getString(R.string.song_not_analyzed)
                     return@launch
                 }
-                
-                val similarSongs = allSongs
-                    .filter { it.id in embeddings.keys && it.id != song.id }
-                    .map { otherSong ->
-                        val otherEmbedding = embeddings[otherSong.id]!!
-                        val similarity = calculateCosineSimilarity(currentEmbedding, otherEmbedding)
-                        otherSong to similarity
-                    }
-                    .sortedByDescending { it.second }
-                    .map { it.first }
-                    .take(30)
-                
-                if (similarSongs.isNotEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        playSong(song, similarSongs)
-                    }
+
+                val similarSongs = withContext(Dispatchers.Default) {
+                    allSongs
+                        .mapNotNull { other ->
+                            if (other.id == song.id) return@mapNotNull null
+                            val embedding = stored[other.id] ?: return@mapNotNull null
+                            other to cosineSimilarity(currentEmbedding, embedding)
+                        }
+                        .sortedByDescending { it.second }
+                        .take(30)
+                        .map { it.first }
                 }
+
+                if (similarSongs.isNotEmpty()) playSong(song, similarSongs)
             } catch (e: Exception) {
-                Log.e("MusicViewModel", "Play similar failed", e)
+                Log.e(TAG, "Play similar failed", e)
             }
         }
     }
 
+    /**
+     * Runs plain-text and CLAP searches for [query].
+     *
+     * Typing used to start a fresh text-encoder inference per keystroke, with no cancellation, so
+     * several ~126 MB inferences piled up while the plain-text filter ran on the main thread. Now
+     * the previous attempt is cancelled, the whole thing is debounced, and neither half touches the
+     * main thread.
+     */
     fun aiSearch(query: String) {
+        searchJob?.cancel()
         if (query.isBlank()) {
             _aiSearchResults.value = null
             _regularSearchResults.value = null
+            _isAiSearching.value = false
+            _aiSearchNeedsModel.value = false
             return
         }
-        
-        // Regular Search
-        val regularResults = allSongs.filter { 
-            it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
-        }.take(20)
-        _regularSearchResults.value = regularResults
 
-        // AI Search
-        viewModelScope.launch(Dispatchers.Default) {
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+
+            val songs = allSongs
+            _regularSearchResults.value = withContext(Dispatchers.Default) {
+                songs.filter {
+                    it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+                }.take(20)
+            }
+
+            // Typing must never kick off a 126 MB download on whatever connection is at hand; the
+            // settings screen is where the user opts into that.
+            if (textEncoder.needsDownload()) {
+                _aiSearchNeedsModel.value = true
+                _aiSearchResults.value = emptyList()
+                return@launch
+            }
+            _aiSearchNeedsModel.value = false
+
+            _isAiSearching.value = true
             try {
-                val queryEmbedding = textEncoder.encode(query).toList()
-                val embeddings = aiScanner.getStoredEmbeddings()
-                
-                val results = allSongs
-                    .filter { it.id in embeddings.keys }
-                    .map { song ->
-                        val songEmbedding = embeddings[song.id]!!
-                        val similarity = calculateCosineSimilarity(queryEmbedding, songEmbedding)
-                        ScoredSong(song, mapSimilarityToDisplay(similarity))
+                val stored = embeddings.all()
+                if (stored.isEmpty()) {
+                    _aiSearchResults.value = emptyList()
+                    return@launch
+                }
+                val queryEmbedding = textEncoder.encode(query)
+                if (queryEmbedding == null) {
+                    // Without a usable query vector every score would be identical noise.
+                    _aiSearchResults.value = emptyList()
+                    return@launch
+                }
+
+                _aiSearchResults.value = withContext(Dispatchers.Default) {
+                    val scored = songs.mapNotNull { song ->
+                        val embedding = stored[song.id] ?: return@mapNotNull null
+                        song to cosineSimilarity(queryEmbedding, embedding)
                     }
-                    .sortedByDescending { it.score }
-                    .filter { it.score > 0.1f } 
-                    .take(50)
-                
-                _aiSearchResults.value = results
+                    if (scored.isEmpty()) return@withContext emptyList()
+
+                    // Where the bulk of the library sits for this particular query. A fixed
+                    // threshold cannot work: the absolute cosine depends on the wording and on what
+                    // is in the library, so what marks a match is standing out from the rest.
+                    val mean = scored.sumOf { it.second.toDouble() } / scored.size
+                    val deviation = kotlin.math.sqrt(
+                        scored.sumOf { (it.second - mean) * (it.second - mean) } / scored.size
+                    )
+                    val cut = maxOf(mean + deviation, MIN_SEARCH_SIMILARITY.toDouble())
+
+                    scored
+                        .filter { it.second >= cut }
+                        .sortedByDescending { it.second }
+                        .take(50)
+                        .map { ScoredSong(it.first, mapSimilarityToDisplay(it.second)) }
+                }
             } catch (e: Exception) {
-                Log.e("MusicViewModel", "AI Search failed", e)
+                Log.e(TAG, "AI Search failed", e)
+            } finally {
+                _isAiSearching.value = false
             }
         }
     }
 
-    private fun calculateCosineSimilarity(v1: List<Float>, v2: List<Float>): Float {
-        var dotProduct = 0f
+    /** Both vectors are stored unit-length, so the dot product is already the cosine. */
+    private fun cosineSimilarity(v1: FloatArray, v2: FloatArray): Float {
+        var dot = 0f
         var normA = 0f
         var normB = 0f
-        for (i in 0 until minOf(v1.size, v2.size)) {
-            dotProduct += v1[i] * v2[i]
+        val n = minOf(v1.size, v2.size)
+        for (i in 0 until n) {
+            dot += v1[i] * v2[i]
             normA += v1[i] * v1[i]
             normB += v2[i] * v2[i]
         }
         val denom = kotlin.math.sqrt(normA) * kotlin.math.sqrt(normB)
-        return if (denom <= 0f) 0f else dotProduct / denom
+        return if (denom <= 0f) 0f else dot / denom
     }
 
+    /**
+     * Turns a text-audio cosine into the percentage the list shows.
+     *
+     * Recalibrated for the corrected features. Measured over this checkpoint, an unrelated track
+     * scores around 0.11 against a query and a good match around 0.35-0.5; the previous curve was
+     * fitted to the old extractor, whose matches peaked near 0.1, so with correct features it
+     * reported almost everything as a near-perfect hit.
+     */
     private fun mapSimilarityToDisplay(rawSimilarity: Float): Float {
         return when {
-            rawSimilarity >= 0.45f -> 0.99f
-            rawSimilarity <= 0.05f -> 0f
-            else -> {
-                0.1f + (rawSimilarity - 0.05f) * (0.85f / 0.40f)
-            }
+            rawSimilarity >= STRONG_SIMILARITY -> 0.99f
+            rawSimilarity <= MIN_SEARCH_SIMILARITY -> 0f
+            else -> (rawSimilarity - MIN_SEARCH_SIMILARITY) / (STRONG_SIMILARITY - MIN_SEARCH_SIMILARITY)
         }.coerceIn(0f, 1f)
     }
 
-    private fun formatEtr(seconds: Long): String {
-        val m = seconds / 60
-        val s = seconds % 60
-        return String.format("%02d:%02d", m, s)
-    }
+    private fun formatEtr(seconds: Long): String = "%02d:%02d".format(seconds / 60, seconds % 60)
 
     override fun onCleared() {
-        controllerFuture?.let {
-            MediaController.releaseFuture(it)
-        }
+        controllerFuture?.let { MediaController.releaseFuture(it) }
         stopProgressUpdate()
+        textEncoder.release()
+        super.onCleared()
+    }
+
+    private companion object {
+        const val TAG = "MusicViewModel"
+        const val PROGRESS_INTERVAL_MS = 500L
+        const val SEARCH_DEBOUNCE_MS = 300L
+        const val PERSIST_DEBOUNCE_MS = 400L
+        const val SCAN_REFRESH_EVERY = 5
+
+        /** Below this a track is not a match for the query under any reading. */
+        const val MIN_SEARCH_SIMILARITY = 0.15f
+
+        /** Where a match is unambiguous, and the displayed score saturates. */
+        const val STRONG_SIMILARITY = 0.45f
     }
 }
