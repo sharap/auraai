@@ -83,6 +83,56 @@ class EqualizerCommandTest {
         assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
     }
 
+    private fun readAudioOptions(): Bundle {
+        val result = send(PlaybackService.COMMAND_GET_AUDIO_OPTIONS, Bundle.EMPTY)
+        assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
+        return result.extras
+    }
+
+    private fun setOption(command: String, enabled: Boolean) {
+        val result = send(command, Bundle().apply { putBoolean("enabled", enabled) })
+        assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
+    }
+
+    /** Both playback behaviours are settings now, so the service has to follow them at runtime. */
+    @Test
+    fun audioOptionsRoundTripThroughTheService() {
+        val before = readAudioOptions()
+        val pause = before.getBoolean(PlaybackService.KEY_PAUSE_ON_DISCONNECT, true)
+        val focus = before.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, true)
+        try {
+            setOption(PlaybackService.COMMAND_SET_PAUSE_ON_DISCONNECT, false)
+            setOption(PlaybackService.COMMAND_SET_AUDIO_FOCUS, false)
+            readAudioOptions().let {
+                assertFalse(it.getBoolean(PlaybackService.KEY_PAUSE_ON_DISCONNECT, true))
+                assertFalse(it.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, true))
+            }
+
+            setOption(PlaybackService.COMMAND_SET_PAUSE_ON_DISCONNECT, true)
+            setOption(PlaybackService.COMMAND_SET_AUDIO_FOCUS, true)
+            readAudioOptions().let {
+                assertTrue(it.getBoolean(PlaybackService.KEY_PAUSE_ON_DISCONNECT, false))
+                assertTrue(it.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, false))
+            }
+        } finally {
+            setOption(PlaybackService.COMMAND_SET_PAUSE_ON_DISCONNECT, pause)
+            setOption(PlaybackService.COMMAND_SET_AUDIO_FOCUS, focus)
+        }
+    }
+
+    /**
+     * Declaring the attributes is what lets the system route and mix the stream correctly, so they
+     * must be set whatever the focus setting says.
+     */
+    @Test
+    fun playerAnnouncesItselfAsMusic() {
+        setOption(PlaybackService.COMMAND_SET_AUDIO_FOCUS, true)
+        var attributes: androidx.media3.common.AudioAttributes? = null
+        instrumentation.runOnMainSync { attributes = controller.audioAttributes }
+        assertEquals(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC, attributes!!.contentType)
+        assertEquals(androidx.media3.common.C.USAGE_MEDIA, attributes!!.usage)
+    }
+
     @Test
     fun switchingTheEqualizerOffAndOnReachesTheEffect() {
         assumeTrue("no equalizer on this device", readParams().getInt("num_bands", 0) > 0)

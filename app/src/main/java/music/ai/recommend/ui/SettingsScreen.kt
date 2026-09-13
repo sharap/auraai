@@ -146,12 +146,72 @@ fun SettingsScreen(viewModel: MusicViewModel) {
 
         item {
             Spacer(modifier = Modifier.height(24.dp))
+            SectionTitle(stringResource(id = R.string.playback))
+            PlaybackCard(viewModel)
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
             SectionTitle(stringResource(id = R.string.equalizer))
             EqualizerControl(viewModel)
         }
 
         // Keeps the last card clear of the navigation bar.
         item { Spacer(modifier = Modifier.height(100.dp)) }
+    }
+}
+
+/** Behaviour that has to survive the app being in the background, so it lives in the service. */
+@Composable
+private fun PlaybackCard(viewModel: MusicViewModel) {
+    val pauseOnDisconnect by viewModel.pauseOnDisconnect.collectAsState()
+    val handleAudioFocus by viewModel.handleAudioFocus.collectAsState()
+
+    SettingsCard {
+        Column(modifier = Modifier.padding(16.dp)) {
+            SwitchRow(
+                title = stringResource(id = R.string.pause_on_disconnect),
+                hint = stringResource(id = R.string.pause_on_disconnect_hint),
+                checked = pauseOnDisconnect,
+                onCheckedChange = { viewModel.setPauseOnDisconnect(it) }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            SwitchRow(
+                title = stringResource(id = R.string.handle_audio_focus),
+                hint = stringResource(id = R.string.handle_audio_focus_hint),
+                checked = handleAudioFocus,
+                onCheckedChange = { viewModel.setHandleAudioFocus(it) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    title: String,
+    hint: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnSurface.current
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

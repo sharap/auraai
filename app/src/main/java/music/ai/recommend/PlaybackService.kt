@@ -6,6 +6,8 @@ import android.media.audiofx.Equalizer
 import android.os.Bundle
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -19,10 +21,15 @@ class PlaybackService : MediaSessionService() {
 
     companion object {
         const val COMMAND_SET_EQ_ENABLED = "SET_EQ_ENABLED"
+        const val COMMAND_GET_AUDIO_OPTIONS = "GET_AUDIO_OPTIONS"
+        const val COMMAND_SET_PAUSE_ON_DISCONNECT = "SET_PAUSE_ON_DISCONNECT"
+        const val COMMAND_SET_AUDIO_FOCUS = "SET_AUDIO_FOCUS"
 
         /** Shared with MusicViewModel, which is the only other writer. */
         const val PREFS = "music_prefs"
         const val KEY_EQ_ENABLED = "eq_enabled"
+        const val KEY_PAUSE_ON_DISCONNECT = "pause_on_disconnect"
+        const val KEY_HANDLE_AUDIO_FOCUS = "handle_audio_focus"
 
         private const val TAG = "PlaybackService"
     }
@@ -34,11 +41,13 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val exoPlayer = ExoPlayer.Builder(this)
-            // Pause when the headphones come out, rather than switching to the speaker.
-            .setHandleAudioBecomingNoisy(true)
-            .build()
+        val exoPlayer = ExoPlayer.Builder(this).build()
         player = exoPlayer
+
+        // Applied from preferences at startup rather than fixed at build time, so both can be
+        // switched from settings without restarting playback.
+        applyPauseOnDisconnect(exoPlayer, preferences().getBoolean(KEY_PAUSE_ON_DISCONNECT, true))
+        applyAudioFocus(exoPlayer, preferences().getBoolean(KEY_HANDLE_AUDIO_FOCUS, true))
 
         try {
             equalizer = Equalizer(0, exoPlayer.audioSessionId).apply {
@@ -75,6 +84,9 @@ class PlaybackService : MediaSessionService() {
                         .add(SessionCommand("GET_EQ_PARAMS", Bundle.EMPTY))
                         .add(SessionCommand("SET_EQ_BAND", Bundle.EMPTY))
                         .add(SessionCommand(COMMAND_SET_EQ_ENABLED, Bundle.EMPTY))
+                        .add(SessionCommand(COMMAND_GET_AUDIO_OPTIONS, Bundle.EMPTY))
+                        .add(SessionCommand(COMMAND_SET_PAUSE_ON_DISCONNECT, Bundle.EMPTY))
+                        .add(SessionCommand(COMMAND_SET_AUDIO_FOCUS, Bundle.EMPTY))
                         .build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(availableSessionCommands)
@@ -106,6 +118,25 @@ class PlaybackService : MediaSessionService() {
                             }
                             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, resultBundle))
                         }
+                        COMMAND_GET_AUDIO_OPTIONS -> {
+                            val bundle = Bundle().apply {
+                                putBoolean(KEY_PAUSE_ON_DISCONNECT, preferences().getBoolean(KEY_PAUSE_ON_DISCONNECT, true))
+                                putBoolean(KEY_HANDLE_AUDIO_FOCUS, preferences().getBoolean(KEY_HANDLE_AUDIO_FOCUS, true))
+                            }
+                            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS, bundle))
+                        }
+                        COMMAND_SET_PAUSE_ON_DISCONNECT -> {
+                            val enabled = args.getBoolean("enabled", true)
+                            player?.let { applyPauseOnDisconnect(it, enabled) }
+                            preferences().edit().putBoolean(KEY_PAUSE_ON_DISCONNECT, enabled).apply()
+                            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
+                        COMMAND_SET_AUDIO_FOCUS -> {
+                            val enabled = args.getBoolean("enabled", true)
+                            player?.let { applyAudioFocus(it, enabled) }
+                            preferences().edit().putBoolean(KEY_HANDLE_AUDIO_FOCUS, enabled).apply()
+                            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
                         COMMAND_SET_EQ_ENABLED -> {
                             val enabled = args.getBoolean("enabled", true)
                             // Band levels are kept either way, so switching back on restores the
@@ -128,6 +159,28 @@ class PlaybackService : MediaSessionService() {
                 }
             })
             .build()
+    }
+
+    /** Pause instead of continuing on the speaker when headphones are pulled out. */
+    @OptIn(UnstableApi::class)
+    private fun applyPauseOnDisconnect(player: ExoPlayer, enabled: Boolean) {
+        runCatching { player.setHandleAudioBecomingNoisy(enabled) }
+            .onFailure { Log.e(TAG, "Could not set becoming-noisy handling", it) }
+    }
+
+    /**
+     * Whether to take audio focus: pause for calls, duck for notifications, stop when another app
+     * starts playing. Declaring the attributes is what lets the system route and mix correctly, so
+     * they are set either way; only the focus handling follows the setting.
+     */
+    @OptIn(UnstableApi::class)
+    private fun applyAudioFocus(player: ExoPlayer, handleFocus: Boolean) {
+        val attributes = AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
+        runCatching { player.setAudioAttributes(attributes, handleFocus) }
+            .onFailure { Log.e(TAG, "Could not set audio attributes", it) }
     }
 
     private fun preferences() = getSharedPreferences(PREFS, MODE_PRIVATE)

@@ -125,6 +125,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _eqEnabled = MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_EQ_ENABLED, true))
     val eqEnabled: StateFlow<Boolean> = _eqEnabled.asStateFlow()
 
+    private val _pauseOnDisconnect =
+        MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_PAUSE_ON_DISCONNECT, true))
+    val pauseOnDisconnect: StateFlow<Boolean> = _pauseOnDisconnect.asStateFlow()
+
+    private val _handleAudioFocus =
+        MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, true))
+    val handleAudioFocus: StateFlow<Boolean> = _handleAudioFocus.asStateFlow()
+
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
@@ -268,6 +276,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             fetchEqParams()
+            fetchAudioOptions()
             syncCurrentMediaItem(c)
 
             if (c.isPlaying) startProgressUpdate()
@@ -691,6 +700,50 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (index < bands.size) setEqBandLevel(index, level)
             }
         }, MoreExecutors.directExecutor())
+    }
+
+    /** The service is the authority once connected; before that the stored values stand in. */
+    private fun fetchAudioOptions() {
+        val c = controller ?: return
+        val future = c.sendCustomCommand(
+            SessionCommand(PlaybackService.COMMAND_GET_AUDIO_OPTIONS, Bundle.EMPTY),
+            Bundle.EMPTY
+        )
+        future.addListener({
+            val result = runCatching { future.get() }.getOrNull() ?: return@addListener
+            if (result.resultCode != SessionResult.RESULT_SUCCESS) return@addListener
+            _pauseOnDisconnect.value =
+                result.extras.getBoolean(PlaybackService.KEY_PAUSE_ON_DISCONNECT, _pauseOnDisconnect.value)
+            _handleAudioFocus.value =
+                result.extras.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, _handleAudioFocus.value)
+        }, MoreExecutors.directExecutor())
+    }
+
+    /** Pause instead of continuing on the speaker when headphones are unplugged. */
+    fun setPauseOnDisconnect(enabled: Boolean) =
+        setAudioOption(_pauseOnDisconnect, PlaybackService.KEY_PAUSE_ON_DISCONNECT,
+            PlaybackService.COMMAND_SET_PAUSE_ON_DISCONNECT, enabled)
+
+    /** Pause for calls, duck for notifications, give way to other players. */
+    fun setHandleAudioFocus(enabled: Boolean) =
+        setAudioOption(_handleAudioFocus, PlaybackService.KEY_HANDLE_AUDIO_FOCUS,
+            PlaybackService.COMMAND_SET_AUDIO_FOCUS, enabled)
+
+    private fun setAudioOption(
+        state: MutableStateFlow<Boolean>,
+        key: String,
+        command: String,
+        enabled: Boolean
+    ) {
+        if (state.value == enabled) return
+        state.value = enabled
+        // Written here as well as by the service, so the setting survives even if the service has
+        // not been started yet and reads it fresh when it is.
+        prefs.edit().putBoolean(key, enabled).apply()
+        controller?.sendCustomCommand(
+            SessionCommand(command, Bundle.EMPTY),
+            Bundle().apply { putBoolean("enabled", enabled) }
+        )
     }
 
     fun setEqBandLevel(band: Int, level: Int) {

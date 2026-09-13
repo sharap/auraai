@@ -109,4 +109,9 @@
     <string name="model_variant_mismatch">Your library was analysed with the other model. Measured difference between the two is tiny, so re-scanning is optional.</string>
     <string name="analysis_reset">Audio processing was corrected, so the previous analysis no longer applies. Run the scan again.</string>
     <string name="eq_enabled">Equalizer enabled</string>
+    <string name="playback">Playback</string>
+    <string name="pause_on_disconnect">Pause on disconnect</string>
+    <string name="pause_on_disconnect_hint">Pause when headphones are unplugged instead of switching to the speaker</string>
+    <string name="handle_audio_focus">Respect other apps</string>
+    <string name="handle_audio_focus_hint">Pause during calls, lower the volume for notifications, and give way when another app plays</string>
 </resources>
