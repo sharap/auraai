@@ -17,14 +17,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ModelAsset
+import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.R
 import music.ai.recommend.ui.theme.LocalMutedOnSurface
 import music.ai.recommend.ui.theme.LocalSurfaceScrim
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(viewModel: MusicViewModel) {
@@ -146,6 +149,12 @@ fun SettingsScreen(viewModel: MusicViewModel) {
 
         item {
             Spacer(modifier = Modifier.height(24.dp))
+            SectionTitle(stringResource(id = R.string.smart_albums))
+            SmartAlbumsCard(viewModel)
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
             SectionTitle(stringResource(id = R.string.playback))
             PlaybackCard(viewModel)
         }
@@ -182,6 +191,77 @@ private fun PlaybackCard(viewModel: MusicViewModel) {
                 checked = handleAudioFocus,
                 onCheckedChange = { viewModel.setHandleAudioFocus(it) }
             )
+        }
+    }
+}
+
+/**
+ * The DBSCAN radius, as a multiplier on the one chosen automatically: an absolute eps is picked
+ * per group in that group's own reduced space, so no single number would mean the same thing in
+ * two libraries.
+ */
+@Composable
+private fun SmartAlbumsCard(viewModel: MusicViewModel) {
+    val scale by viewModel.smartAlbumsEpsScale.collectAsState()
+    val building by viewModel.smartAlbumsBuilding.collectAsState()
+    // Regrouping takes seconds on a large library, so it runs when the thumb is released, not on
+    // every step of the drag.
+    var dragged by remember(scale) { mutableFloatStateOf(scale) }
+
+    SettingsCard {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(id = R.string.smart_albums_eps),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                if (building) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(
+                    text = if (dragged == 1f) stringResource(id = R.string.smart_albums_eps_auto)
+                    else "×" + String.format(java.util.Locale.ROOT, "%.2f", dragged),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.smart_albums_eps_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnSurface.current
+            )
+            Slider(
+                value = dragged,
+                onValueChange = { dragged = (it * 20).roundToInt() / 20f },
+                onValueChangeFinished = { viewModel.setSmartAlbumsEpsScale(dragged) },
+                valueRange = SmartAlbumClustering.MIN_EPS_SCALE..SmartAlbumClustering.MAX_EPS_SCALE,
+                // 0.05 per step.
+                steps = ((SmartAlbumClustering.MAX_EPS_SCALE - SmartAlbumClustering.MIN_EPS_SCALE) * 20).roundToInt() - 1,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(id = R.string.smart_albums_eps_tighter),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMutedOnSurface.current,
+                    modifier = Modifier.weight(1f)
+                )
+                if (scale != 1f) {
+                    TextButton(onClick = { viewModel.setSmartAlbumsEpsScale(1f) }) {
+                        Text(stringResource(id = R.string.smart_albums_eps_reset))
+                    }
+                }
+                Text(
+                    text = stringResource(id = R.string.smart_albums_eps_wider),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMutedOnSurface.current,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.End
+                )
+            }
         }
     }
 }

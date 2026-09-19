@@ -22,6 +22,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.gson.*
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -41,11 +42,15 @@ import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.ai.ModelProgress
 import music.ai.recommend.ai.ModelRepository
 import music.ai.recommend.ai.ScanStage
+import music.ai.recommend.ai.SmartAlbum
+import music.ai.recommend.ai.SmartAlbumBuilder
+import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
 import music.ai.recommend.scanner.MusicScanner
 import music.ai.recommend.ui.theme.BackgroundTone
 import music.ai.recommend.ui.theme.measureBackgroundTone
+import kotlin.math.roundToInt
 import java.lang.reflect.Type
 
 class UriAdapter : JsonSerializer<Uri>, JsonDeserializer<Uri> {
@@ -86,6 +91,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val modelRepository = ModelRepository.getInstance(application)
     private val embeddings = EmbeddingStore.getInstance(application)
     private val textEncoder by lazy { ClapTextEncoder(modelRepository) }
+    private val smartAlbumBuilder by lazy { SmartAlbumBuilder(application, modelRepository, embeddings, textEncoder) }
     private val gson = GsonBuilder()
         .registerTypeAdapter(Uri::class.java, UriAdapter())
         .create()
@@ -132,6 +138,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _handleAudioFocus =
         MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, true))
     val handleAudioFocus: StateFlow<Boolean> = _handleAudioFocus.asStateFlow()
+
+    private val _smartAlbums = MutableStateFlow<List<SmartAlbum>>(emptyList())
+    val smartAlbums: StateFlow<List<SmartAlbum>> = _smartAlbums.asStateFlow()
+
+    private val _smartAlbumsEpsScale = MutableStateFlow(prefs.getFloat(KEY_SMART_ALBUMS_EPS_SCALE, 1f))
+    /** Multiplier on the automatically chosen DBSCAN eps; 1 means automatic. */
+    val smartAlbumsEpsScale: StateFlow<Float> = _smartAlbumsEpsScale.asStateFlow()
+
+    private val _smartAlbumsBuilding = MutableStateFlow(false)
+    val smartAlbumsBuilding: StateFlow<Boolean> = _smartAlbumsBuilding.asStateFlow()
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
@@ -229,6 +245,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var saveQueueJob: Job? = null
     private var saveEqJob: Job? = null
     private var downloadJob: Job? = null
+    private var smartAlbumsJob: Job? = null
     private var savedPlaylists: List<Playlist> = emptyList()
     private var playlistSongs: List<Song> = emptyList()
     private var allSongs: List<Song> = emptyList()
@@ -332,6 +349,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _folders.value = listOf(allTracksFolder) + result
 
                 rebuildPlaylists() // Favorites is derived from allSongs, which just changed.
+                refreshSmartAlbums()
                 controller?.let { syncCurrentMediaItem(it) }
             } finally {
                 _isScanning.value = false
@@ -988,6 +1006,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (!running) {
                     refreshScannedIds()
                     refreshModelStatus()
+                    refreshSmartAlbums()
                 }
             }
         }
@@ -1053,6 +1072,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "Failed to refresh scanned IDs", e)
             }
         }
+    }
+
+    /**
+     * Regroups the analysed tracks into smart albums. Cheap when nothing changed — the builder
+     * answers from its cache — so it is called whenever the library or the analysis may have.
+     *
+     * @param rebuild recluster and rename even if the cached result is current.
+     */
+    fun refreshSmartAlbums(rebuild: Boolean = false) {
+        val library = allSongs
+        if (library.isEmpty()) return
+        smartAlbumsJob?.cancel()
+        smartAlbumsJob = viewModelScope.launch {
+            _smartAlbumsBuilding.value = true
+            try {
+                _smartAlbums.value = smartAlbumBuilder.albums(library, _smartAlbumsEpsScale.value, rebuild)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to build smart albums", e)
+            } finally {
+                // A cancelled run finishes after its replacement started; leave the flag to that one.
+                if (smartAlbumsJob === coroutineContext[Job]) _smartAlbumsBuilding.value = false
+            }
+        }
+    }
+
+    fun setSmartAlbumsEpsScale(scale: Float) {
+        val snapped = (scale.coerceIn(SmartAlbumClustering.MIN_EPS_SCALE, SmartAlbumClustering.MAX_EPS_SCALE) * 20)
+            .roundToInt() / 20f
+        if (snapped == _smartAlbumsEpsScale.value) return
+        _smartAlbumsEpsScale.value = snapped
+        prefs.edit().putFloat(KEY_SMART_ALBUMS_EPS_SCALE, snapped).apply()
+        refreshSmartAlbums()
     }
 
     fun stopAiScan() {
@@ -1225,6 +1278,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         const val SEARCH_DEBOUNCE_MS = 300L
         const val PERSIST_DEBOUNCE_MS = 400L
         const val SCAN_REFRESH_EVERY = 5
+        const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
 
         /** Below this a track is not a match for the query under any reading. */
         const val MIN_SEARCH_SIMILARITY = 0.15f

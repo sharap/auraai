@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 val folders by viewModel.folders.collectAsState()
                 val playlists by viewModel.playlists.collectAsState()
+                val smartAlbums by viewModel.smartAlbums.collectAsState()
 
                 val folderNavController = rememberNavController()
                 val playlistNavController = rememberNavController()
@@ -183,7 +184,23 @@ class MainActivity : ComponentActivity() {
                                                     viewModel = viewModel,
                                                     onPlaylistClick = { playlistName ->
                                                         playlistNavController.navigate("song_list_playlist/$playlistName")
+                                                    },
+                                                    onSmartAlbumClick = { id ->
+                                                        playlistNavController.navigate("smart_album/$id")
                                                     }
+                                                )
+                                            }
+                                            composable(
+                                                "smart_album/{albumId}",
+                                                arguments = listOf(navArgument("albumId") { type = NavType.StringType })
+                                            ) { backStackEntry ->
+                                                val id = backStackEntry.arguments?.getString("albumId") ?: ""
+                                                val album = smartAlbums.find { it.id == id }
+                                                SongListScreen(
+                                                    viewModel = viewModel,
+                                                    title = album?.title ?: "",
+                                                    songs = album?.songs ?: emptyList(),
+                                                    onBack = { playlistNavController.popBackStack() }
                                                 )
                                             }
                                             composable(
