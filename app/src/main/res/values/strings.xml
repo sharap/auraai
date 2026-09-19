@@ -30,6 +30,11 @@
     <string name="search_hint">AI Search (e.g. \'chill piano\')</string>
     <string name="search_results">Search Results</string>
     <string name="ai_recommendations">AI Recommendations</string>
+    <string name="search_in_album">Search in this list</string>
+    <string name="search_in_hint">Search in “%1$s”</string>
+    <string name="search_results_in">In “%1$s”</string>
+    <string name="ai_recommendations_library">AI across the whole library</string>
+    <string name="search_nothing_found">No matches by title or artist.</string>
     <string name="clear_search">Clear</string>
 
     <!-- Settings -->
@@ -124,6 +129,7 @@
     <string name="smart_albums_eps_tighter">Tighter</string>
     <string name="smart_albums_eps_wider">Looser</string>
     <string name="smart_albums_eps_reset">Auto</string>
+    <string name="now_playing_album">Playing now</string>
     <string name="smart_albums_refresh">Rebuild smart albums</string>
     <string name="smart_albums_building">Grouping tracks by sound…</string>
     <string name="smart_albums_hint">Analyse tracks with AI to group them into albums by sound.</string>

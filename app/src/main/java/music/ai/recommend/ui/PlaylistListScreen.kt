@@ -1,5 +1,6 @@
 package music.ai.recommend.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,13 +9,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +39,12 @@ fun PlaylistListScreen(
     val smartAlbums by viewModel.smartAlbums.collectAsState()
     val building by viewModel.smartAlbumsBuilding.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
+    val currentSong by viewModel.currentSong.collectAsState()
+    val currentSongId = currentSong?.id
+    // Smart albums do not overlap, so the playing track is in at most one of them.
+    val playingAlbumId = remember(smartAlbums, currentSongId) {
+        currentSongId?.let { id -> smartAlbums.firstOrNull { album -> album.songs.any { it.id == id } }?.id }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -66,7 +76,11 @@ fun PlaylistListScreen(
                 }
             }
             items(smartAlbums, key = { "smart_${it.id}" }) { album ->
-                SmartAlbumItem(album = album, onClick = { onSmartAlbumClick(album.id) })
+                SmartAlbumItem(
+                    album = album,
+                    isActive = album.id == playingAlbumId,
+                    onClick = { onSmartAlbumClick(album.id) }
+                )
             }
             item(key = "playlists_header") {
                 SectionHeader(title = stringResource(id = R.string.playlists_section))
@@ -111,12 +125,18 @@ private fun SectionHeader(title: String, action: @Composable () -> Unit = {}) {
 }
 
 @Composable
-private fun SmartAlbumItem(album: SmartAlbum, onClick: () -> Unit) {
+private fun SmartAlbumItem(album: SmartAlbum, isActive: Boolean, onClick: () -> Unit) {
+    // Highlighted the same way as the folder holding the playing track.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 12.dp)
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                else Color.Transparent
+            )
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AlbumArt(
@@ -124,7 +144,7 @@ private fun SmartAlbumItem(album: SmartAlbum, onClick: () -> Unit) {
             size = 48.dp,
             iconPadding = 8.dp,
             fallbackIcon = Icons.Default.AutoAwesome,
-            fallbackTint = MaterialTheme.colorScheme.secondary
+            fallbackTint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -140,6 +160,15 @@ private fun SmartAlbumItem(album: SmartAlbum, onClick: () -> Unit) {
                 color = LocalMutedOnBackground.current,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (isActive) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Default.GraphicEq,
+                contentDescription = stringResource(id = R.string.now_playing_album),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
             )
         }
     }

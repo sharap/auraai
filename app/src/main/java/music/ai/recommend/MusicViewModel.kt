@@ -69,6 +69,9 @@ data class EqBand(val index: Int, val freq: Int, val level: Int)
 data class EqPreset(val name: String, val levels: List<Int>)
 data class ScoredSong(val song: Song, val score: Float)
 
+/** @property needsModel the text model is not on the device, so no AI search was attempted. */
+data class AiSearchResult(val matches: List<ScoredSong>, val needsModel: Boolean = false)
+
 /** What the settings screen needs to know about the on-device weights. */
 data class ModelStatus(
     val variant: AudioModelVariant,
@@ -164,22 +167,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _scannedSongIds = MutableStateFlow<Set<Long>>(emptySet())
     val scannedSongIds: StateFlow<Set<Long>> = _scannedSongIds.asStateFlow()
 
-    private val _aiSearchResults = MutableStateFlow<List<ScoredSong>?>(null)
-    val aiSearchResults: StateFlow<List<ScoredSong>?> = _aiSearchResults.asStateFlow()
-
-    private val _regularSearchResults = MutableStateFlow<List<Song>?>(null)
-    val regularSearchResults: StateFlow<List<Song>?> = _regularSearchResults.asStateFlow()
-
-    private val _isAiSearching = MutableStateFlow(false)
-    val isAiSearching: StateFlow<Boolean> = _isAiSearching.asStateFlow()
 
     /** Set when embeddings from an older, incorrect analysis had to be discarded. */
     private val _analysisReset = MutableStateFlow(false)
     val analysisReset: StateFlow<Boolean> = _analysisReset.asStateFlow()
-
-    /** Set when AI search was asked for but the text weights are not on the device yet. */
-    private val _aiSearchNeedsModel = MutableStateFlow(false)
-    val aiSearchNeedsModel: StateFlow<Boolean> = _aiSearchNeedsModel.asStateFlow()
 
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -241,7 +232,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
-    private var searchJob: Job? = null
     private var saveQueueJob: Job? = null
     private var saveEqJob: Job? = null
     private var downloadJob: Job? = null
@@ -1152,83 +1142,65 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Runs plain-text and CLAP searches for [query].
-     *
-     * Typing used to start a fresh text-encoder inference per keystroke, with no cancellation, so
-     * several ~126 MB inferences piled up while the plain-text filter ran on the main thread. Now
-     * the previous attempt is cancelled, the whole thing is debounced, and neither half touches the
-     * main thread.
+     * Plain-text matches for [query] in [scope], or in the whole library when [scope] is null.
+     * A global search keeps only the first [GLOBAL_PLAIN_RESULTS]; within one album every match
+     * is shown, since the album is already small.
      */
-    fun aiSearch(query: String) {
-        searchJob?.cancel()
-        if (query.isBlank()) {
-            _aiSearchResults.value = null
-            _regularSearchResults.value = null
-            _isAiSearching.value = false
-            _aiSearchNeedsModel.value = false
-            return
+    suspend fun searchPlain(query: String, scope: List<Song>? = null): List<Song> {
+        val songs = scope ?: allSongs
+        return withContext(Dispatchers.Default) {
+            val matches = songs.asSequence().filter {
+                it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+            }
+            if (scope == null) matches.take(GLOBAL_PLAIN_RESULTS).toList() else matches.toList()
         }
+    }
 
-        searchJob = viewModelScope.launch {
-            delay(SEARCH_DEBOUNCE_MS)
-
+    /**
+     * CLAP matches for [query] across the whole library, wherever the search was started: a
+     * description ("calm piano") is a request for music, not for a spot in one album.
+     *
+     * Screens call this from their own debounced effect, so a new keystroke cancels the previous
+     * inference and each screen keeps its own results.
+     */
+    suspend fun searchAi(query: String): AiSearchResult {
+        // Typing must never kick off a 126 MB download on whatever connection is at hand; the
+        // settings screen is where the user opts into that.
+        if (textEncoder.needsDownload()) return AiSearchResult(emptyList(), needsModel = true)
+        return try {
+            val stored = embeddings.all()
+            if (stored.isEmpty()) return AiSearchResult(emptyList())
+            // Without a usable query vector every score would be identical noise.
+            val queryEmbedding = textEncoder.encode(query) ?: return AiSearchResult(emptyList())
             val songs = allSongs
-            _regularSearchResults.value = withContext(Dispatchers.Default) {
-                songs.filter {
-                    it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
-                }.take(20)
-            }
-
-            // Typing must never kick off a 126 MB download on whatever connection is at hand; the
-            // settings screen is where the user opts into that.
-            if (textEncoder.needsDownload()) {
-                _aiSearchNeedsModel.value = true
-                _aiSearchResults.value = emptyList()
-                return@launch
-            }
-            _aiSearchNeedsModel.value = false
-
-            _isAiSearching.value = true
-            try {
-                val stored = embeddings.all()
-                if (stored.isEmpty()) {
-                    _aiSearchResults.value = emptyList()
-                    return@launch
+            val matches = withContext(Dispatchers.Default) {
+                val scored = songs.mapNotNull { song ->
+                    val embedding = stored[song.id] ?: return@mapNotNull null
+                    song to cosineSimilarity(queryEmbedding, embedding)
                 }
-                val queryEmbedding = textEncoder.encode(query)
-                if (queryEmbedding == null) {
-                    // Without a usable query vector every score would be identical noise.
-                    _aiSearchResults.value = emptyList()
-                    return@launch
-                }
+                if (scored.isEmpty()) return@withContext emptyList()
 
-                _aiSearchResults.value = withContext(Dispatchers.Default) {
-                    val scored = songs.mapNotNull { song ->
-                        val embedding = stored[song.id] ?: return@mapNotNull null
-                        song to cosineSimilarity(queryEmbedding, embedding)
-                    }
-                    if (scored.isEmpty()) return@withContext emptyList()
+                // Where the bulk of the library sits for this particular query. A fixed
+                // threshold cannot work: the absolute cosine depends on the wording and on what
+                // is in the library, so what marks a match is standing out from the rest.
+                val mean = scored.sumOf { it.second.toDouble() } / scored.size
+                val deviation = kotlin.math.sqrt(
+                    scored.sumOf { (it.second - mean) * (it.second - mean) } / scored.size
+                )
+                val cut = maxOf(mean + deviation, MIN_SEARCH_SIMILARITY.toDouble())
 
-                    // Where the bulk of the library sits for this particular query. A fixed
-                    // threshold cannot work: the absolute cosine depends on the wording and on what
-                    // is in the library, so what marks a match is standing out from the rest.
-                    val mean = scored.sumOf { it.second.toDouble() } / scored.size
-                    val deviation = kotlin.math.sqrt(
-                        scored.sumOf { (it.second - mean) * (it.second - mean) } / scored.size
-                    )
-                    val cut = maxOf(mean + deviation, MIN_SEARCH_SIMILARITY.toDouble())
-
-                    scored
-                        .filter { it.second >= cut }
-                        .sortedByDescending { it.second }
-                        .take(50)
-                        .map { ScoredSong(it.first, mapSimilarityToDisplay(it.second)) }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "AI Search failed", e)
-            } finally {
-                _isAiSearching.value = false
+                scored
+                    .filter { it.second >= cut }
+                    .sortedByDescending { it.second }
+                    .take(50)
+                    .map { ScoredSong(it.first, mapSimilarityToDisplay(it.second)) }
             }
+            AiSearchResult(matches)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "AI Search failed", e)
+            AiSearchResult(emptyList())
         }
     }
 
@@ -1275,7 +1247,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TAG = "MusicViewModel"
         const val PROGRESS_INTERVAL_MS = 500L
-        const val SEARCH_DEBOUNCE_MS = 300L
+        const val GLOBAL_PLAIN_RESULTS = 20
         const val PERSIST_DEBOUNCE_MS = 400L
         const val SCAN_REFRESH_EVERY = 5
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"

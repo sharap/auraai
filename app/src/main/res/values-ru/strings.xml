@@ -30,6 +30,11 @@
     <string name="search_hint">AI Поиск (напр. \'chill piano\')</string>
     <string name="search_results">Результаты поиска</string>
     <string name="ai_recommendations">AI Рекомендации</string>
+    <string name="search_in_album">Поиск в этом списке</string>
+    <string name="search_in_hint">Поиск в «%1$s»</string>
+    <string name="search_results_in">В «%1$s»</string>
+    <string name="ai_recommendations_library">AI по всей библиотеке</string>
+    <string name="search_nothing_found">По названию и исполнителю ничего не найдено.</string>
     <string name="clear_search">Очистить</string>
 
     <!-- Настройки -->
@@ -124,6 +129,7 @@
     <string name="smart_albums_eps_tighter">Строже</string>
     <string name="smart_albums_eps_wider">Свободнее</string>
     <string name="smart_albums_eps_reset">Авто</string>
+    <string name="now_playing_album">Сейчас играет</string>
     <string name="smart_albums_refresh">Пересобрать умные альбомы</string>
     <string name="smart_albums_building">Группирую треки по звучанию…</string>
     <string name="smart_albums_hint">Проанализируйте треки с помощью ИИ, чтобы собрать их в альбомы по звучанию.</string>

@@ -32,108 +32,41 @@ fun FolderListScreen(
     val currentSong by viewModel.currentSong.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
     val scanCounts by viewModel.folderScanCounts.collectAsState()
-    val aiSearchResults by viewModel.aiSearchResults.collectAsState()
-    val regularSearchResults by viewModel.regularSearchResults.collectAsState()
-    val isAiSearching by viewModel.isAiSearching.collectAsState()
-    val aiSearchNeedsModel by viewModel.aiSearchNeedsModel.collectAsState()
     val activeFolderName = currentSong?.folderName
     val currentSongId = currentSong?.id
 
-    var searchQuery by remember { mutableStateOf("") }
+    val search = rememberSongSearch(viewModel)
     var selectedFolderForMenu by remember { mutableStateOf<Folder?>(null) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = {
-                searchQuery = it
-                viewModel.aiSearch(it)
-            },
+        SongSearchField(
+            state = search,
+            placeholder = stringResource(id = R.string.search_hint),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            placeholder = { Text(stringResource(id = R.string.search_hint)) },
-            leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
-            trailingIcon = {
-                if (isAiSearching) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = {
-                        searchQuery = ""
-                        viewModel.aiSearch("")
-                    }) {
-                        Icon(Icons.Default.Clear, contentDescription = stringResource(id = R.string.clear_search))
-                    }
-                }
-            },
-            singleLine = true,
-            shape = MaterialTheme.shapes.medium
+                .padding(16.dp)
         )
 
         Box(modifier = Modifier.weight(1f)) {
-            val results = aiSearchResults
-            val regResults = regularSearchResults
-
-            if (results != null || regResults != null) {
+            if (search.isActive) {
+                val plainTitle = stringResource(id = R.string.search_results)
+                val aiTitle = stringResource(id = R.string.ai_recommendations)
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp)
                 ) {
-                    if (!regResults.isNullOrEmpty()) {
-                        item(key = "header_plain") {
-                            Text(
-                                text = stringResource(id = R.string.search_results),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
-                        items(regResults, key = { "plain_${it.id}" }) { song ->
-                            SongItem(
-                                song = song,
-                                isActive = song.id == currentSongId,
-                                isScanned = song.id in scannedIds,
-                                onClick = { viewModel.playSong(song, regResults) },
-                                onLongClick = { }
-                            )
-                        }
-                    }
-
-                    if (aiSearchNeedsModel) {
-                        item(key = "ai_needs_model") {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = stringResource(id = R.string.ai_search_needs_model),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = LocalMutedOnBackground.current
-                            )
-                        }
-                    }
-
-                    if (!results.isNullOrEmpty()) {
-                        item(key = "header_ai") {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = stringResource(id = R.string.ai_recommendations),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
-                        items(results, key = { "ai_${it.song.id}" }) { scoredSong ->
-                            SongItem(
-                                song = scoredSong.song,
-                                isActive = scoredSong.song.id == currentSongId,
-                                isScanned = true,
-                                score = scoredSong.score,
-                                onClick = { viewModel.playSong(scoredSong.song, results.map { it.song }) },
-                                onLongClick = { }
-                            )
-                        }
-                    }
+                    songSearchResults(
+                        state = search,
+                        plainTitle = plainTitle,
+                        aiTitle = aiTitle,
+                        currentSongId = currentSongId,
+                        scannedIds = scannedIds,
+                        onPlayPlain = { song, list -> viewModel.playSong(song, list) },
+                        onPlayAi = { song, list -> viewModel.playSong(song, list) }
+                    )
                 }
             } else {
                 LazyColumn(

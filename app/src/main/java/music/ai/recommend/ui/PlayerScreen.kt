@@ -1,6 +1,7 @@
 package music.ai.recommend.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -212,14 +213,18 @@ fun PlayerMainContent(
         Spacer(modifier = Modifier.height(48.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = currentSong.title,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
-            )
+            // Scrolls only when the title does not fit; keyed so a new track starts from the left.
+            key(currentSong.id) {
+                Text(
+                    text = currentSong.title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .basicMarquee(iterations = Int.MAX_VALUE)
+                )
+            }
             if (isScanned) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Icon(

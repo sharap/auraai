@@ -19,6 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,9 +48,14 @@ fun SongListScreen(
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
+    val search = rememberSongSearch(viewModel, scope = songs)
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
     val currentSongId = currentSong?.id
     LaunchedEffect(currentSongId) {
-        if (currentSongId == null) return@LaunchedEffect
+        // While searching the list shows results, and the index would point at the wrong row.
+        if (currentSongId == null || search.isActive) return@LaunchedEffect
         val index = songs.indexOfFirst { it.id == currentSongId }
         if (index >= 0) listState.animateScrollToItem(index)
     }
@@ -67,10 +75,34 @@ fun SongListScreen(
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = {
+                if (searchOpen) search.clear()
+                searchOpen = !searchOpen
+            }) {
+                Icon(
+                    imageVector = if (searchOpen) Icons.Default.SearchOff else Icons.Default.Search,
+                    contentDescription = stringResource(id = R.string.search_in_album)
+                )
+            }
         }
 
+        if (searchOpen) {
+            SongSearchField(
+                state = search,
+                placeholder = stringResource(id = R.string.search_in_hint, title),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .focusRequester(focusRequester)
+            )
+            LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        }
+
+        val searchInTitle = stringResource(id = R.string.search_results_in, title)
+        val aiLibraryTitle = stringResource(id = R.string.ai_recommendations_library)
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -78,16 +110,29 @@ fun SongListScreen(
                 .fillMaxWidth(),
             contentPadding = PaddingValues(16.dp)
         ) {
-            items(songs, key = { it.id }) { song ->
-                SongItem(
-                    song = song,
-                    isActive = song.id == currentSongId,
-                    isScanned = song.id in scannedIds,
-                    isFavorite = song.id in favoriteIds,
-                    onToggleFavorite = { viewModel.toggleFavorite(song.id) },
-                    onClick = { viewModel.playSong(song, songs) },
-                    onLongClick = { selectedSongForMenu = song }
+            if (search.isActive) {
+                songSearchResults(
+                    state = search,
+                    plainTitle = searchInTitle,
+                    aiTitle = aiLibraryTitle,
+                    currentSongId = currentSongId,
+                    scannedIds = scannedIds,
+                    // A track found here plays on through the album it was found in.
+                    onPlayPlain = { song, _ -> viewModel.playSong(song, songs) },
+                    onPlayAi = { song, list -> viewModel.playSong(song, list) }
                 )
+            } else {
+                items(songs, key = { it.id }) { song ->
+                    SongItem(
+                        song = song,
+                        isActive = song.id == currentSongId,
+                        isScanned = song.id in scannedIds,
+                        isFavorite = song.id in favoriteIds,
+                        onToggleFavorite = { viewModel.toggleFavorite(song.id) },
+                        onClick = { viewModel.playSong(song, songs) },
+                        onLongClick = { selectedSongForMenu = song }
+                    )
+                }
             }
         }
 
