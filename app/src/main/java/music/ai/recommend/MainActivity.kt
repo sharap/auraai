@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                 val folders by viewModel.folders.collectAsState()
                 val playlists by viewModel.playlists.collectAsState()
                 val smartAlbums by viewModel.smartAlbums.collectAsState()
+                val dailyMix by viewModel.dailyMix.collectAsState()
 
                 val folderNavController = rememberNavController()
                 val playlistNavController = rememberNavController()
@@ -187,7 +188,16 @@ class MainActivity : ComponentActivity() {
                                                     },
                                                     onSmartAlbumClick = { id ->
                                                         playlistNavController.navigate("smart_album/$id")
-                                                    }
+                                                    },
+                                                    onDailyMixClick = { playlistNavController.navigate("daily_mix") }
+                                                )
+                                            }
+                                            composable("daily_mix") {
+                                                SongListScreen(
+                                                    viewModel = viewModel,
+                                                    title = stringResource(id = R.string.daily_mix),
+                                                    songs = dailyMix,
+                                                    onBack = { playlistNavController.popBackStack() }
                                                 )
                                             }
                                             composable(

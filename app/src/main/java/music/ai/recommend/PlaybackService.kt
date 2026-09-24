@@ -8,6 +8,8 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -16,6 +18,12 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import music.ai.recommend.history.PlayHistory
+import music.ai.recommend.history.PlayTracker
 
 class PlaybackService : MediaSessionService() {
 
@@ -38,6 +46,12 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private var equalizer: Equalizer? = null
 
+    // Listens are recorded here rather than in the ViewModel: playback outlives the UI, and most
+    // listening happens with the screen off, where no ViewModel is around to see it.
+    private val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val history by lazy { PlayHistory.getInstance(this) }
+    private val tracker = PlayTracker { event -> historyScope.launch { history.record(event) } }
+
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -46,6 +60,9 @@ class PlaybackService : MediaSessionService() {
 
         // Applied from preferences at startup rather than fixed at build time, so both can be
         // switched from settings without restarting playback.
+        exoPlayer.addListener(historyListener(exoPlayer))
+        historyScope.launch { history.prune() }
+
         applyPauseOnDisconnect(exoPlayer, preferences().getBoolean(KEY_PAUSE_ON_DISCONNECT, true))
         applyAudioFocus(exoPlayer, preferences().getBoolean(KEY_HANDLE_AUDIO_FOCUS, true))
 
@@ -191,11 +208,57 @@ class PlaybackService : MediaSessionService() {
         preferences().edit().putBoolean(KEY_EQ_ENABLED, enabled).apply()
     }
 
+    /**
+     * Feeds the tracker. Media3 reports the position of the track being left in
+     * [Player.Listener.onPositionDiscontinuity], which fires before the transition callback, so
+     * the furthest position is known by the time the track is closed.
+     */
+    private fun historyListener(exoPlayer: ExoPlayer) = object : Player.Listener {
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            tracker.progress(oldPosition.positionMs)
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val songId = mediaItem?.mediaId?.toLongOrNull()
+            if (songId == null) {
+                tracker.finished(System.currentTimeMillis())
+                return
+            }
+            tracker.started(songId, exoPlayer.duration.orZero(), System.currentTimeMillis())
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            when (playbackState) {
+                Player.STATE_READY -> tracker.progress(exoPlayer.currentPosition, exoPlayer.duration.orZero())
+                // Reaching the end counts as the whole track even if the last position reported
+                // was a second short of it.
+                Player.STATE_ENDED -> {
+                    tracker.progress(exoPlayer.duration.orZero())
+                    tracker.finished(System.currentTimeMillis())
+                }
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // A pause may be the end of the listen; recording the position now means nothing is
+            // lost if the service is killed while paused.
+            tracker.progress(exoPlayer.currentPosition, exoPlayer.duration.orZero())
+        }
+    }
+
+    private fun Long.orZero(): Long = if (this == C.TIME_UNSET || this < 0) 0 else this
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return mediaSession
     }
 
     override fun onDestroy() {
+        player?.let { tracker.progress(it.currentPosition, it.duration.orZero()) }
+        tracker.finished(System.currentTimeMillis())
         equalizer?.release()
         equalizer = null
         mediaSession?.run {

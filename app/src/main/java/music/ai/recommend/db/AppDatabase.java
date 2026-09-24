@@ -9,9 +9,11 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {EmbeddingEntity.class}, version = 2, exportSchema = false)
+@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 4, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
+
+    public abstract PlayEventDao playEventDao();
 
     private static volatile AppDatabase INSTANCE;
 
@@ -29,13 +31,37 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /** Listening history, which the daily playlist is built from. */
+    static final Migration MIGRATION_2_3 = new Migration(2, 3) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS play_events ("
+                    + "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"
+                    + " songId INTEGER NOT NULL, playedAt INTEGER NOT NULL,"
+                    + " playedMs INTEGER NOT NULL, durationMs INTEGER NOT NULL)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_play_events_playedAt ON play_events (playedAt)");
+        }
+    };
+
+    /**
+     * Repairs databases created by the build whose {@code play_events} index was missing from the
+     * entity. Nothing changes in the tables — the migration exists so that Room re-validates the
+     * schema and stores the corrected identity hash, instead of refusing to open the file.
+     */
+    static final Migration MIGRATION_3_4 = new Migration(3, 4) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_play_events_playedAt ON play_events (playedAt)");
+        }
+    };
+
     public static AppDatabase getDatabase(final Context context) {
         if (INSTANCE == null) {
             synchronized (AppDatabase.class) {
                 if (INSTANCE == null) {
                     INSTANCE = Room.databaseBuilder(context.getApplicationContext(),
                                     AppDatabase.class, "music_database")
-                            .addMigrations(MIGRATION_1_2)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                             .build();
                 }
             }

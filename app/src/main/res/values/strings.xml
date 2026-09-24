@@ -129,6 +129,10 @@
     <string name="smart_albums_eps_tighter">Tighter</string>
     <string name="smart_albums_eps_wider">Looser</string>
     <string name="smart_albums_eps_reset">Auto</string>
+    <string name="daily_mix">Daily mix</string>
+    <string name="daily_mix_building">Picking today\'s tracks…</string>
+    <string name="daily_mix_rebuild">Build another one for today</string>
+    <string name="play">Play</string>
     <string name="now_playing_album">Playing now</string>
     <string name="smart_albums_refresh">Rebuild smart albums</string>
     <string name="smart_albums_building">Grouping tracks by sound…</string>

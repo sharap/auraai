@@ -10,7 +10,9 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -27,16 +29,20 @@ import music.ai.recommend.MusicViewModel
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
 import music.ai.recommend.ai.SmartAlbum
+import music.ai.recommend.model.Song
 
 @Composable
 fun PlaylistListScreen(
     viewModel: MusicViewModel,
     onPlaylistClick: (String) -> Unit,
-    onSmartAlbumClick: (String) -> Unit
+    onSmartAlbumClick: (String) -> Unit,
+    onDailyMixClick: () -> Unit
 ) {
     val playlists by viewModel.playlists.collectAsState()
     val scanCounts by viewModel.playlistScanCounts.collectAsState()
     val smartAlbums by viewModel.smartAlbums.collectAsState()
+    val dailyMix by viewModel.dailyMix.collectAsState()
+    val dailyMixBuilding by viewModel.dailyMixBuilding.collectAsState()
     val building by viewModel.smartAlbumsBuilding.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
     val currentSong by viewModel.currentSong.collectAsState()
@@ -50,6 +56,19 @@ fun PlaylistListScreen(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp)
     ) {
+        if (dailyMix.isNotEmpty() || dailyMixBuilding) {
+            item(key = "daily_mix") {
+                DailyMixCard(
+                    songs = dailyMix,
+                    building = dailyMixBuilding,
+                    containsCurrent = currentSongId != null && dailyMix.any { it.id == currentSongId },
+                    onOpen = onDailyMixClick,
+                    onPlay = { viewModel.playDailyMix() },
+                    onRebuild = { viewModel.refreshDailyMix(rebuild = true) }
+                )
+            }
+        }
+
         // Nothing to group until some tracks are analysed; the section stays out of the way.
         if (smartAlbums.isNotEmpty() || building || scannedIds.isNotEmpty()) {
             item(key = "smart_header") {
@@ -104,6 +123,82 @@ fun PlaylistListScreen(
                 onClick = { onPlaylistClick(playlist.name) },
                 onDelete = { viewModel.deletePlaylist(playlist) }
             )
+        }
+    }
+}
+
+/**
+ * The playlist of the day. It gets a card rather than a row because it is the one thing on this
+ * screen the user did not make themselves, and it changes every day.
+ */
+@Composable
+private fun DailyMixCard(
+    songs: List<Song>,
+    building: Boolean,
+    containsCurrent: Boolean,
+    onOpen: () -> Unit,
+    onPlay: () -> Unit,
+    onRebuild: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clickable(onClick = onOpen),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Today,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(id = R.string.daily_mix),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    if (containsCurrent) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = stringResource(id = R.string.now_playing_album),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (building && songs.isEmpty()) stringResource(id = R.string.daily_mix_building)
+                    else stringResource(id = R.string.songs_count, songs.size),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnBackground.current
+                )
+            }
+            if (building) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onRebuild) {
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(id = R.string.daily_mix_rebuild))
+                }
+            }
+            IconButton(onClick = onPlay, enabled = songs.isNotEmpty()) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = stringResource(id = R.string.play),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }

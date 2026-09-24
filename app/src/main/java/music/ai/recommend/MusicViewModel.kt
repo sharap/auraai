@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
 import music.ai.recommend.ai.AiScanState
 import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ClapTextEncoder
+import music.ai.recommend.ai.DailyMixBuilder
 import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.ai.ModelProgress
@@ -45,6 +46,7 @@ import music.ai.recommend.ai.ScanStage
 import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.SmartAlbumBuilder
 import music.ai.recommend.ai.SmartAlbumClustering
+import music.ai.recommend.history.PlayHistory
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
 import music.ai.recommend.scanner.MusicScanner
@@ -95,6 +97,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val embeddings = EmbeddingStore.getInstance(application)
     private val textEncoder by lazy { ClapTextEncoder(modelRepository) }
     private val smartAlbumBuilder by lazy { SmartAlbumBuilder(application, modelRepository, embeddings, textEncoder) }
+    private val playHistory = PlayHistory.getInstance(application)
+    private val dailyMixBuilder by lazy { DailyMixBuilder(application, embeddings, playHistory) }
     private val gson = GsonBuilder()
         .registerTypeAdapter(Uri::class.java, UriAdapter())
         .create()
@@ -141,6 +145,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _handleAudioFocus =
         MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, true))
     val handleAudioFocus: StateFlow<Boolean> = _handleAudioFocus.asStateFlow()
+
+    private val _dailyMix = MutableStateFlow<List<Song>>(emptyList())
+    /** The playlist of the day: fixed for the day, rebuilt at midnight. */
+    val dailyMix: StateFlow<List<Song>> = _dailyMix.asStateFlow()
+
+    private val _dailyMixBuilding = MutableStateFlow(false)
+    val dailyMixBuilding: StateFlow<Boolean> = _dailyMixBuilding.asStateFlow()
 
     private val _smartAlbums = MutableStateFlow<List<SmartAlbum>>(emptyList())
     val smartAlbums: StateFlow<List<SmartAlbum>> = _smartAlbums.asStateFlow()
@@ -236,6 +247,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var saveEqJob: Job? = null
     private var downloadJob: Job? = null
     private var smartAlbumsJob: Job? = null
+    private var dailyMixJob: Job? = null
     private var savedPlaylists: List<Playlist> = emptyList()
     private var playlistSongs: List<Song> = emptyList()
     private var allSongs: List<Song> = emptyList()
@@ -340,6 +352,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
                 rebuildPlaylists() // Favorites is derived from allSongs, which just changed.
                 refreshSmartAlbums()
+                refreshDailyMix()
                 controller?.let { syncCurrentMediaItem(it) }
             } finally {
                 _isScanning.value = false
@@ -997,6 +1010,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     refreshScannedIds()
                     refreshModelStatus()
                     refreshSmartAlbums()
+                    refreshDailyMix()
                 }
             }
         }
@@ -1096,6 +1110,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _smartAlbumsEpsScale.value = snapped
         prefs.edit().putFloat(KEY_SMART_ALBUMS_EPS_SCALE, snapped).apply()
         refreshSmartAlbums()
+    }
+
+    /**
+     * Rebuilds the playlist of the day when it is missing or stale, and schedules the next rebuild
+     * for midnight so the app does not have to be restarted to see a new one.
+     *
+     * @param rebuild asks for a different playlist for today, on the user's request.
+     */
+    fun refreshDailyMix(rebuild: Boolean = false) {
+        val library = allSongs
+        if (library.isEmpty()) return
+        dailyMixJob?.cancel()
+        dailyMixJob = viewModelScope.launch {
+            _dailyMixBuilding.value = true
+            try {
+                val playlist = dailyMixBuilder.playlist(library, _favoriteSongIds.value, rebuild)
+                _dailyMix.value = playlist.songs
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to build the daily mix", e)
+            } finally {
+                if (dailyMixJob === coroutineContext[Job]) _dailyMixBuilding.value = false
+            }
+            delay(dailyMixBuilder.millisUntilNextDay())
+            refreshDailyMix()
+        }
+    }
+
+    fun playDailyMix() {
+        val mix = _dailyMix.value
+        if (mix.isNotEmpty()) playSong(mix.first(), mix)
     }
 
     fun stopAiScan() {
