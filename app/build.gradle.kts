@@ -31,6 +31,29 @@ val signReleaseWithDebugKey: Boolean = providers.gradleProperty("auraai.signRele
 val devAbis: List<String> = providers.gradleProperty("auraai.abi").orNull
     ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
 
+// One APK per ABI instead of one that carries all four, plus a universal APK for the cases where
+// the target's architecture is unknown.
+//
+// Splits are configured for the whole project rather than per build type, so they are keyed off the
+// requested tasks: a debug build keeps producing the single APK that `adb install` and the
+// instrumentation tests expect, and only release builds are split. Off, too, when -Pauraai.abi has
+// already narrowed the build to one ABI, since there would be nothing left to split.
+val buildingRelease: Boolean = gradle.startParameter.taskNames.any { it.contains("elease") }
+val abiSplits: Boolean = providers.gradleProperty("auraai.abiSplits")
+    .getOrElse("true").toBoolean() && devAbis.isEmpty() && buildingRelease
+
+/**
+ * Per-ABI offsets for the version code. Every APK of one release must carry a different version
+ * code, and a 64-bit APK must outrank the 32-bit one it can replace, so the order here is the
+ * order of preference — a device that can run several takes the highest.
+ */
+val abiVersionOffsets = mapOf(
+    "armeabi-v7a" to 1,
+    "x86" to 2,
+    "x86_64" to 3,
+    "arm64-v8a" to 4
+)
+
 android {
     namespace = "music.ai.recommend"
     compileSdk {
@@ -51,6 +74,17 @@ android {
 
         if (devAbis.isNotEmpty()) {
             ndk { abiFilters += devAbis }
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = abiSplits
+            reset()
+            include(*abiVersionOffsets.keys.toTypedArray())
+            // Kept so there is still one APK that installs anywhere, which is what side-loading
+            // and "send it to someone" need.
+            isUniversalApk = true
         }
     }
 
@@ -130,3 +164,17 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
 
+// The version code of a split APK has to be unique, and the universal one has to stay below the
+// per-ABI APKs so that a device capable of both prefers its own architecture.
+androidComponents {
+    onVariants { variant ->
+        for (output in variant.outputs) {
+            val abi = output.filters
+                .find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                ?.identifier
+            val offset = abi?.let { abiVersionOffsets[it] } ?: 0
+            val base = output.versionCode.orNull ?: 1
+            output.versionCode.set(base * 10 + offset)
+        }
+    }
+}
