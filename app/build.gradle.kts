@@ -54,6 +54,26 @@ val abiVersionOffsets = mapOf(
     "arm64-v8a" to 4
 )
 
+// Release signing. The keystore and its passwords live in keystore.properties, which is outside
+// version control: a key that has been published is no longer a key, and every future update of
+// a published app has to be signed with the same one.
+//
+// Parsed by hand rather than with java.util.Properties: that format treats a backslash as an
+// escape, so a password containing one is silently read as something else, and the build fails
+// with "keystore password was incorrect" while the file plainly holds the right password.
+// Values are trimmed, so a password must not begin or end with a space.
+val keystoreProperties: Map<String, String> = rootProject.file("keystore.properties")
+    .takeIf { it.exists() }
+    ?.readLines()
+    ?.filterNot { it.isBlank() || it.trimStart().startsWith("#") }
+    ?.mapNotNull { line ->
+        val separator = line.indexOf('=')
+        if (separator <= 0) null else line.take(separator).trim() to line.substring(separator + 1).trim()
+    }
+    ?.toMap()
+    .orEmpty()
+val hasKeystore = keystoreProperties["storeFile"] != null
+
 android {
     namespace = "music.ai.recommend"
     compileSdk {
@@ -88,6 +108,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasKeystore) {
+            create("release") {
+                storeFile = file(keystoreProperties.getValue("storeFile"))
+                storePassword = keystoreProperties["storePassword"]
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
         release {
             optimization {
@@ -98,8 +129,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (signReleaseWithDebugKey) {
-                signingConfig = signingConfigs.getByName("debug")
+            signingConfig = when {
+                // A real key wins over the development convenience, so a machine that has one
+                // never accidentally publishes a debug-signed build.
+                hasKeystore -> signingConfigs.getByName("release")
+                signReleaseWithDebugKey -> signingConfigs.getByName("debug")
+                else -> null
             }
         }
     }
@@ -121,7 +156,7 @@ android {
     }
 }
 
-if (signReleaseWithDebugKey) {
+if (signReleaseWithDebugKey && !hasKeystore) {
     // Said out loud at package time rather than at configuration time, so it is not swallowed by a
     // configuration cache hit.
     tasks.matching { it.name == "packageRelease" }.configureEach {

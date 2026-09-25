@@ -26,3 +26,9 @@ app/src/main/assets/*.onnx
 
 # JVM crash dumps.
 hs_err_pid*.log
+
+# Signing key and its passwords. Never commit these: the key cannot be replaced once published,
+# because Android only accepts updates signed with the same one.
+keystore.properties
+*.jks
+*.keystore
