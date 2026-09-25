@@ -20,6 +20,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
+import music.ai.recommend.BuildConfig
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ModelAsset
@@ -165,6 +168,12 @@ fun SettingsScreen(viewModel: MusicViewModel) {
             EqualizerControl(viewModel)
         }
 
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionTitle(stringResource(id = R.string.about))
+            AboutCard()
+        }
+
         // Keeps the last card clear of the navigation bar.
         item { Spacer(modifier = Modifier.height(100.dp)) }
     }
@@ -292,6 +301,104 @@ private fun SwitchRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * Where the app says what it is and where its source lives.
+ *
+ * The licence requires that whoever receives a build can get the source for that same build, and a
+ * link inside the app is the most direct way to satisfy that — it travels with the APK, however the
+ * APK was passed along.
+ */
+@Composable
+private fun AboutCard() {
+    val uriHandler = LocalUriHandler.current
+    val sourceUrl = stringResource(id = R.string.about_source_url)
+    val licenceUrl = stringResource(id = R.string.about_license_url)
+    val thirdPartyUrl = stringResource(id = R.string.about_third_party_url)
+
+    SettingsCard {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(id = R.string.app_name),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = stringResource(
+                    id = R.string.about_version,
+                    BuildConfig.VERSION_NAME,
+                    BuildConfig.VERSION_CODE
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnSurface.current
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(id = R.string.about_privacy),
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnSurface.current
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            AboutLink(
+                title = stringResource(id = R.string.about_source),
+                hint = sourceUrl,
+                icon = Icons.Default.Code,
+                onClick = { uriHandler.openUri(sourceUrl) }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            AboutLink(
+                title = stringResource(id = R.string.about_license),
+                hint = stringResource(id = R.string.about_license_hint),
+                icon = Icons.Default.Policy,
+                onClick = { uriHandler.openUri(licenceUrl) }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            AboutLink(
+                title = stringResource(id = R.string.about_third_party),
+                hint = stringResource(id = R.string.about_third_party_hint),
+                icon = Icons.Default.Inventory2,
+                onClick = { uriHandler.openUri(thirdPartyUrl) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutLink(title: String, hint: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnSurface.current
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.OpenInNew,
+            contentDescription = null,
+            tint = LocalMutedOnSurface.current,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 

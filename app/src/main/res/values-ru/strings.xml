@@ -173,4 +173,17 @@
     <string name="smart_label_gothic">Готика</string>
     <string name="smart_label_synth_pop">Синти-поп</string>
     <string name="smart_label_lofi">Лоу-фай</string>
+
+    <!-- About -->
+    <string name="about">О программе</string>
+    <string name="about_version">Версия %1$s (сборка %2$d)</string>
+    <string name="about_privacy">Всё работает на этом устройстве. Ни учётной записи, ни сервера, ни телеметрии: анализ библиотеки, история прослушиваний и собранные из них плейлисты не покидают телефон.</string>
+    <string name="about_source">Исходный код</string>
+    <string name="about_source_url" translatable="false">https://github.com/sharap/auraai</string>
+    <string name="about_license">Свободная программа, GPL-3.0</string>
+    <string name="about_license_hint">Можно пользоваться, изучать, распространять и изменять; производные работы остаются свободными на тех же условиях.</string>
+    <string name="about_license_url" translatable="false">https://www.gnu.org/licenses/gpl-3.0.html</string>
+    <string name="about_third_party">Сторонние компоненты</string>
+    <string name="about_third_party_hint">Веса CLAP — Apache-2.0, ONNX Runtime — MIT и другие</string>
+    <string name="about_third_party_url" translatable="false">https://github.com/sharap/auraai/blob/main/THIRD-PARTY.md</string>
 </resources>
