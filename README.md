@@ -2,6 +2,8 @@
 
 An offline music player for Android that understands how its library *sounds*.
 
+<https://github.com/sharap/auraai>
+
 Everything runs on the device. There is no account, no server and no telemetry: the library is
 analysed locally with a CLAP neural network, and the embeddings, the listening history and every
 playlist built from them stay in the app's own storage.
@@ -74,6 +76,9 @@ FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
 
 These terms cover the whole project, including the commits made before this file was added: the
 copyright in all of it is held by the author, and this is the licence under which it is released.
+
+The source for every released build is at <https://github.com/sharap/auraai>, which is how anyone
+who receives a binary gets the corresponding source, as the licence requires.
 
 [THIRD-PARTY.md](THIRD-PARTY.md) lists the libraries, model weights and data files this project
 builds on, and the terms they come under.
