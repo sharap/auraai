@@ -13,3 +13,16 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# CLAP weights, ~390 MB. They were committed once and made the repository 470 MB; the app
+# downloads them from Hugging Face on demand and checks them by sha256, and a build that wants
+# them bundled reads them straight from here.
+app/src/main/assets/*.onnx
+
+# IDE state that describes this machine rather than the project.
+/.idea/artifacts/
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
+
+# JVM crash dumps.
+hs_err_pid*.log
