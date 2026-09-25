@@ -6,6 +6,8 @@
 -keep class music.ai.recommend.EqPreset { *; }
 -keep class music.ai.recommend.ai.SmartAlbumBuilder$Stored { *; }
 -keep class music.ai.recommend.ai.SmartAlbumBuilder$StoredAlbum { *; }
+-keep class music.ai.recommend.ai.DailyMixBuilder$Stored { *; }
+-keep class music.ai.recommend.ai.DailyMixBuilder$Day { *; }
 
 # Gson needs generic signatures and the TypeToken machinery intact.
 -keepattributes Signature, InnerClasses, EnclosingMethod

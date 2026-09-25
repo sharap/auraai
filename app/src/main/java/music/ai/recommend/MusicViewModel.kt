@@ -1127,6 +1127,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val playlist = dailyMixBuilder.playlist(library, _favoriteSongIds.value, rebuild)
                 _dailyMix.value = playlist.songs
+                if (playlist.songs.isEmpty()) Log.w(TAG, "daily mix came back empty for ${library.size} songs")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

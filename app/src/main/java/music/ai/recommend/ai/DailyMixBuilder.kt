@@ -79,11 +79,13 @@ class DailyMixBuilder(
             )
         }
 
+        // Whatever was stored last goes into the recent days — including a finished day, which is
+        // the whole point of remembering them: yesterday's playlist must not come back today.
         val previousToday = stored?.takeIf { it.day == today }
         val attempt = if (previousToday != null) previousToday.attempt + 1 else 0
         val recent = buildList {
-            if (previousToday != null) add(Day(today, previousToday.ids))
-            addAll(stored?.recent.orEmpty().filter { it.day != today })
+            if (stored != null) add(Day(stored.day, stored.ids))
+            addAll(stored?.recent.orEmpty().filter { it.day != stored?.day })
         }.take(REMEMBERED_DAYS)
 
         val ids = DailyMix.build(
@@ -95,7 +97,10 @@ class DailyMixBuilder(
             now = now
         )
         save(Stored(today, attempt, ids, recent))
-        Log.d(TAG, "daily mix for $today: ${ids.size} of ${tracks.size} analysed tracks")
+        // Logged at info so that an empty playlist can be told from a playlist that was never
+        // built, without attaching a debugger to a release build.
+        Log.i(TAG, "daily mix for $today: ${ids.size} tracks from ${tracks.size} analysed, " +
+            "${recent.size} recent days held back")
         DailyPlaylist(today, ids.mapNotNull { byId[it] })
     }
 
