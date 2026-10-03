@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
+import android.os.Build
 import android.media.MediaFormat
 import android.os.Handler
 import android.os.HandlerThread
@@ -345,7 +346,15 @@ class AiScanner(
                                         inputDone = true
                                         break
                                     }
-                                    val next = extractor.sampleSize
+                                    // Packing several frames into one input buffer needs to know
+                                    // how big the next one is, and that was only exposed in
+                                    // Android 9. Below it, one frame per buffer — slower, but the
+                                    // call does not exist there and would crash the scan.
+                                    val next = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                        extractor.sampleSize
+                                    } else {
+                                        -1
+                                    }
                                     if (next <= 0 || filled + next > buffer.capacity()) break
                                 }
                             }
