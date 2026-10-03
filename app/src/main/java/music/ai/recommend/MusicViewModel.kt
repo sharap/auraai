@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import music.ai.recommend.ai.AiScanState
 import music.ai.recommend.ai.AudioModelVariant
@@ -277,12 +279,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var dailyMixJob: Job? = null
     private var waveJob: Job? = null
     private var waveEventsJob: Job? = null
+    /** Serialises the wave's queue edits: fast skips used to interleave them. */
+    private val waveLock = Mutex()
     private var waveState: WaveState? = null
     private var waveTracks: List<MixTrack> = emptyList()
     private var waveTrackById: Map<Long, MixTrack> = emptyMap()
     private var savedPlaylists: List<Playlist> = emptyList()
     private var playlistSongs: List<Song> = emptyList()
     private var allSongs: List<Song> = emptyList()
+    private var allSongsById: Map<Long, Song> = emptyMap()
 
     init {
         // Two cheap scalar reads; everything else is a SharedPreferences read plus a Gson parse,
@@ -355,6 +360,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (playbackState == Player.STATE_READY) {
                         _duration.value = c.duration
                     }
+                    // A wave has no end; if the queue ran dry anyway, refill it and carry on.
+                    if (playbackState == Player.STATE_ENDED && waveState != null) {
+                        viewModelScope.launch {
+                            refillWave()
+                            controller?.play()
+                        }
+                    }
                 }
 
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -379,6 +391,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val result = withContext(Dispatchers.IO) { scanner.scanMusic(getApplication()) }
                 allSongs = result.flatMap { it.songs }
+                allSongsById = allSongs.associateBy { it.id }
 
                 val allTracksFolder = Folder(getApplication<Application>().getString(R.string.all_tracks), allSongs)
                 _folders.value = listOf(allTracksFolder) + result
@@ -468,6 +481,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applySmartShuffle(currentSong: Song) {
+        // The wave orders its own queue by the same similarity; the two reordering each other's
+        // tracks produced a queue nobody could predict.
+        if (waveState != null) return
         val c = controller ?: return
         val currentIndex = c.currentMediaItemIndex
         val mediaItemCount = c.mediaItemCount
@@ -501,12 +517,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             val currentIdx = c.currentMediaItemIndex
                             if (j > currentIdx && j != currentIdx + 1) {
                                 c.moveMediaItem(j, currentIdx + 1)
-                                val q = _queue.value.toMutableList()
-                                if (j < q.size && (currentIdx + 1) < q.size) {
-                                    q.add(currentIdx + 1, q.removeAt(j))
-                                    _queue.value = q
-                                    playlistSongs = q
-                                }
+                                syncQueueFromController()
                             }
                             break
                         }
@@ -530,32 +541,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeFromQueue(index: Int) {
         controller?.removeMediaItem(index)
-        val currentList = _queue.value.toMutableList()
-        if (index in currentList.indices) {
-            currentList.removeAt(index)
-            _queue.value = currentList
-            playlistSongs = currentList
-            saveCurrentQueue()
-        }
+        syncQueueFromController()
+        saveCurrentQueue()
     }
 
     fun moveQueueItem(from: Int, to: Int) {
         controller?.moveMediaItem(from, to)
-        val currentList = _queue.value.toMutableList()
-        if (from in currentList.indices && to in currentList.indices) {
-            currentList.add(to, currentList.removeAt(from))
-            _queue.value = currentList
-            playlistSongs = currentList
-            saveCurrentQueue()
-        }
+        syncQueueFromController()
+        saveCurrentQueue()
     }
 
     fun addToEndOfQueue(song: Song) {
         controller?.addMediaItem(createMediaItem(song))
-        val currentList = _queue.value.toMutableList()
-        currentList.add(song)
-        _queue.value = currentList
-        playlistSongs = currentList
+        syncQueueFromController()
         saveCurrentQueue()
     }
 
@@ -563,11 +561,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val currentIndex = controller?.currentMediaItemIndex ?: -1
         val nextIndex = if (currentIndex == -1) 0 else currentIndex + 1
         controller?.addMediaItem(nextIndex, createMediaItem(song))
-
-        val currentList = _queue.value.toMutableList()
-        if (nextIndex <= currentList.size) currentList.add(nextIndex, song) else currentList.add(song)
-        _queue.value = currentList
-        playlistSongs = currentList
+        syncQueueFromController()
         saveCurrentQueue()
     }
 
@@ -575,10 +569,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun addAllToEndOfQueue(songs: List<Song>) {
         if (songs.isEmpty()) return
         controller?.addMediaItems(songs.map { createMediaItem(it) })
-        val currentList = _queue.value.toMutableList()
-        currentList.addAll(songs)
-        _queue.value = currentList
-        playlistSongs = currentList
+        syncQueueFromController()
         saveCurrentQueue()
     }
 
@@ -587,11 +578,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val currentIndex = controller?.currentMediaItemIndex ?: -1
         val nextIndex = if (currentIndex == -1) 0 else currentIndex + 1
         controller?.addMediaItems(nextIndex, songs.map { createMediaItem(it) })
-
-        val currentList = _queue.value.toMutableList()
-        currentList.addAll(nextIndex.coerceAtMost(currentList.size), songs)
-        _queue.value = currentList
-        playlistSongs = currentList
+        syncQueueFromController()
         saveCurrentQueue()
     }
 
@@ -1248,43 +1235,71 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val track = waveTrackById[event.songId] ?: return@collect
                 val fraction = Wave.fractionOf(event.playedMs, event.durationMs)
                 waveState = Wave.react(state, track, fraction)
-                if (fraction < SKIP_FRACTION) dropQueuedWaveTracks()
-                topUpWave()
+                refillWave(replaceTail = fraction < SKIP_FRACTION)
             }
         }
     }
 
-    /** Keeps [QUEUE_AHEAD] tracks waiting behind the one playing, so the stream never stalls. */
-    private suspend fun topUpWave() {
-        val state = waveState ?: return
-        val controller = controller ?: return
-        val ahead = controller.mediaItemCount - controller.currentMediaItemIndex - 1
-        if (ahead >= QUEUE_AHEAD) return
+    /**
+     * Keeps [QUEUE_AHEAD] tracks waiting behind the one playing.
+     *
+     * @param replaceTail throw away what was queued and put fresh tracks there instead, which is
+     *   what a skip asks for: a rejection taking effect three tracks later would not feel like
+     *   being listened to.
+     *
+     * The replacements are chosen first and swapped in afterwards, in one call. Removing the tail
+     * before having anything to put in its place left the player with an empty queue for as long
+     * as the scoring took, and a track ending inside that gap stopped playback — which is what
+     * fast skipping ran into.
+     */
+    private suspend fun refillWave(replaceTail: Boolean = false) = waveLock.withLock {
+        val state = waveState ?: return@withLock
+        val controller = controller ?: return@withLock
+        val from = controller.currentMediaItemIndex + 1
+        val queued = controller.mediaItemCount - from
+        val needed = if (replaceTail) QUEUE_AHEAD else QUEUE_AHEAD - queued
+        if (needed <= 0) return@withLock
+
         val current = waveTrackById[_currentSong.value?.id]
-        // Scoring the whole library for every pick is a few million multiplications; off the main
-        // thread, so a track change never costs a dropped frame.
-        val (next, queued) = withContext(Dispatchers.Default) {
+        // Scoring the whole library is a few million multiplications; off the main thread, so a
+        // track change never costs a dropped frame.
+        val (picked, walked) = withContext(Dispatchers.Default) {
             Wave.next(
                 state = state,
                 tracks = waveTracks,
-                count = QUEUE_AHEAD - ahead,
+                count = needed,
                 current = current,
                 excluded = _dislikedSongIds.value
             )
         }
-        waveState = queued
-        val byId = allSongs.associateBy { it.id }
-        addAllToEndOfQueue(next.mapNotNull { byId[it.id] })
+        val songs = picked.mapNotNull { allSongsById[it.id] }
+        if (songs.isEmpty()) return@withLock
+        waveState = walked
+
+        val items = songs.map { createMediaItem(it) }
+        if (replaceTail && queued > 0) {
+            controller.replaceMediaItems(from, controller.mediaItemCount, items)
+        } else {
+            controller.addMediaItems(items)
+        }
+        syncQueueFromController()
+        saveCurrentQueue()
     }
 
-    private fun dropQueuedWaveTracks() {
+    /**
+     * Rebuilds the shown queue from what the player actually holds.
+     *
+     * The queue used to be kept twice — once in the player, once as a list for the UI — so anything
+     * that reordered the player's items behind the list's back (smart shuffle did) left the two
+     * disagreeing, which showed up as a track playing that the queue did not list.
+     */
+    private fun syncQueueFromController() {
         val controller = controller ?: return
-        val from = controller.currentMediaItemIndex + 1
-        if (from >= controller.mediaItemCount) return
-        controller.removeMediaItems(from, controller.mediaItemCount)
-        val trimmed = _queue.value.take(from)
-        _queue.value = trimmed
-        playlistSongs = trimmed
+        val songs = (0 until controller.mediaItemCount).mapNotNull { index ->
+            allSongsById[controller.getMediaItemAt(index).mediaId.toLongOrNull()]
+        }
+        _queue.value = songs
+        playlistSongs = songs
     }
 
     fun clearWaveMessage() {
@@ -1321,11 +1336,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         waveState = Wave.react(state, track, fraction = 0f, disliked = true)
-        dropQueuedWaveTracks()
         viewModelScope.launch {
-            // Refill before skipping on: the tail was just thrown away, and skipping into an empty
-            // queue would stop playback instead of moving to the next track.
-            topUpWave()
+            // The tail is swapped out before moving on, so there is always something to move on to.
+            refillWave(replaceTail = true)
             next()
         }
     }
