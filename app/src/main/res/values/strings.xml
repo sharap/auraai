@@ -186,4 +186,19 @@
     <string name="about_third_party">Third-party components</string>
     <string name="about_third_party_hint">CLAP weights — Apache-2.0, ONNX Runtime — MIT, and others</string>
     <string name="about_third_party_url" translatable="false">https://github.com/sharap/auraai/blob/main/THIRD-PARTY.md</string>
+
+    <!-- My wave -->
+    <string name="wave">My wave</string>
+    <string name="wave_needs_analysis">Analyse some tracks with AI first — a wave needs them to steer by.</string>
+    <string name="wave_taste">To my taste</string>
+    <string name="wave_taste_hint">Starts from what you have been listening to</string>
+    <string name="wave_similar">Like what is playing</string>
+    <string name="wave_similar_hint">Starts from the current track</string>
+    <string name="wave_description">By description</string>
+    <string name="wave_description_hint">“calm piano”, “something to run to”</string>
+    <string name="wave_describe_prompt">What should it sound like?</string>
+    <string name="wave_start">Start</string>
+    <string name="wave_stop">Stop the wave</string>
+    <string name="wave_playing">Wave is playing</string>
+    <string name="dislike">Don\'t like, play something else</string>
 </resources>

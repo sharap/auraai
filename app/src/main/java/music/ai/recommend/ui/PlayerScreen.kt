@@ -109,6 +109,7 @@ fun PlayerScreen(
                     aiShuffleEnabled = aiShuffleEnabled,
                     isFavorite = song.id in favoriteIds,
                     onToggleFavorite = { viewModel.toggleFavorite(song.id) },
+                    onDislike = { viewModel.dislikeCurrent() },
                     onToggleShuffle = { viewModel.toggleShuffle() },
                     onToggleAiShuffle = { viewModel.toggleAiShuffle() },
                     onNextRepeatMode = { viewModel.nextRepeatMode() },
@@ -176,6 +177,7 @@ fun PlayerMainContent(
     aiShuffleEnabled: Boolean,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
+    onDislike: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleAiShuffle: () -> Unit,
     onNextRepeatMode: () -> Unit,
@@ -282,6 +284,19 @@ fun PlayerMainContent(
             }
             IconButton(onClick = onNext) {
                 Icon(imageVector = Icons.Default.SkipNext, contentDescription = "Next", modifier = Modifier.size(48.dp))
+            }
+            // Rejecting a track is as much a verdict as liking it, and the wave steers on it, so
+            // it sits next to the heart rather than hidden in a menu.
+            IconButton(onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onDislike()
+            }) {
+                Icon(
+                    imageVector = Icons.Default.ThumbDown,
+                    contentDescription = stringResource(id = R.string.dislike),
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(28.dp)
+                )
             }
             IconButton(onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)

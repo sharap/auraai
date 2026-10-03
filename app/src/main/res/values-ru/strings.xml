@@ -186,4 +186,19 @@
     <string name="about_third_party">Сторонние компоненты</string>
     <string name="about_third_party_hint">Веса CLAP — Apache-2.0, ONNX Runtime — MIT и другие</string>
     <string name="about_third_party_url" translatable="false">https://github.com/sharap/auraai/blob/main/THIRD-PARTY.md</string>
+
+    <!-- My wave -->
+    <string name="wave">Моя волна</string>
+    <string name="wave_needs_analysis">Сначала проанализируйте треки с помощью ИИ — волне не на что опереться.</string>
+    <string name="wave_taste">По моему вкусу</string>
+    <string name="wave_taste_hint">Отталкивается от того, что вы слушали</string>
+    <string name="wave_similar">Похоже на то, что играет</string>
+    <string name="wave_similar_hint">Отталкивается от текущего трека</string>
+    <string name="wave_description">По описанию</string>
+    <string name="wave_description_hint">«спокойное пианино», «что-нибудь для бега»</string>
+    <string name="wave_describe_prompt">Как это должно звучать?</string>
+    <string name="wave_start">Включить</string>
+    <string name="wave_stop">Остановить волну</string>
+    <string name="wave_playing">Играет волна</string>
+    <string name="dislike">Не нравится, дальше</string>
 </resources>

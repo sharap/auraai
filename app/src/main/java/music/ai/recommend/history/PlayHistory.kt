@@ -3,6 +3,9 @@ package music.ai.recommend.history
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import music.ai.recommend.db.AppDatabase
 import music.ai.recommend.db.PlayEventDao
@@ -26,7 +29,17 @@ class PlayHistory private constructor(context: Context) {
 
     private val dao: PlayEventDao = AppDatabase.getDatabase(context.applicationContext).playEventDao()
 
+    private val _events = MutableSharedFlow<PlayEvent>(extraBufferCapacity = 16)
+
+    /**
+     * Listens as they finish, for anything that has to react at once rather than read the history
+     * later — the wave steers on these. The playback service and the UI live in the same process,
+     * so this is a direct hand-off and not a trip through the database.
+     */
+    val events: SharedFlow<PlayEvent> = _events.asSharedFlow()
+
     suspend fun record(event: PlayEvent) = withContext(Dispatchers.IO) {
+        _events.tryEmit(event)
         try {
             dao.insert(PlayEventEntity(event.songId, event.playedAt, event.playedMs, event.durationMs))
         } catch (e: Exception) {

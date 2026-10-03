@@ -37,7 +37,12 @@ import kotlinx.coroutines.withContext
 import music.ai.recommend.ai.AiScanState
 import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ClapTextEncoder
+import music.ai.recommend.ai.DailyMix
 import music.ai.recommend.ai.DailyMixBuilder
+import music.ai.recommend.ai.MixListen
+import music.ai.recommend.ai.MixTrack
+import music.ai.recommend.ai.Wave
+import music.ai.recommend.ai.WaveState
 import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.ai.ModelProgress
@@ -70,6 +75,9 @@ data class Playlist(val name: String, val songs: List<Song>)
 data class EqBand(val index: Int, val freq: Int, val level: Int)
 data class EqPreset(val name: String, val levels: List<Int>)
 data class ScoredSong(val song: Song, val score: Float)
+
+/** Where a wave takes its initial direction from. */
+enum class WaveMode { TASTE, SIMILAR, DESCRIPTION }
 
 /** @property needsModel the text model is not on the device, so no AI search was attempted. */
 data class AiSearchResult(val matches: List<ScoredSong>, val needsModel: Boolean = false)
@@ -145,6 +153,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _handleAudioFocus =
         MutableStateFlow(prefs.getBoolean(PlaybackService.KEY_HANDLE_AUDIO_FOCUS, true))
     val handleAudioFocus: StateFlow<Boolean> = _handleAudioFocus.asStateFlow()
+
+    private val _dislikedSongIds = MutableStateFlow<Set<Long>>(emptySet())
+    /** Tracks the listener rejected outright; they are kept out of the wave and the daily mix. */
+    val dislikedSongIds: StateFlow<Set<Long>> = _dislikedSongIds.asStateFlow()
+
+    private val _waveMode = MutableStateFlow<WaveMode?>(null)
+    /** The running wave's mode, or null when no wave is playing. */
+    val waveMode: StateFlow<WaveMode?> = _waveMode.asStateFlow()
+
+    private val _waveDescription = MutableStateFlow<String?>(null)
+    /** What the wave was asked for, for the subtitle: the query, or the track it started from. */
+    val waveDescription: StateFlow<String?> = _waveDescription.asStateFlow()
+
+    private val _waveMessage = MutableStateFlow<String?>(null)
+    /** Why a wave could not start, for the screen to show and then clear. */
+    val waveMessage: StateFlow<String?> = _waveMessage.asStateFlow()
+
+    private val _waveStarting = MutableStateFlow(false)
+    val waveStarting: StateFlow<Boolean> = _waveStarting.asStateFlow()
 
     private val _dailyMix = MutableStateFlow<List<Song>>(emptyList())
     /** The playlist of the day: fixed for the day, rebuilt at midnight. */
@@ -248,6 +275,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadJob: Job? = null
     private var smartAlbumsJob: Job? = null
     private var dailyMixJob: Job? = null
+    private var waveJob: Job? = null
+    private var waveEventsJob: Job? = null
+    private var waveState: WaveState? = null
+    private var waveTracks: List<MixTrack> = emptyList()
+    private var waveTrackById: Map<Long, MixTrack> = emptyMap()
     private var savedPlaylists: List<Playlist> = emptyList()
     private var playlistSongs: List<Song> = emptyList()
     private var allSongs: List<Song> = emptyList()
@@ -265,6 +297,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch(Dispatchers.IO) {
             loadFavorites()
+            loadDislikes()
             loadEqPresets()
             loadPlaylists()
         }
@@ -381,7 +414,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playSong(song: Song, playlist: List<Song>) {
+    fun playSong(song: Song, playlist: List<Song>, fromWave: Boolean = false) {
+        // Picking a track by hand ends the stream: it is no longer the wave's queue.
+        if (!fromWave) stopWave()
         playlistSongs = playlist
         _queue.value = playlist
         val mediaItems = playlist.map { createMediaItem(it) }
@@ -583,6 +618,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "Failed to delete file", e)
             }
         }
+    }
+
+    private fun loadDislikes() {
+        val json = prefs.getString("disliked_ids", null) ?: return
+        val type = object : TypeToken<Set<Long>>() {}.type
+        _dislikedSongIds.value = runCatching { gson.fromJson<Set<Long>>(json, type) }.getOrNull() ?: emptySet()
     }
 
     private fun loadFavorites() {
@@ -1103,6 +1144,192 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ------------------------------------------------------------------ the wave
+
+    /**
+     * Starts an endless stream steered by what happens next: a track heard out pulls it closer, a
+     * skip pushes it away. Unlike the daily mix, nothing is decided in advance — the queue is kept
+     * a few tracks deep and rebuilt whenever the listener says something.
+     *
+     * @param query only for [WaveMode.DESCRIPTION]: what the stream should sound like.
+     */
+    fun startWave(mode: WaveMode, query: String? = null) {
+        waveJob?.cancel()
+        _waveStarting.value = true
+        waveJob = viewModelScope.launch {
+            try {
+                val vectors = embeddings.all()
+                val library = allSongs.filter { it.id in vectors }.distinctBy { it.id }
+                if (library.size < MIN_WAVE_LIBRARY) {
+                    _waveMessage.value = getApplication<Application>().getString(R.string.wave_needs_analysis)
+                    return@launch
+                }
+                _waveMessage.value = null
+                val seed = waveSeed(mode, query, vectors) ?: return@launch
+
+                val lastPlayed = playHistory.lastPlayed()
+                waveTracks = library.map { song ->
+                    MixTrack(
+                        id = song.id,
+                        vector = vectors.getValue(song.id),
+                        group = song.artist.trim().lowercase()
+                            .takeIf { it.isNotEmpty() && it != "<unknown>" } ?: song.folderName.lowercase(),
+                        lastPlayedAt = lastPlayed[song.id]
+                    )
+                }
+                waveTrackById = waveTracks.associateBy { it.id }
+                val songsById = library.associateBy { it.id }
+
+                val state = Wave.start(seed)
+                val (first, queued) = Wave.next(state, waveTracks, QUEUE_AHEAD + 1, excluded = _dislikedSongIds.value)
+                if (first.isEmpty()) return@launch
+                waveState = queued
+                _waveMode.value = mode
+                _waveDescription.value = when (mode) {
+                    WaveMode.DESCRIPTION -> query
+                    WaveMode.SIMILAR -> _currentSong.value?.title
+                    WaveMode.TASTE -> null
+                }
+                val songs = first.mapNotNull { songsById[it.id] }
+                playSong(songs.first(), songs, fromWave = true)
+                observeWave()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start the wave", e)
+            } finally {
+                _waveStarting.value = false
+            }
+        }
+    }
+
+    /** The direction the stream sets off in. */
+    private suspend fun waveSeed(mode: WaveMode, query: String?, vectors: Map<Long, FloatArray>): FloatArray? =
+        when (mode) {
+            WaveMode.SIMILAR -> vectors[_currentSong.value?.id] ?: vectors.values.randomOrNull()
+
+            WaveMode.DESCRIPTION -> {
+                if (query.isNullOrBlank()) null
+                else if (textEncoder.needsDownload()) {
+                    _waveMessage.value = getApplication<Application>().getString(R.string.ai_search_needs_model)
+                    null
+                } else textEncoder.encode(query)
+            }
+
+            // The taste profile, which is the same signal the daily mix starts from: what has been
+            // played recently, with skips counting against and favourites counting for.
+            WaveMode.TASTE -> withContext(Dispatchers.Default) {
+                val listens = playHistory.recent().map { MixListen(it.songId, it.playedAt, it.fraction) }
+                val weights = DailyMix.tasteWeights(listens, _favoriteSongIds.value, System.currentTimeMillis())
+                    .filterValues { it > 0f }
+                    .filterKeys { it in vectors }
+                if (weights.isEmpty()) return@withContext vectors.values.randomOrNull()
+                val dimensions = vectors.values.first().size
+                val sum = FloatArray(dimensions)
+                for ((id, weight) in weights) {
+                    val vector = vectors.getValue(id)
+                    for (i in 0 until minOf(dimensions, vector.size)) sum[i] += weight * vector[i]
+                }
+                sum
+            }
+        }
+
+    /**
+     * Reacts to every finished listen while the wave runs: steers, then refills the queue. A
+     * rejection also throws away what was queued behind it — a skip that only took effect three
+     * tracks later would not feel like being listened to.
+     */
+    private fun observeWave() {
+        // One subscription per wave: a second one would top the queue up twice per track.
+        waveEventsJob?.cancel()
+        waveEventsJob = viewModelScope.launch {
+            playHistory.events.collect { event ->
+                val state = waveState ?: return@collect
+                val track = waveTrackById[event.songId] ?: return@collect
+                val fraction = Wave.fractionOf(event.playedMs, event.durationMs)
+                waveState = Wave.react(state, track, fraction)
+                if (fraction < SKIP_FRACTION) dropQueuedWaveTracks()
+                topUpWave()
+            }
+        }
+    }
+
+    /** Keeps [QUEUE_AHEAD] tracks waiting behind the one playing, so the stream never stalls. */
+    private suspend fun topUpWave() {
+        val state = waveState ?: return
+        val controller = controller ?: return
+        val ahead = controller.mediaItemCount - controller.currentMediaItemIndex - 1
+        if (ahead >= QUEUE_AHEAD) return
+        val current = waveTrackById[_currentSong.value?.id]
+        // Scoring the whole library for every pick is a few million multiplications; off the main
+        // thread, so a track change never costs a dropped frame.
+        val (next, queued) = withContext(Dispatchers.Default) {
+            Wave.next(
+                state = state,
+                tracks = waveTracks,
+                count = QUEUE_AHEAD - ahead,
+                current = current,
+                excluded = _dislikedSongIds.value
+            )
+        }
+        waveState = queued
+        val byId = allSongs.associateBy { it.id }
+        addAllToEndOfQueue(next.mapNotNull { byId[it.id] })
+    }
+
+    private fun dropQueuedWaveTracks() {
+        val controller = controller ?: return
+        val from = controller.currentMediaItemIndex + 1
+        if (from >= controller.mediaItemCount) return
+        controller.removeMediaItems(from, controller.mediaItemCount)
+        val trimmed = _queue.value.take(from)
+        _queue.value = trimmed
+        playlistSongs = trimmed
+    }
+
+    fun clearWaveMessage() {
+        _waveMessage.value = null
+    }
+
+    fun stopWave() {
+        waveJob?.cancel()
+        waveJob = null
+        waveEventsJob?.cancel()
+        waveEventsJob = null
+        waveState = null
+        waveTracks = emptyList()
+        waveTrackById = emptyMap()
+        _waveMode.value = null
+        _waveDescription.value = null
+    }
+
+    /**
+     * Rejects the playing track: it is remembered, the wave is steered away from it, and playback
+     * moves on. Works outside a wave too — the daily mix leaves rejected tracks out as well.
+     */
+    fun dislikeCurrent() {
+        val song = _currentSong.value ?: return
+        val disliked = _dislikedSongIds.value + song.id
+        _dislikedSongIds.value = disliked
+        persistAsync("disliked_ids", disliked)
+        if (_favoriteSongIds.value.contains(song.id)) toggleFavorite(song.id)
+
+        val state = waveState
+        val track = waveTrackById[song.id]
+        if (state == null || track == null) {
+            next()
+            return
+        }
+        waveState = Wave.react(state, track, fraction = 0f, disliked = true)
+        dropQueuedWaveTracks()
+        viewModelScope.launch {
+            // Refill before skipping on: the tail was just thrown away, and skipping into an empty
+            // queue would stop playback instead of moving to the next track.
+            topUpWave()
+            next()
+        }
+    }
+
     fun setSmartAlbumsEpsScale(scale: Float) {
         val snapped = (scale.coerceIn(SmartAlbumClustering.MIN_EPS_SCALE, SmartAlbumClustering.MAX_EPS_SCALE) * 20)
             .roundToInt() / 20f
@@ -1297,6 +1524,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         const val GLOBAL_PLAIN_RESULTS = 20
         const val PERSIST_DEBOUNCE_MS = 400L
         const val SCAN_REFRESH_EVERY = 5
+
+        /** Tracks kept queued behind the one playing while a wave runs. */
+        const val QUEUE_AHEAD = 4
+
+        /** Below this much of a track, the wave treats it as a rejection and rebuilds its queue. */
+        const val SKIP_FRACTION = 0.3f
+
+        /** Fewer analysed tracks than this and a wave would circle immediately. */
+        const val MIN_WAVE_LIBRARY = 40
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
 
         /** Below this a track is not a match for the query under any reading. */

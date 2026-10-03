@@ -12,12 +12,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Waves
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -26,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
+import music.ai.recommend.WaveMode
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
 import music.ai.recommend.ai.SmartAlbum
@@ -42,6 +47,11 @@ fun PlaylistListScreen(
     val scanCounts by viewModel.playlistScanCounts.collectAsState()
     val smartAlbums by viewModel.smartAlbums.collectAsState()
     val dailyMix by viewModel.dailyMix.collectAsState()
+    val waveMode by viewModel.waveMode.collectAsState()
+    val waveDescription by viewModel.waveDescription.collectAsState()
+    val waveStarting by viewModel.waveStarting.collectAsState()
+    val waveMessage by viewModel.waveMessage.collectAsState()
+    var describing by remember { mutableStateOf(false) }
     val dailyMixBuilding by viewModel.dailyMixBuilding.collectAsState()
     val building by viewModel.smartAlbumsBuilding.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
@@ -56,6 +66,19 @@ fun PlaylistListScreen(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp)
     ) {
+        item(key = "wave") {
+            WaveCard(
+                mode = waveMode,
+                description = waveDescription,
+                starting = waveStarting,
+                message = waveMessage,
+                onStart = { viewModel.startWave(it) },
+                onDescribe = { describing = true },
+                onStop = { viewModel.stopWave() },
+                onDismissMessage = { viewModel.clearWaveMessage() }
+            )
+        }
+
         if (dailyMix.isNotEmpty() || dailyMixBuilding) {
             item(key = "daily_mix") {
                 DailyMixCard(
@@ -124,6 +147,16 @@ fun PlaylistListScreen(
                 onDelete = { viewModel.deletePlaylist(playlist) }
             )
         }
+    }
+
+    if (describing) {
+        DescribeWaveDialog(
+            onDismiss = { describing = false },
+            onStart = { query ->
+                describing = false
+                viewModel.startWave(WaveMode.DESCRIPTION, query)
+            }
+        )
     }
 }
 
@@ -201,6 +234,166 @@ private fun DailyMixCard(
             }
         }
     }
+}
+
+/**
+ * The wave: an endless stream that steers itself from skips and finished tracks.
+ *
+ * The three starting points are offered side by side rather than hidden behind a default, because
+ * they answer different wishes — "the usual", "more of this", and "something specific right now" —
+ * and only the listener knows which one it is.
+ */
+@Composable
+private fun WaveCard(
+    mode: WaveMode?,
+    description: String?,
+    starting: Boolean,
+    message: String?,
+    onStart: (WaveMode) -> Unit,
+    onDescribe: () -> Unit,
+    onStop: () -> Unit,
+    onDismissMessage: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Waves,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(id = R.string.wave),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    val subtitle = when {
+                        mode == null -> null
+                        description != null -> stringResource(id = R.string.wave_playing) + " · " + description
+                        else -> stringResource(id = R.string.wave_playing)
+                    }
+                    if (subtitle != null) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMutedOnBackground.current,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (starting) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else if (mode != null) {
+                    IconButton(onClick = onStop) {
+                        Icon(Icons.Default.Stop, contentDescription = stringResource(id = R.string.wave_stop))
+                    }
+                }
+            }
+
+            if (message != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onDismissMessage) { Text(stringResource(id = android.R.string.ok)) }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            WaveMode.entries.forEach { option ->
+                WaveOption(
+                    title = stringResource(
+                        id = when (option) {
+                            WaveMode.TASTE -> R.string.wave_taste
+                            WaveMode.SIMILAR -> R.string.wave_similar
+                            WaveMode.DESCRIPTION -> R.string.wave_description
+                        }
+                    ),
+                    hint = stringResource(
+                        id = when (option) {
+                            WaveMode.TASTE -> R.string.wave_taste_hint
+                            WaveMode.SIMILAR -> R.string.wave_similar_hint
+                            WaveMode.DESCRIPTION -> R.string.wave_description_hint
+                        }
+                    ),
+                    running = mode == option,
+                    onClick = { if (option == WaveMode.DESCRIPTION) onDescribe() else onStart(option) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WaveOption(title: String, hint: String, running: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (running) Icons.Default.GraphicEq else Icons.Default.PlayArrow,
+            contentDescription = null,
+            tint = if (running) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnBackground.current
+            )
+        }
+    }
+}
+
+/** Asks what the stream should sound like; the text is encoded by CLAP and becomes its direction. */
+@Composable
+private fun DescribeWaveDialog(onDismiss: () -> Unit, onStart: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(id = R.string.wave_describe_prompt)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text(stringResource(id = R.string.wave_description_hint)) },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { if (text.isNotBlank()) onStart(text.trim()) }) {
+                Text(stringResource(id = R.string.wave_start))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(id = R.string.cancel)) }
+        }
+    )
 }
 
 @Composable
