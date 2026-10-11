@@ -21,11 +21,35 @@ random tracks.
 The wave could use both factors; the daily mix only the day type, since it is built once and kept
 for the day, and an "evening" playlist opened in the morning would read as a fault.
 
-**Why it is waiting.** The history only starts at 2026-09-24. Before building this, look at a month
-of it and check whether the pattern is there at all: do the tracks played between 7:00 and 10:00
-actually differ from those played after 20:00, and by more than chance? A local library of a few
-thousand tracks is small, and an hour slot may hold too few listens to say anything. If the data
-shows nothing, not building this is the better answer.
+**Why it is waiting.** Measured on 2026-10-11, on 606 listens of 473 distinct tracks over 16 days
+(62% heard to the end, 25% skipped, busiest hour 21:00, busiest day Saturday). The answer was no —
+twice over, and the first answer was wrong in an instructive way.
+
+Comparing the mean embedding of morning, day and evening listening against random splits of the
+same listens made every pair look different, at p < 0.001. That is an artefact: music is listened
+to in sessions, an album at a time, so listens in one evening resemble each other because they are
+one album, not because it is evening. Shuffling individual tracks destroys that structure and makes
+the null far too tight. The real sample is 34 sessions, not 606 tracks.
+
+Permuting whole sessions instead, only day against evening survives (p = 0.009); morning against
+day (p = 0.27), morning against evening (p = 0.55) and weekday against weekend (p = 0.055) are not
+distinguishable from chance.
+
+And the question that actually decides it — does knowing the hour help predict what will be played?
+For each listen, the profile built from the same slot on *other* days scored it 0.627 on average,
+against 0.630 for the profile built from all other days: a difference of -0.003 ± 0.004, winning
+48% of the time. No gain, even where the music does differ.
+
+So: not enough evidence, and no predictive value in what evidence there is. Worth re-measuring at
+around a hundred sessions — roughly two months at the current rate, since sessions are what counts,
+not listens.
+
+**How to repeat the measurement.** The database holds everything needed: `play_events` has the
+timestamps and `embeddings` the vectors. Build a debug APK with `-Pauraai.testWithReleaseKey=true`
+so it is signed with the release key, install it over the release build (same signature, so nothing
+is lost), copy `databases/music_database` out with `run-as`, and analyse offline. Split listens
+into sessions at gaps over 30 minutes, permute sessions rather than listens, and finish with the
+leave-one-day-out prediction check — the permutation test alone will mislead.
 
 ## Search in Russian
 

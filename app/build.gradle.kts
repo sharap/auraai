@@ -25,6 +25,14 @@ val bundleModels: Boolean = providers.gradleProperty("auraai.bundleModels")
 val signReleaseWithDebugKey: Boolean = providers.gradleProperty("auraai.signReleaseWithDebugKey")
     .getOrElse("true").toBoolean()
 
+// Instrumented tests only reach the installed app when both carry the same signature, so a
+// debug-signed test APK cannot examine a release install. With -Pauraai.testWithReleaseKey=true the
+// debug build type — and the androidTest APK with it — is signed with the release key instead.
+// Note that the app under test must then be a debug build too: a release build is minified, and
+// test code loaded into it fails to resolve the Kotlin runtime.
+val testWithReleaseKey: Boolean = providers.gradleProperty("auraai.testWithReleaseKey")
+    .getOrElse("false").toBoolean()
+
 // ONNX Runtime ships a native library per ABI and all four land in the APK — about 58 MB, of which
 // a given phone uses one. Narrow it while developing with e.g. -Pauraai.abi=arm64-v8a; leave it
 // unset for a build that has to run anywhere.
@@ -120,6 +128,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (testWithReleaseKey && hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+
         release {
             optimization {
                 enable = true
