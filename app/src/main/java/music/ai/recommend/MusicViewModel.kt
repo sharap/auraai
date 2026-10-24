@@ -358,6 +358,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (_aiShuffleEnabled.value && song != null) {
                         applySmartShuffle(song)
                     }
+
+                    // The wave tops its queue up here, on the track change itself. It used to do
+                    // so only when a listen was recorded, and a track left within three seconds
+                    // records none: five quick skips ran the queue dry and the stream stopped.
+                    if (waveState != null) viewModelScope.launch { refillWave() }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -447,6 +452,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         saveCurrentQueue()
     }
 
+    /**
+     * Plays a track the queue already holds, by moving to it instead of rebuilding the playlist.
+     *
+     * Tapping ahead in the queue is skipping, not choosing something else, so a running wave
+     * carries on from there. Going through [playSong] set the same tracks again as a new playlist,
+     * which counted as picking by hand and silently ended the stream.
+     */
+    fun playFromQueue(song: Song) {
+        val controller = controller ?: return
+        val index = (0 until controller.mediaItemCount)
+            .firstOrNull { controller.getMediaItemAt(it).mediaId.toLongOrNull() == song.id }
+            ?: return playSong(song, _queue.value)
+        controller.seekTo(index, 0L)
+        controller.play()
+    }
+
     fun pause() {
         controller?.pause()
         saveCurrentQueue(immediate = true)
@@ -457,7 +478,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun next() {
-        controller?.seekToNext()
+        val controller = controller ?: return
+        // At the end of the queue seekToNext does nothing at all, which during a wave looks like
+        // the player ignoring the button. A wave has no end, so queue more and then move on.
+        if (waveState != null && !controller.hasNextMediaItem()) {
+            viewModelScope.launch {
+                refillWave()
+                this@MusicViewModel.controller?.seekToNext()
+            }
+            return
+        }
+        controller.seekToNext()
     }
 
     fun previous() {
@@ -1246,6 +1277,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         waveEventsJob = viewModelScope.launch {
             playHistory.events.collect { event ->
                 val state = waveState ?: return@collect
+                // Only what the wave queued steers it. Whatever was playing when the wave started
+                // is closed by the same mechanism, and a wave asked to sound like that track would
+                // otherwise take its own seed for a skip and head straight away from it.
+                if (event.songId !in state.played) return@collect
                 val track = waveTrackById[event.songId] ?: return@collect
                 val fraction = Wave.fractionOf(event.playedMs, event.durationMs)
                 waveState = Wave.react(state, track, fraction)

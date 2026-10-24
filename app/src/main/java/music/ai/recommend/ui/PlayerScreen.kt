@@ -130,7 +130,7 @@ fun PlayerScreen(
                     playlists = playlists,
                     scannedIds = scannedIds,
                     currentSong = song,
-                    onSongClick = { s -> viewModel.playSong(s, queue) },
+                    onSongClick = { s -> viewModel.playFromQueue(s) },
                     onRemove = { index -> viewModel.removeFromQueue(index) },
                     onMove = { from, to -> viewModel.moveQueueItem(from, to) },
                     onSaveNew = { name -> viewModel.createPlaylistWithSongs(name, queue) },

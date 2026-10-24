@@ -38,8 +38,14 @@ class PlayHistory private constructor(context: Context) {
      */
     val events: SharedFlow<PlayEvent> = _events.asSharedFlow()
 
-    suspend fun record(event: PlayEvent) = withContext(Dispatchers.IO) {
+    /**
+     * Hands the event to whoever is listening now, and keeps it if it was long enough to be a
+     * listen. A track left after a second says plenty about the moment — the wave reacts to it —
+     * but it is the player settling as often as it is a verdict, so the history does not keep it.
+     */
+    suspend fun record(event: PlayEvent): Unit = withContext(Dispatchers.IO) {
         _events.tryEmit(event)
+        if (event.playedMs < MIN_LISTEN_MS) return@withContext
         try {
             dao.insert(PlayEventEntity(event.songId, event.playedAt, event.playedMs, event.durationMs))
         } catch (e: Exception) {
@@ -98,6 +104,9 @@ class PlayHistory private constructor(context: Context) {
     companion object {
         private const val TAG = "PlayHistory"
         const val DAY_MS = 24L * 60 * 60 * 1000
+
+        /** Shorter than this is not kept as a listen; see [record]. */
+        const val MIN_LISTEN_MS = 3_000L
 
         /** How far back the taste profile looks. */
         const val PROFILE_DAYS = 90

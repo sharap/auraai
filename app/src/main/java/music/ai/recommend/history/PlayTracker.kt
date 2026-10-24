@@ -31,17 +31,16 @@ class PlayTracker(private val emit: (PlayEvent) -> Unit) {
         if (positionMs > furthestMs) furthestMs = positionMs
     }
 
-    /** The current track was left: skipped, ended, paused for good, or the service is stopping. */
+    /**
+     * The current track was left: skipped, ended, paused for good, or the service is stopping.
+     *
+     * Every departure is reported, however short. A track dropped after a second is the clearest
+     * "not this one" there is, and the wave steers on these events; it is [PlayHistory] that
+     * decides what is long enough to be worth keeping as a listen.
+     */
     fun finished(now: Long) {
         val id = songId ?: return
         songId = null
-        // A track that barely started is usually the player settling, not a listen. A deliberate
-        // skip still counts: it is a negative signal, and it is worth knowing about.
-        if (furthestMs < MIN_LISTEN_MS) return
         emit(PlayEvent(id, now, furthestMs, durationMs))
-    }
-
-    private companion object {
-        const val MIN_LISTEN_MS = 3_000L
     }
 }
