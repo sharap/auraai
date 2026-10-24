@@ -34,7 +34,7 @@ class RealLibraryWaveTest {
         // steering, since the stream is pointed straight at what is being refused.
         val seedTrack = tracks[tracks.size / 3]
         val refusedFolder = folderOf(seedTrack.id)
-        var state = Wave.start(seedTrack.vector)
+        var state = Wave.start(seedTrack.vector, tracks)
         val random = Random(17)
         val played = ArrayList<Long>()
         var skips = 0

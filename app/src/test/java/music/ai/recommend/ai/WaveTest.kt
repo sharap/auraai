@@ -48,7 +48,7 @@ class WaveTest {
     fun theStreamStartsWhereItWasPointed() {
         val (tracks, centres) = library(groups = 6, perGroup = 20)
 
-        val state = Wave.start(centres[3])
+        val state = Wave.start(centres[3], tracks)
         val (next, _) = Wave.next(state, tracks, count = 5, random = Random(1), now = now)
 
         assertEquals(5, next.size)
@@ -56,14 +56,35 @@ class WaveTest {
         assertTrue("started elsewhere: ${next.map { it.id }}", fromSeedGroup >= 3)
     }
 
-    /** The point of the whole thing: skipping one kind of music moves the stream off it. */
+    /**
+     * One skip is one data point, and it used to empty the neighbourhood the listener was in: the
+     * avoidance applied at full strength from the first rejection. It should bend the stream, not
+     * turn it.
+     */
+    @Test
+    fun oneSkipDoesNotEmptyTheNeighbourhood() {
+        val (tracks, centres) = library(groups = 4, perGroup = 30)
+        val liked = 0
+        val state = Wave.start(centres[liked], tracks)
+        val (before, _) = Wave.next(state, tracks, count = 6, random = Random(3), now = now)
+
+        val afterOneSkip = Wave.react(state, tracks.first { groupOf(it.id, 30) == liked }, fraction = 0.02f)
+        val (after, _) = Wave.next(afterOneSkip, tracks, count = 6, random = Random(3), now = now)
+
+        val keptBefore = before.count { groupOf(it.id, 30) == liked }
+        val keptAfter = after.count { groupOf(it.id, 30) == liked }
+        assertTrue("was $keptBefore of six, now $keptAfter", keptAfter >= keptBefore - 2)
+        assertTrue("the stream left after a single skip: ${after.map { it.id }}", keptAfter >= 2)
+    }
+
+    /** A pattern of skips, on the other hand, does move the stream off that kind of music. */
     @Test
     fun skipsSteerTheStreamAway() {
         val (tracks, centres) = library(groups = 4, perGroup = 30)
         val skipped = 0
-        var state = Wave.start(centres[skipped])
+        var state = Wave.start(centres[skipped], tracks)
 
-        repeat(10) { step ->
+        repeat(14) { step ->
             val (next, queued) = Wave.next(state, tracks, count = 1, random = Random(step), now = now)
             state = queued
             val track = next.single()
@@ -78,7 +99,7 @@ class WaveTest {
     @Test
     fun aDislikeMovesTheStreamFurtherThanASkip() {
         val (tracks, centres) = library(groups = 3, perGroup = 10)
-        val state = Wave.start(centres[0])
+        val state = Wave.start(centres[0], tracks)
         val track = tracks.first()
 
         val afterSkip = Wave.react(state, track, fraction = 0.05f)
@@ -92,7 +113,7 @@ class WaveTest {
     @Test
     fun aTrackHeardToTheEndPullsTheStreamTowardsIt() {
         val (tracks, centres) = library(groups = 3, perGroup = 10)
-        val state = Wave.start(centres[0])
+        val state = Wave.start(centres[0], tracks)
         val track = tracks.last() // from another group
 
         val after = Wave.react(state, track, fraction = 1f)
@@ -103,7 +124,7 @@ class WaveTest {
     @Test
     fun theStreamDoesNotRepeatItselfOrOneArtist() {
         val (tracks, centres) = library(groups = 8, perGroup = 25)
-        val state = Wave.start(centres[0])
+        val state = Wave.start(centres[0], tracks)
 
         val (next, _) = Wave.next(state, tracks, count = 30, random = Random(7), now = now)
 
@@ -119,7 +140,7 @@ class WaveTest {
         val (plain, centres) = library(groups = 5, perGroup = 20)
         val tracks = plain.map { if (it.id < 40) it.copy(lastPlayedAt = now - day) else it }
 
-        val state = Wave.start(centres[0])
+        val state = Wave.start(centres[0], tracks)
         val (next, _) = Wave.next(state, tracks, count = 10, random = Random(3), now = now)
 
         assertTrue("served what was just played: ${next.map { it.id }}", next.none { it.id < 40 })
@@ -132,7 +153,7 @@ class WaveTest {
         val (tracks, centres) = library(groups = 2, perGroup = 6)
         val fresh = tracks.map { it.copy(lastPlayedAt = now - 60_000) } // all just played
 
-        val state = Wave.start(centres[0])
+        val state = Wave.start(centres[0], tracks)
         val (next, _) = Wave.next(state, fresh, count = 12, random = Random(5), now = now)
 
         assertEquals("the stream ran dry", 12, next.size)
@@ -143,7 +164,7 @@ class WaveTest {
         val (tracks, centres) = library(groups = 4, perGroup = 20)
         val banned = tracks.filter { groupOf(it.id, 20) == 0 }.map { it.id }.toSet()
 
-        val state = Wave.start(centres[0]) // pointed straight at the banned group
+        val state = Wave.start(centres[0], tracks) // pointed straight at the banned group
         val (next, _) = Wave.next(state, tracks, count = 20, excluded = banned, random = Random(2), now = now)
 
         assertTrue("a rejected track came back", next.none { it.id in banned })

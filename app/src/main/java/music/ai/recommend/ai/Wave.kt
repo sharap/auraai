@@ -10,8 +10,19 @@ import kotlin.random.Random
  * step by step instead of through a mutable object that playback keeps poking at.
  */
 data class WaveState(
-    /** Unit vector the stream is heading towards. */
+    /**
+     * Unit vector the stream is heading towards, in centred space — see [WaveState.centre].
+     */
     val direction: FloatArray,
+    /**
+     * The library's mean direction, subtracted from every vector before anything is compared.
+     *
+     * CLAP embeddings share a large component that says little more than "this is music": raw
+     * cosines between any two tracks sit around 0.6-0.95, so "close to what was rejected" came out
+     * close to "music in general" and the penalty swamped everything else. Comparing what is left
+     * after the mean is removed is what makes similarity mean the thing that distinguishes a track.
+     */
+    val centre: FloatArray,
     /**
      * What has been rejected, as a unit vector, or null while nothing has been.
      *
@@ -26,7 +37,9 @@ data class WaveState(
     val played: Set<Long> = emptySet(),
     /** Artists of the last few tracks, to keep one act from taking over. */
     val recentGroups: List<String> = emptyList(),
-    val steps: Int = 0
+    val steps: Int = 0,
+    /** Skips and dislikes so far; the avoidance grows with them rather than acting on the first. */
+    val rejections: Int = 0
 ) {
     override fun equals(other: Any?) = this === other
     override fun hashCode() = System.identityHashCode(this)
@@ -57,8 +70,18 @@ object Wave {
     /** An explicit "don't like" is unambiguous, so it moves the direction harder. */
     private const val DISLIKE_PUSH = 0.30f
 
-    /** How much being close to what was rejected counts against a candidate. */
-    private const val AVOID_WEIGHT = 1.1f
+    /**
+     * Most that being close to what was rejected can count against a candidate, and how fast that
+     * weight is reached.
+     *
+     * One skip used to apply the full penalty, which emptied the neighbourhood the listener was in
+     * after a single track — the loudest complaint about the first version. A skip is one data
+     * point: it should bend the stream, and only a pattern of them should turn it. The weight is
+     * rejections / (rejections + [AVOID_HALFWAY]) of the maximum, so one skip pulls a third of it,
+     * two a half, and six about three quarters.
+     */
+    private const val AVOID_MAX = 0.9f
+    private const val AVOID_HALFWAY = 2f
 
     /** Fraction of a track below which it counts as skipped, and above which as heard. */
     private const val SKIPPED_BELOW = 0.3f
@@ -74,19 +97,46 @@ object Wave {
      * starts repeating within the hour. */
     private const val SHORTLIST = 40
 
-    /** Spread of the sampling. Higher means more surprising, lower means more predictable. */
-    private const val TEMPERATURE = 0.04f
+    /**
+     * Spread of the sampling. Higher means more surprising, lower means more predictable.
+     *
+     * Wider than it was, because scores are now differences between centred vectors, which spread
+     * over a far larger range than raw cosines did — at the old value the draw had collapsed onto
+     * whatever scored best.
+     */
+    private const val TEMPERATURE = 0.12f
 
     /** An artist cannot come back within this many tracks. */
     private const val GROUP_COOLDOWN = 5
 
-    /** Played more recently than this, a track is held back unless the stream runs dry. */
-    private const val RECENT_DAYS = 14
+    /**
+     * How long a track is held back after being played, at novelty 0 and at novelty 1.
+     *
+     * This is the knob behind "familiar — new": at the low end the stream happily returns to what
+     * was played this week, at the high end it stays away from anything heard in the last two
+     * months, which in a library of a few thousand tracks means digging for what was forgotten.
+     */
+    private const val RECENT_DAYS_FAMILIAR = 3
+    private const val RECENT_DAYS_NEW = 60
+
+    /** How much a never-played track is favoured at novelty 1. */
+    private const val UNPLAYED_BONUS = 0.25f
 
     private const val DAY_MS = 24L * 60 * 60 * 1000
 
-    /** Starts a stream heading in [seed]'s direction. */
-    fun start(seed: FloatArray): WaveState = WaveState(direction = normalize(seed.copyOf()))
+    /**
+     * Starts a stream heading in [seed]'s direction through [tracks].
+     *
+     * The library is needed here, not just when picking, because everything is compared with its
+     * mean direction removed, and that mean is a property of the library.
+     */
+    fun start(seed: FloatArray, tracks: List<MixTrack>): WaveState {
+        val centre = centroid(tracks.map { it.vector })
+        return WaveState(
+            direction = normalize(subtract(seed, centre)),
+            centre = centre
+        )
+    }
 
     /**
      * Steers the stream after a track was left.
@@ -102,21 +152,21 @@ object Wave {
             // Heard most of the way through: neither a verdict for nor against.
             else -> 0f
         }
+        val specific = normalize(subtract(track.vector, state.centre))
         val direction = if (step == 0f) state.direction else {
-            normalize(FloatArray(state.direction.size) { i ->
-                state.direction[i] + step * track.vector.getOrElse(i) { 0f }
-            })
+            normalize(FloatArray(state.direction.size) { i -> state.direction[i] + step * specific[i] })
         }
         val avoid = if (step >= 0f) state.avoid else {
             val weight = -step
             val previous = state.avoid
-            normalize(FloatArray(track.vector.size) { i ->
-                (previous?.getOrElse(i) { 0f } ?: 0f) + weight * track.vector[i]
+            normalize(FloatArray(specific.size) { i ->
+                (previous?.getOrElse(i) { 0f } ?: 0f) + weight * specific[i]
             })
         }
         return state.copy(
             direction = direction,
             avoid = avoid,
+            rejections = state.rejections + if (step < 0f) 1 else 0,
             played = state.played + track.id,
             recentGroups = (state.recentGroups + track.group).takeLast(GROUP_COOLDOWN),
             steps = state.steps + 1
@@ -131,12 +181,17 @@ object Wave {
      * @return the chosen tracks in order, and the state as if they had been queued — so a caller
      *   that queues several at once does not get the same track twice.
      */
+    /**
+     * @param novelty 0 keeps to the familiar, 1 digs for what has not been heard in a long time
+     *   or ever; 0.5 is the middle the stream ran at before this was adjustable.
+     */
     fun next(
         state: WaveState,
         tracks: List<MixTrack>,
         count: Int,
         current: MixTrack? = null,
         excluded: Set<Long> = emptySet(),
+        novelty: Float = 0.5f,
         random: Random = Random.Default,
         now: Long = System.currentTimeMillis()
     ): Pair<List<MixTrack>, WaveState> {
@@ -144,7 +199,7 @@ object Wave {
         var walking = state
         var previous = current
         repeat(count) {
-            val pick = pickOne(walking, tracks, previous, excluded, random, now) ?: return@repeat
+            val pick = pickOne(walking, tracks, previous, excluded, novelty, random, now) ?: return@repeat
             chosen += pick
             // Queued tracks count as played straight away: the wave looks several tracks ahead,
             // and without this the same track would be picked for every slot of the lookahead.
@@ -162,9 +217,12 @@ object Wave {
         tracks: List<MixTrack>,
         current: MixTrack?,
         excluded: Set<Long>,
+        novelty: Float,
         random: Random,
         now: Long
     ): MixTrack? {
+        val holdBackDays = RECENT_DAYS_FAMILIAR +
+            (RECENT_DAYS_NEW - RECENT_DAYS_FAMILIAR) * novelty.coerceIn(0f, 1f)
         // Relaxed in turn when nothing is left: a wave that stops is a broken wave, and a repeat
         // after an hour is a smaller fault than silence.
         for (relaxation in 0..3) {
@@ -173,7 +231,7 @@ object Wave {
                 if (track.id in state.played) return@filter false
                 if (relaxation < 1 && track.group in state.recentGroups) return@filter false
                 if (relaxation < 2 && track.lastPlayedAt != null &&
-                    now - track.lastPlayedAt < RECENT_DAYS * DAY_MS
+                    now - track.lastPlayedAt < holdBackDays * DAY_MS
                 ) return@filter false
                 true
             }.ifEmpty {
@@ -183,7 +241,7 @@ object Wave {
             }
             if (candidates.isEmpty()) continue
 
-            val scored = candidates.map { it to score(it, state, current) }
+            val scored = candidates.map { it to score(it, state, current, novelty) }
                 .sortedByDescending { it.second }
                 .take(SHORTLIST)
             return sample(scored, random)
@@ -191,11 +249,16 @@ object Wave {
         return null
     }
 
-    private fun score(track: MixTrack, state: WaveState, current: MixTrack?): Float {
-        val towardsDirection = dot(state.direction, track.vector)
-        val followsOn = current?.let { dot(it.vector, track.vector) } ?: towardsDirection
-        val rejected = state.avoid?.let { dot(it, track.vector) } ?: 0f
-        return (1 - CONTINUITY) * towardsDirection + CONTINUITY * followsOn - AVOID_WEIGHT * rejected
+    private fun score(track: MixTrack, state: WaveState, current: MixTrack?, novelty: Float): Float {
+        val specific = normalize(subtract(track.vector, state.centre))
+        val towardsDirection = dot(state.direction, specific)
+        val followsOn = current?.let { dot(normalize(subtract(it.vector, state.centre)), specific) }
+            ?: towardsDirection
+        val rejected = state.avoid?.let { dot(it, specific) } ?: 0f
+        val avoidWeight = AVOID_MAX * state.rejections / (state.rejections + AVOID_HALFWAY)
+        val unheard = if (track.lastPlayedAt == null) UNPLAYED_BONUS * novelty.coerceIn(0f, 1f) else 0f
+        return (1 - CONTINUITY) * towardsDirection + CONTINUITY * followsOn -
+            avoidWeight * rejected + unheard
     }
 
     /** Draws one candidate with a probability that grows with its score. */
@@ -213,6 +276,17 @@ object Wave {
     /** Turns a listen into the fraction the wave reacts to. */
     fun fractionOf(playedMs: Long, durationMs: Long): Float =
         if (durationMs <= 0) 0f else (playedMs.toFloat() / durationMs).coerceIn(0f, 1f)
+
+    /** @return a - b, as a new array. */
+    private fun subtract(a: FloatArray, b: FloatArray): FloatArray =
+        FloatArray(a.size) { a[it] - b.getOrElse(it) { 0f } }
+
+    private fun centroid(vectors: List<FloatArray>): FloatArray {
+        val sum = FloatArray(vectors.first().size)
+        for (v in vectors) for (i in sum.indices) sum[i] += v[i]
+        for (i in sum.indices) sum[i] /= vectors.size
+        return sum
+    }
 
     internal fun dot(a: FloatArray, b: FloatArray): Float {
         var sum = 0f
