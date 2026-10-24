@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Waves
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -16,8 +17,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import music.ai.recommend.MusicViewModel
+import music.ai.recommend.R
 import music.ai.recommend.ui.theme.LocalMutedOnSurface
 
 @Composable
@@ -26,6 +29,7 @@ fun PlayerOverlay(
     onClick: () -> Unit
 ) {
     val currentSong by viewModel.currentSong.collectAsState()
+    val waveMode by viewModel.waveMode.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
 
@@ -53,6 +57,23 @@ fun PlayerOverlay(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    if (waveMode != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Waves,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = stringResource(id = R.string.wave_now_playing),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1
+                            )
+                        }
+                    }
                     // Colours are set explicitly rather than inherited: the ambient content colour
                     // here resolved to a light grey that measured 1.14:1 against the bar.
                     // Keyed on the track so a new title starts from its beginning. The marquee only

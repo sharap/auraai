@@ -168,6 +168,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** What the wave was asked for, for the subtitle: the query, or the track it started from. */
     val waveDescription: StateFlow<String?> = _waveDescription.asStateFlow()
 
+    private val _waveNovelty = MutableStateFlow(prefs.getFloat(KEY_WAVE_NOVELTY, 0.5f))
+    /** 0 keeps the wave to the familiar, 1 makes it dig for what has not been heard in a long time. */
+    val waveNovelty: StateFlow<Float> = _waveNovelty.asStateFlow()
+
     private val _waveMessage = MutableStateFlow<String?>(null)
     /** Why a wave could not start, for the screen to show and then clear. */
     val waveMessage: StateFlow<String?> = _waveMessage.asStateFlow()
@@ -1140,7 +1144,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      *
      * @param query only for [WaveMode.DESCRIPTION]: what the stream should sound like.
      */
-    fun startWave(mode: WaveMode, query: String? = null) {
+    /**
+     * @param label what to show as the wave's subtitle, when it reads better than [query] — a mood
+     *   button passes the mood's name while sending CLAP the English prompt behind it.
+     */
+    fun startWave(mode: WaveMode, query: String? = null, label: String? = null) {
         waveJob?.cancel()
         _waveStarting.value = true
         waveJob = viewModelScope.launch {
@@ -1167,13 +1175,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 waveTrackById = waveTracks.associateBy { it.id }
                 val songsById = library.associateBy { it.id }
 
-                val state = Wave.start(seed)
-                val (first, queued) = Wave.next(state, waveTracks, QUEUE_AHEAD + 1, excluded = _dislikedSongIds.value)
+                val state = Wave.start(seed, waveTracks)
+                val (first, queued) = Wave.next(
+                    state = state,
+                    tracks = waveTracks,
+                    count = QUEUE_AHEAD + 1,
+                    excluded = _dislikedSongIds.value,
+                    novelty = _waveNovelty.value
+                )
                 if (first.isEmpty()) return@launch
                 waveState = queued
                 _waveMode.value = mode
                 _waveDescription.value = when (mode) {
-                    WaveMode.DESCRIPTION -> query
+                    WaveMode.DESCRIPTION -> label ?: query
                     WaveMode.SIMILAR -> _currentSong.value?.title
                     WaveMode.TASTE -> null
                 }
@@ -1269,7 +1283,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 tracks = waveTracks,
                 count = needed,
                 current = current,
-                excluded = _dislikedSongIds.value
+                excluded = _dislikedSongIds.value,
+                novelty = _waveNovelty.value
             )
         }
         val songs = picked.mapNotNull { allSongsById[it.id] }
@@ -1300,6 +1315,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         _queue.value = songs
         playlistSongs = songs
+    }
+
+    /** Takes effect from the next track the wave queues, not only on the next wave. */
+    fun setWaveNovelty(value: Float) {
+        val snapped = (value.coerceIn(0f, 1f) * 20).roundToInt() / 20f
+        if (snapped == _waveNovelty.value) return
+        _waveNovelty.value = snapped
+        prefs.edit().putFloat(KEY_WAVE_NOVELTY, snapped).apply()
     }
 
     fun clearWaveMessage() {
@@ -1547,6 +1570,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** Fewer analysed tracks than this and a wave would circle immediately. */
         const val MIN_WAVE_LIBRARY = 40
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
+        const val KEY_WAVE_NOVELTY = "wave_novelty"
 
         /** Below this a track is not a match for the query under any reading. */
         const val MIN_SEARCH_SIMILARITY = 0.15f

@@ -23,6 +23,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
@@ -50,6 +51,8 @@ fun PlayerScreen(
     val audioSessionId by viewModel.audioSessionId.collectAsState()
     val aiShuffleEnabled by viewModel.aiShuffleEnabled.collectAsState()
     val favoriteIds by viewModel.favoriteSongIds.collectAsState()
+    val waveMode by viewModel.waveMode.collectAsState()
+    val waveDescription by viewModel.waveDescription.collectAsState()
     val sleepTimerRemaining by viewModel.sleepTimerRemaining.collectAsState()
 
     val song = currentSong ?: run {
@@ -110,6 +113,9 @@ fun PlayerScreen(
                     isFavorite = song.id in favoriteIds,
                     onToggleFavorite = { viewModel.toggleFavorite(song.id) },
                     onDislike = { viewModel.dislikeCurrent() },
+                    waveDescription = if (waveMode != null) waveDescription else null,
+                    waveRunning = waveMode != null,
+                    onStopWave = { viewModel.stopWave() },
                     onToggleShuffle = { viewModel.toggleShuffle() },
                     onToggleAiShuffle = { viewModel.toggleAiShuffle() },
                     onNextRepeatMode = { viewModel.nextRepeatMode() },
@@ -178,6 +184,10 @@ fun PlayerMainContent(
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onDislike: () -> Unit,
+    /** The running wave's subtitle, when it has one. */
+    waveDescription: String?,
+    waveRunning: Boolean,
+    onStopWave: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleAiShuffle: () -> Unit,
     onNextRepeatMode: () -> Unit,
@@ -213,6 +223,43 @@ fun PlayerMainContent(
         }
 
         Spacer(modifier = Modifier.height(48.dp))
+
+        // Said plainly: that the queue is endless and steers itself is not something to infer from
+        // the absence of a playlist name.
+        if (waveRunning) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                    .padding(start = 10.dp, end = 2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Waves,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = stringResource(id = R.string.wave_now_playing) +
+                        (waveDescription?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                IconButton(onClick = onStopWave) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(id = R.string.wave_stop),
+                        tint = LocalMutedOnBackground.current,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Scrolls only when the title does not fit; keyed so a new track starts from the left.

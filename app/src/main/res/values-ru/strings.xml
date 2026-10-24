@@ -201,4 +201,20 @@
     <string name="wave_stop">Остановить волну</string>
     <string name="wave_playing">Играет волна</string>
     <string name="dislike">Не нравится, дальше</string>
+
+    <!-- Wave moods and novelty -->
+    <string name="mood_calm">Спокойное</string>
+    <string name="mood_energetic">Энергичное</string>
+    <string name="mood_sad">Меланхоличное</string>
+    <string name="mood_bright">Светлое</string>
+    <string name="mood_dance">Танцевальное</string>
+    <string name="mood_instrumental">Инструментальное</string>
+    <string name="mood_focus">Для сосредоточения</string>
+    <string name="mood_epic">Эпичное</string>
+    <string name="wave_mood">Настроение</string>
+    <string name="wave_novelty">Привычное — новое</string>
+    <string name="wave_novelty_familiar">Привычное</string>
+    <string name="wave_novelty_new">Забытое</string>
+    <string name="wave_novelty_hint">Насколько долго волна обходит уже слышанное: от нескольких дней до двух месяцев.</string>
+    <string name="wave_now_playing">Моя волна</string>
 </resources>

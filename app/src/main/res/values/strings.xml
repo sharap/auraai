@@ -201,4 +201,20 @@
     <string name="wave_stop">Stop the wave</string>
     <string name="wave_playing">Wave is playing</string>
     <string name="dislike">Don\'t like, play something else</string>
+
+    <!-- Wave moods and novelty -->
+    <string name="mood_calm">Calm</string>
+    <string name="mood_energetic">Energetic</string>
+    <string name="mood_sad">Melancholic</string>
+    <string name="mood_bright">Bright</string>
+    <string name="mood_dance">Danceable</string>
+    <string name="mood_instrumental">Instrumental</string>
+    <string name="mood_focus">For focus</string>
+    <string name="mood_epic">Epic</string>
+    <string name="wave_mood">Mood</string>
+    <string name="wave_novelty">Familiar — new</string>
+    <string name="wave_novelty_familiar">Familiar</string>
+    <string name="wave_novelty_new">Forgotten</string>
+    <string name="wave_novelty_hint">How long the wave stays away from what you have already heard: from a few days to two months.</string>
+    <string name="wave_now_playing">My wave</string>
 </resources>

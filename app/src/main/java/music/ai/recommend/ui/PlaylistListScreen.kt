@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
@@ -19,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.WaveMode
+import music.ai.recommend.ai.WaveMood
+import music.ai.recommend.ai.WaveMoods
 import music.ai.recommend.Playlist
 import music.ai.recommend.R
 import music.ai.recommend.ai.SmartAlbum
@@ -51,7 +55,10 @@ fun PlaylistListScreen(
     val waveDescription by viewModel.waveDescription.collectAsState()
     val waveStarting by viewModel.waveStarting.collectAsState()
     val waveMessage by viewModel.waveMessage.collectAsState()
+    val waveNovelty by viewModel.waveNovelty.collectAsState()
     var describing by remember { mutableStateOf(false) }
+    // Resolved here because a lambda passed down to the card cannot read string resources.
+    val moodTitles = WaveMoods.all.associate { it.prompt to stringResource(id = it.title) }
     val dailyMixBuilding by viewModel.dailyMixBuilding.collectAsState()
     val building by viewModel.smartAlbumsBuilding.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
@@ -72,7 +79,10 @@ fun PlaylistListScreen(
                 description = waveDescription,
                 starting = waveStarting,
                 message = waveMessage,
+                novelty = waveNovelty,
                 onStart = { viewModel.startWave(it) },
+                onMood = { mood -> viewModel.startWave(WaveMode.DESCRIPTION, mood.prompt, moodTitles[mood.prompt]) },
+                onNovelty = { viewModel.setWaveNovelty(it) },
                 onDescribe = { describing = true },
                 onStop = { viewModel.stopWave() },
                 onDismissMessage = { viewModel.clearWaveMessage() }
@@ -249,7 +259,10 @@ private fun WaveCard(
     description: String?,
     starting: Boolean,
     message: String?,
+    novelty: Float,
     onStart: (WaveMode) -> Unit,
+    onMood: (WaveMood) -> Unit,
+    onNovelty: (Float) -> Unit,
     onDescribe: () -> Unit,
     onStop: () -> Unit,
     onDismissMessage: () -> Unit
@@ -311,6 +324,56 @@ private fun WaveCard(
                         modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = onDismissMessage) { Text(stringResource(id = android.R.string.ok)) }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            // The slider is here rather than in settings: it is worth moving while listening, and
+            // it applies to the next track the wave queues, not only to the next wave.
+            var dragged by remember(novelty) { mutableFloatStateOf(novelty) }
+            Text(
+                text = stringResource(id = R.string.wave_novelty),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Slider(
+                value = dragged,
+                onValueChange = { dragged = it },
+                onValueChangeFinished = { onNovelty(dragged) },
+                steps = 19,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = stringResource(id = R.string.wave_novelty_familiar),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMutedOnBackground.current,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stringResource(id = R.string.wave_novelty_new),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMutedOnBackground.current
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = stringResource(id = R.string.wave_mood),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(WaveMoods.all, key = { it.prompt }) { mood ->
+                    val title = stringResource(id = mood.title)
+                    AssistChip(
+                        onClick = { onMood(mood) },
+                        label = { Text(title) },
+                        leadingIcon = if (description == title) {
+                            { Icon(Icons.Default.GraphicEq, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
                 }
             }
 
