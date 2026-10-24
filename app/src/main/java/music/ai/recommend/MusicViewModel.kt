@@ -44,6 +44,8 @@ import music.ai.recommend.ai.DailyMixBuilder
 import music.ai.recommend.ai.MixListen
 import music.ai.recommend.ai.MixTrack
 import music.ai.recommend.ai.Wave
+import music.ai.recommend.ai.WaveSession
+import music.ai.recommend.ai.WaveSessions
 import music.ai.recommend.ai.WaveState
 import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.ModelAsset
@@ -60,6 +62,7 @@ import music.ai.recommend.scanner.MusicScanner
 import music.ai.recommend.ui.theme.BackgroundTone
 import music.ai.recommend.ui.theme.measureBackgroundTone
 import kotlin.math.roundToInt
+import java.io.File
 import java.lang.reflect.Type
 
 class UriAdapter : JsonSerializer<Uri>, JsonDeserializer<Uri> {
@@ -286,6 +289,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** Serialises the wave's queue edits: fast skips used to interleave them. */
     private val waveLock = Mutex()
     private var waveState: WaveState? = null
+    private var waveRestoreJob: Job? = null
     private var waveTracks: List<MixTrack> = emptyList()
     private var waveTrackById: Map<Long, MixTrack> = emptyMap()
     private var savedPlaylists: List<Playlist> = emptyList()
@@ -409,6 +413,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 refreshSmartAlbums()
                 refreshDailyMix()
                 controller?.let { syncCurrentMediaItem(it) }
+                restoreWave()
             } finally {
                 _isScanning.value = false
             }
@@ -941,6 +946,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             controller?.setMediaItems(restoredQueue.map { createMediaItem(it) }, index, lastPosition)
             controller?.prepare()
             _currentPosition.value = lastPosition
+            restoreWave()
         }
     }
 
@@ -1193,16 +1199,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _waveMessage.value = null
                 val seed = waveSeed(mode, query, vectors) ?: return@launch
 
-                val lastPlayed = playHistory.lastPlayed()
-                waveTracks = library.map { song ->
-                    MixTrack(
-                        id = song.id,
-                        vector = vectors.getValue(song.id),
-                        group = song.artist.trim().lowercase()
-                            .takeIf { it.isNotEmpty() && it != "<unknown>" } ?: song.folderName.lowercase(),
-                        lastPlayedAt = lastPlayed[song.id]
-                    )
-                }
+                waveTracks = waveLibrary(library, vectors)
                 waveTrackById = waveTracks.associateBy { it.id }
                 val songsById = library.associateBy { it.id }
 
@@ -1225,6 +1222,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val songs = first.mapNotNull { songsById[it.id] }
                 playSong(songs.first(), songs, fromWave = true)
                 observeWave()
+                persistWave()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1232,6 +1230,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _waveStarting.value = false
             }
+        }
+    }
+
+    /**
+     * The library as the wave sees it: analysed tracks, each with the act to keep off repeat and
+     * when it was last heard.
+     */
+    private suspend fun waveLibrary(library: List<Song>, vectors: Map<Long, FloatArray>): List<MixTrack> {
+        val lastPlayed = playHistory.lastPlayed()
+        return library.map { song ->
+            MixTrack(
+                id = song.id,
+                vector = vectors.getValue(song.id),
+                group = song.artist.trim().lowercase()
+                    .takeIf { it.isNotEmpty() && it != "<unknown>" } ?: song.folderName.lowercase(),
+                lastPlayedAt = lastPlayed[song.id]
+            )
         }
     }
 
@@ -1284,6 +1299,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val track = waveTrackById[event.songId] ?: return@collect
                 val fraction = Wave.fractionOf(event.playedMs, event.durationMs)
                 waveState = Wave.react(state, track, fraction)
+                persistWave()
                 refillWave(replaceTail = fraction < SKIP_FRACTION)
             }
         }
@@ -1334,6 +1350,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         syncQueueFromController()
         saveCurrentQueue()
+        persistWave()
     }
 
     /**
@@ -1352,6 +1369,78 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playlistSongs = songs
     }
 
+    /**
+     * Writes the wave down so it can be picked up again after the app is unloaded.
+     *
+     * Called on every reaction and every refill — a few kilobytes on the IO dispatcher, at most
+     * twice per track. Android reclaims the process of an app left in the background, and without
+     * this the queue came back from the saved playlist while the direction behind it was gone: a
+     * wave that quietly turned into an ordinary queue of the last few tracks.
+     */
+    private fun persistWave() {
+        val state = waveState ?: return
+        val mode = _waveMode.value ?: return
+        val session = WaveSession(mode.name, _waveDescription.value, state, System.currentTimeMillis())
+        val file = waveSessionFile()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                file.outputStream().use { WaveSessions.write(it, session) }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not save the wave", e)
+            }
+        }
+    }
+
+    /**
+     * Picks a wave back up where it was left.
+     *
+     * Attempted from both ends — when the library finishes loading and when the queue is restored —
+     * because resuming needs the analysed library and also needs to know what is playing, and which
+     * of the two arrives last depends on whether the playback service outlived the app.
+     */
+    private fun restoreWave() {
+        if (waveState != null || waveRestoreJob?.isActive == true) return
+        val playing = _currentSong.value?.id ?: return
+        if (allSongs.isEmpty()) return
+        waveRestoreJob = viewModelScope.launch {
+            val file = waveSessionFile()
+            val session = withContext(Dispatchers.IO) {
+                if (!file.exists()) null
+                else runCatching { file.inputStream().use { WaveSessions.read(it) } }.getOrNull()
+            } ?: return@launch
+
+            val mode = runCatching { WaveMode.valueOf(session.mode) }.getOrNull()
+            // Playing something the wave never queued means the listener moved on; a wave older
+            // than half a day is not the mood it was. Either way, let it go.
+            if (mode == null || playing !in session.state.played ||
+                System.currentTimeMillis() - session.savedAt > WAVE_MAX_AGE_MS
+            ) {
+                forgetWave()
+                return@launch
+            }
+
+            val vectors = embeddings.all()
+            val library = allSongs.filter { it.id in vectors }.distinctBy { it.id }
+            if (library.size < MIN_WAVE_LIBRARY) return@launch
+            waveTracks = waveLibrary(library, vectors)
+            waveTrackById = waveTracks.associateBy { it.id }
+            waveState = session.state
+            _waveMode.value = mode
+            _waveDescription.value = session.description
+            observeWave()
+            Log.i(TAG, "wave resumed after ${session.state.steps} tracks")
+            // The restored queue is as long as it was saved; top it back up to the usual depth.
+            refillWave()
+        }
+    }
+
+    private fun forgetWave() {
+        val file = waveSessionFile()
+        viewModelScope.launch(Dispatchers.IO) { runCatching { file.delete() } }
+    }
+
+    private fun waveSessionFile() = File(getApplication<Application>().filesDir, "wave_session.bin")
+
     /** Takes effect from the next track the wave queues, not only on the next wave. */
     fun setWaveNovelty(value: Float) {
         val snapped = (value.coerceIn(0f, 1f) * 20).roundToInt() / 20f
@@ -1369,7 +1458,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         waveJob = null
         waveEventsJob?.cancel()
         waveEventsJob = null
+        waveRestoreJob?.cancel()
+        waveRestoreJob = null
         waveState = null
+        forgetWave()
         waveTracks = emptyList()
         waveTrackById = emptyMap()
         _waveMode.value = null
@@ -1394,6 +1486,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         waveState = Wave.react(state, track, fraction = 0f, disliked = true)
+        persistWave()
         viewModelScope.launch {
             // The tail is swapped out before moving on, so there is always something to move on to.
             refillWave(replaceTail = true)
@@ -1604,6 +1697,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** Fewer analysed tracks than this and a wave would circle immediately. */
         const val MIN_WAVE_LIBRARY = 40
+
+        /**
+         * How long a saved wave is worth resuming.
+         *
+         * A wave is about the moment. Coming back to the app the same evening should carry on where
+         * it stopped; coming back two days later should not resurrect a direction that was steered
+         * by a mood nobody remembers.
+         */
+        const val WAVE_MAX_AGE_MS = 12L * 60 * 60 * 1000
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
         const val KEY_WAVE_NOVELTY = "wave_novelty"
 
