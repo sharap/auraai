@@ -16,11 +16,16 @@ import java.nio.LongBuffer
  * CLAP's own text tower only ever saw English. Fed Russian it answers with something plausible and
  * meaningless: measured against the thirty-five prompts this app names albums with, a Russian query
  * landed on the right one 0% of the time, at a mean rank of 18 out of 35 — chance. The fix is the
- * Multilingual-CLIP recipe: a small multilingual encoder (`cointegrated/rubert-tiny2`, 29M
+ * Multilingual-CLIP recipe: a small multilingual encoder (`sergeyzh/rubert-mini-sts`, 33M
  * parameters) trained to reproduce what CLAP's text tower produces for the English translation of
  * the same phrase. Audio takes no part in it, so every embedding already in the library stays
  * valid — the student simply arrives at the same place from another language. On the same thirty-five
- * prompts it lands first 71% of the time and within five 91%.
+ * prompts it lands first 77% of the time and within three 91%.
+ *
+ * Bigger students were tried. A twelve-layer one (LaBSE-en-ru, 129M) is better again — a Russian
+ * query reproduces half of what its English twin returns, against 45% here — but it does not
+ * survive int8: a single layer of it costs more accuracy than this whole model does, and shipping
+ * it would mean half a gigabyte.
  *
  * Trained against *this app's* quantised CLAP export, not a fresh checkpoint from the Hub: the
  * student has to match the embeddings the app actually searches with.
@@ -71,7 +76,7 @@ class RuTextEncoder(private val models: ModelRepository) {
         }
     }
 
-    /** Guarded by a mutex: two searches in flight must not each build their own 30 MB session. */
+    /** Guarded by a mutex: two searches in flight must not each build their own 33 MB session. */
     private suspend fun session(): OrtSession? {
         ortSession?.let { return it }
         return mutex.withLock { ortSession ?: build() }

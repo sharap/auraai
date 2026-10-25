@@ -91,8 +91,8 @@ enum class ModelAsset(
     RU_TEXT_MODEL(
         assetName = "ru_text_encoder_quantized.onnx",
         remotePath = "ru_text_encoder_quantized.onnx",
-        sizeBytes = 29_546_266L,
-        sha256 = "a3a1329de415f69a0a891d8074aab68bd06e9d8ed201df6e5cbae92cd19cf228",
+        sizeBytes = 32_784_917L,
+        sha256 = "854dfc4b60cd6e1e44b04b02da662d893af4ac0bc025f205014a2ccd9f9f8d2f",
         source = ModelSource.PROJECT
     ),
 

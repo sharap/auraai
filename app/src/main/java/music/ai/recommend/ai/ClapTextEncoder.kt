@@ -31,7 +31,7 @@ class ClapTextEncoder(private val models: ModelRepository) {
     /**
      * True when encoding [text] would need a download first.
      *
-     * Takes the text because the two doors are fetched separately: the Russian encoder is 30 MB
+     * Takes the text because the two doors are fetched separately: the Russian encoder is 33 MB
      * that someone who never searches in Russian should not be made to download.
      */
     fun needsDownload(text: String = ""): Boolean =

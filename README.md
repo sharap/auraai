@@ -16,7 +16,7 @@ playlist built from them stay in the app's own storage.
   album or across the whole library.
 - **…in Russian too.** CLAP only ever saw English, so a Russian query goes through a small encoder
   trained here to answer the way CLAP's text tower answers for the English translation of the same
-  phrase. It is a separate 30 MB download, fetched only once something is typed in Russian.
+  phrase. It is a separate 33 MB download, fetched only once something is typed in Russian.
 - **Smart albums.** The library is grouped by sound with DBSCAN over the track embeddings, and each
   group is named zero-shot ("Транс", "Классика · Secret Garden") by comparing its centre with a
   vocabulary of genre and mood descriptions. The grouping radius is adjustable in settings.
@@ -53,7 +53,7 @@ The CLAP weights are **not** in this repository — they are ~390 MB, which is n
 or leave the directory as it is and let the app download them from Hugging Face on first use
 (Settings → AI models). Either way they are verified by sha256 before use.
 
-The Russian query encoder (`ru_text_encoder_quantized.onnx`, 30 MB) is handled the same way, from
+The Russian query encoder (`ru_text_encoder_quantized.onnx`, 33 MB) is handled the same way, from
 this project's own Hugging Face repository rather than the upstream CLAP one. Its vocabulary
 (`ru_vocab.txt`) is a megabyte and ships in every APK, because the tokenizer is useless without it.
 

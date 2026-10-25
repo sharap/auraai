@@ -33,13 +33,14 @@ It was made from, and so carries obligations towards:
 
 | Ingredient | Origin | Licence |
 | --- | --- | --- |
-| Starting weights | [cointegrated/rubert-tiny2](https://huggingface.co/cointegrated/rubert-tiny2) | MIT |
+| Starting weights | [sergeyzh/rubert-mini-sts](https://huggingface.co/sergeyzh/rubert-mini-sts) | MIT |
 | Training sentences (general language) | [Tatoeba](https://tatoeba.org) ru-en, via [OPUS](https://opus.nlpl.eu/Tatoeba.php) | CC-BY 2.0 FR |
 | Training targets | CLAP's own text embeddings of the English side, from the Apache-2.0 weights above | Apache-2.0 |
 | Music vocabulary pairs | Written for this project | GPL-3.0-or-later |
 
-`app/src/main/assets/ru_vocab.txt` is rubert-tiny2's WordPiece vocabulary, MIT, and ships in every
-APK because it is a megabyte and the tokenizer is useless without it.
+`app/src/main/assets/ru_vocab.txt` is the WordPiece vocabulary rubert-mini-sts inherits unchanged
+from rubert-tiny2, MIT either way, and ships in every APK because it is a megabyte and the
+tokenizer is useless without it.
 
 ## Data files in this repository
 
