@@ -9,8 +9,16 @@ val hfModelRepo: String = providers.gradleProperty("auraai.hf.repo")
     .getOrElse("Xenova/larger_clap_music_and_speech")
 val hfModelRevision: String = providers.gradleProperty("auraai.hf.revision").getOrElse("main")
 
-// The two .onnx files in assets are ~408 MB. Build with -Pauraai.bundleModels=false to leave them
-// out; the app then downloads them from the repo above on first use (Settings -> AI Models).
+// Where the Russian query encoder comes from. It was trained for this app against its own CLAP
+// export, so there is no upstream to point at: it is published in this project's own repository.
+val ruModelRepo: String = providers.gradleProperty("auraai.hf.ruRepo")
+    .getOrElse("sharap/auraai-ru-encoder")
+val ruModelRevision: String = providers.gradleProperty("auraai.hf.ruRevision").getOrElse("main")
+
+// The .onnx files in assets are ~438 MB: the two CLAP exports and the Russian query encoder. Build
+// with -Pauraai.bundleModels=false to leave them out; the app then downloads what it needs on first
+// use (Settings -> AI Models), each from the repository named above. The tokenizer files beside
+// them are a couple of megabytes and always ship.
 val bundleModels: Boolean = providers.gradleProperty("auraai.bundleModels")
     .getOrElse("true").toBoolean()
 
@@ -99,6 +107,8 @@ android {
 
         buildConfigField("String", "HF_MODEL_REPO", "\"$hfModelRepo\"")
         buildConfigField("String", "HF_MODEL_REVISION", "\"$hfModelRevision\"")
+        buildConfigField("String", "RU_MODEL_REPO", "\"$ruModelRepo\"")
+        buildConfigField("String", "RU_MODEL_REVISION", "\"$ruModelRevision\"")
 
         if (devAbis.isNotEmpty()) {
             ndk { abiFilters += devAbis }

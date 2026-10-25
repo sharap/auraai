@@ -88,6 +88,8 @@
     <string name="ai_models">AI Models</string>
     <string name="model_audio">Audio model</string>
     <string name="model_text">Text model (search)</string>
+    <string name="model_russian">Russian search</string>
+    <string name="model_russian_hint">Search and describe a wave in Russian. %1$s, from the project\'s own repository on Hugging Face. CLAP itself only understands English; this is a small encoder trained to answer the way it would for the English translation.</string>
     <string name="model_state_bundled">In app</string>
     <string name="model_state_downloaded">Downloaded</string>
     <string name="model_state_missing">Not downloaded</string>
@@ -104,6 +106,7 @@
     <string name="clear_ai_data">Clear AI Data</string>
     <string name="ai_data_cleared">AI data cleared</string>
     <string name="ai_search_needs_model">AI search needs the text model. Download it in Settings → AI Models.</string>
+    <string name="ai_search_needs_russian_model">Searching in Russian needs its own model. Download it in Settings → AI Models.</string>
     <string name="scan_channel_name">AI Analysis</string>
     <string name="scan_notification_title">Analyzing your library</string>
     <string name="model_variant_title">Analysis model</string>

@@ -50,6 +50,9 @@ class SongSearchState {
         internal set
     var aiNeedsModel by mutableStateOf(false)
         internal set
+    /** The missing model is the Russian one, which is said differently and fetched separately. */
+    var aiNeedsRussianModel by mutableStateOf(false)
+        internal set
 
     val isActive: Boolean get() = query.isNotBlank()
 
@@ -73,6 +76,7 @@ fun rememberSongSearch(viewModel: MusicViewModel, scope: List<Song>? = null): So
             state.ai = null
             state.aiSearching = false
             state.aiNeedsModel = false
+            state.aiNeedsRussianModel = false
             return@LaunchedEffect
         }
         delay(SEARCH_DEBOUNCE_MS)
@@ -82,6 +86,7 @@ fun rememberSongSearch(viewModel: MusicViewModel, scope: List<Song>? = null): So
             val result = viewModel.searchAi(query)
             state.ai = result.matches
             state.aiNeedsModel = result.needsModel
+            state.aiNeedsRussianModel = result.needsRussianModel
         } finally {
             state.aiSearching = false
         }
@@ -157,7 +162,10 @@ fun LazyListScope.songSearchResults(
         item(key = "ai_needs_model") {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = stringResource(id = R.string.ai_search_needs_model),
+                text = stringResource(
+                    id = if (state.aiNeedsRussianModel) R.string.ai_search_needs_russian_model
+                    else R.string.ai_search_needs_model
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = LocalMutedOnBackground.current
             )

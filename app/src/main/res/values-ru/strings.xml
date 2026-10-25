@@ -88,6 +88,8 @@
     <string name="ai_models">AI модели</string>
     <string name="model_audio">Аудио-модель</string>
     <string name="model_text">Текстовая модель (поиск)</string>
+    <string name="model_russian">Поиск по-русски</string>
+    <string name="model_russian_hint">Поиск и описание волны на русском. %1$s, из репозитория проекта на Hugging Face. Сам CLAP понимает только английский; это маленький энкодер, обученный отвечать так же, как ответил бы CLAP на английский перевод.</string>
     <string name="model_state_bundled">В приложении</string>
     <string name="model_state_downloaded">Загружена</string>
     <string name="model_state_missing">Не загружена</string>
@@ -104,6 +106,7 @@
     <string name="clear_ai_data">Очистить данные AI</string>
     <string name="ai_data_cleared">Данные AI очищены</string>
     <string name="ai_search_needs_model">Для AI-поиска нужна текстовая модель. Загрузите её в Настройках → AI модели.</string>
+    <string name="ai_search_needs_russian_model">Для поиска по-русски нужна отдельная модель. Загрузите её в Настройках → AI модели.</string>
     <string name="scan_channel_name">AI анализ</string>
     <string name="scan_notification_title">Анализ библиотеки</string>
     <string name="model_variant_title">Модель анализа</string>

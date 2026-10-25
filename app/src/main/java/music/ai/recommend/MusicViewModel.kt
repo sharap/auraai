@@ -51,6 +51,7 @@ import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.ai.ModelProgress
 import music.ai.recommend.ai.ModelRepository
+import music.ai.recommend.ai.RuTextEncoder
 import music.ai.recommend.ai.ScanStage
 import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.SmartAlbumBuilder
@@ -85,7 +86,12 @@ data class ScoredSong(val song: Song, val score: Float)
 enum class WaveMode { TASTE, SIMILAR, DESCRIPTION }
 
 /** @property needsModel the text model is not on the device, so no AI search was attempted. */
-data class AiSearchResult(val matches: List<ScoredSong>, val needsModel: Boolean = false)
+data class AiSearchResult(
+    val matches: List<ScoredSong>,
+    val needsModel: Boolean = false,
+    /** The missing model is the Russian encoder, which is a different download and a different message. */
+    val needsRussianModel: Boolean = false
+)
 
 /** What the settings screen needs to know about the on-device weights. */
 data class ModelStatus(
@@ -98,7 +104,11 @@ data class ModelStatus(
     val fullReady: Boolean,
     val quantizedBundled: Boolean,
     val fullBundled: Boolean,
-    val pendingBytes: Long
+    val pendingBytes: Long,
+    val russianReady: Boolean,
+    val russianBundled: Boolean,
+    /** Counted apart from [pendingBytes]: Russian search is an opt-in extra, not part of the set. */
+    val russianPendingBytes: Long
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -1004,7 +1014,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             quantizedBundled = modelRepository.isBundled(ModelAsset.AUDIO_MODEL_QUANTIZED),
             fullBundled = modelRepository.isBundled(ModelAsset.AUDIO_MODEL),
             // Only what the chosen variant needs; the other export is not a pending download.
-            pendingBytes = modelRepository.pendingDownloadBytes(needed)
+            pendingBytes = modelRepository.pendingDownloadBytes(needed),
+            russianReady = modelRepository.isAvailable(ModelAsset.forRussianText),
+            russianBundled = modelRepository.isBundled(ModelAsset.RU_TEXT_MODEL),
+            russianPendingBytes = modelRepository.pendingDownloadBytes(ModelAsset.forRussianText)
         )
     }
 
@@ -1026,6 +1039,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (downloadJob?.isActive == true) return
         downloadJob = viewModelScope.launch {
             modelRepository.ensure(modelRepository.audioVariant.value.assets + ModelAsset.forText)
+            refreshModelStatus()
+        }
+    }
+
+    /**
+     * Fetches the Russian encoder, on its own.
+     *
+     * Separate from [downloadModels] on purpose: 30 MB is not much, but it is pointless for someone
+     * who never types Cyrillic, and nobody should pay for it by accident.
+     */
+    fun downloadRussianModel() {
+        if (downloadJob?.isActive == true) return
+        downloadJob = viewModelScope.launch {
+            modelRepository.ensure(ModelAsset.forRussianText)
             refreshModelStatus()
         }
     }
@@ -1257,8 +1284,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
             WaveMode.DESCRIPTION -> {
                 if (query.isNullOrBlank()) null
-                else if (textEncoder.needsDownload()) {
-                    _waveMessage.value = getApplication<Application>().getString(R.string.ai_search_needs_model)
+                else if (textEncoder.needsDownload(query)) {
+                    _waveMessage.value = getApplication<Application>().getString(
+                        if (RuTextEncoder.handles(query)) R.string.ai_search_needs_russian_model
+                        else R.string.ai_search_needs_model
+                    )
                     null
                 } else textEncoder.encode(query)
             }
@@ -1604,7 +1634,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun searchAi(query: String): AiSearchResult {
         // Typing must never kick off a 126 MB download on whatever connection is at hand; the
         // settings screen is where the user opts into that.
-        if (textEncoder.needsDownload()) return AiSearchResult(emptyList(), needsModel = true)
+        if (textEncoder.needsDownload(query)) {
+            return AiSearchResult(
+                emptyList(),
+                needsModel = true,
+                needsRussianModel = RuTextEncoder.handles(query)
+            )
+        }
         return try {
             val stored = embeddings.all()
             if (stored.isEmpty()) return AiSearchResult(emptyList())

@@ -23,6 +23,20 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
+/** Whose Hugging Face repository a weight file comes from when it was not bundled into the APK. */
+enum class ModelSource {
+    /** The CLAP exports, from the upstream repository named by the build. */
+    UPSTREAM,
+
+    /**
+     * Weights trained for this app, from this project's own repository.
+     *
+     * The Russian encoder exists nowhere else: it was distilled against this app's own CLAP export,
+     * so there is no upstream to point at.
+     */
+    PROJECT
+}
+
 /**
  * A weight file the AI engine needs. [assetName] is the name used both inside `assets/` (when the
  * file is bundled into the APK) and inside the app's private `files/models/` directory (when it has
@@ -33,7 +47,8 @@ enum class ModelAsset(
     val remotePath: String,
     val sizeBytes: Long,
     /** LFS sha256 from the Hub; null for small files that the Hub tracks as plain git blobs. */
-    val sha256: String?
+    val sha256: String?,
+    val source: ModelSource = ModelSource.UPSTREAM
 ) {
     /** int8. The default: a quarter of the download and markedly faster inference. */
     AUDIO_MODEL_QUANTIZED(
@@ -67,11 +82,35 @@ enum class ModelAsset(
         remotePath = "merges.txt",
         sizeBytes = 456_318L,
         sha256 = null
+    ),
+
+    /**
+     * The Russian query encoder: a small multilingual student taught to reproduce CLAP's text
+     * embeddings, so a Russian query can be compared with the same track vectors. int8.
+     */
+    RU_TEXT_MODEL(
+        assetName = "ru_text_encoder_quantized.onnx",
+        remotePath = "ru_text_encoder_quantized.onnx",
+        sizeBytes = 29_546_266L,
+        sha256 = "a3a1329de415f69a0a891d8074aab68bd06e9d8ed201df6e5cbae92cd19cf228",
+        source = ModelSource.PROJECT
+    ),
+
+    /** WordPiece vocabulary for the above. Small enough to ship in every APK. */
+    RU_VOCAB(
+        assetName = "ru_vocab.txt",
+        remotePath = "ru_vocab.txt",
+        sizeBytes = 1_080_666L,
+        sha256 = "b99581da1a76076e7b13e40b2d83f7cf323ce2ea4150dd637902433f62c29aa2",
+        source = ModelSource.PROJECT
     );
 
     companion object {
         /** Everything the text encoder needs. */
         val forText = listOf(TEXT_MODEL, VOCAB, MERGES)
+
+        /** Everything a Russian query needs on top of nothing else: this encoder is self-contained. */
+        val forRussianText = listOf(RU_TEXT_MODEL, RU_VOCAB)
     }
 }
 
@@ -338,7 +377,14 @@ class ModelRepository private constructor(context: Context) {
             return
         }
 
-        val url = URL("$HF_ENDPOINT/${BuildConfig.HF_MODEL_REPO}/resolve/${BuildConfig.HF_MODEL_REVISION}/${asset.remotePath}")
+        val url = URL(
+            when (asset.source) {
+                ModelSource.UPSTREAM ->
+                    "$HF_ENDPOINT/${BuildConfig.HF_MODEL_REPO}/resolve/${BuildConfig.HF_MODEL_REVISION}/${asset.remotePath}"
+                ModelSource.PROJECT ->
+                    "$HF_ENDPOINT/${BuildConfig.RU_MODEL_REPO}/resolve/${BuildConfig.RU_MODEL_REVISION}/${asset.remotePath}"
+            }
+        )
         val connection = openConnection(url, existing)
         try {
             val code = connection.responseCode

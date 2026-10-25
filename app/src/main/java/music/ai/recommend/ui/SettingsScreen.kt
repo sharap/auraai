@@ -494,6 +494,36 @@ private fun AiModelsCard(viewModel: MusicViewModel) {
                 bundled = status.textBundled,
                 ready = status.textReady
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            ModelRow(
+                label = stringResource(id = R.string.model_russian),
+                bundled = status.russianBundled,
+                ready = status.russianReady
+            )
+
+            // Offered on its own rather than folded into the download above: searching in Russian
+            // is an extra, and someone who never types Cyrillic should not be fetching it.
+            if (status.russianPendingBytes > 0L) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(
+                        id = R.string.model_russian_hint,
+                        formatBytes(status.russianPendingBytes)
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { viewModel.downloadRussianModel() },
+                    modifier = Modifier.align(Alignment.End),
+                    enabled = !progress.running
+                ) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(id = R.string.download_models))
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -561,7 +591,8 @@ private fun AiModelsCard(viewModel: MusicViewModel) {
             // and cannot be freed.
             val hasDownloads = (status.quantizedReady && !status.quantizedBundled) ||
                 (status.fullReady && !status.fullBundled) ||
-                (status.textReady && !status.textBundled)
+                (status.textReady && !status.textBundled) ||
+                (status.russianReady && !status.russianBundled)
             if (hasDownloads) {
                 TextButton(
                     onClick = { viewModel.deleteDownloadedModels() },

@@ -10,18 +10,37 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.nio.LongBuffer
 
+/**
+ * Text into CLAP's text space, which is where the library's track vectors live.
+ *
+ * Two doors lead there. English goes through CLAP's own text tower, the graph the embeddings were
+ * made with. Russian goes through [RuTextEncoder], a student trained to answer the way that tower
+ * answers for the English translation — CLAP itself was never shown a word of Russian and treats
+ * it as noise. Which door a query takes is decided by the query, so nothing above this has to know
+ * there are two.
+ */
 class ClapTextEncoder(private val models: ModelRepository) {
 
     private val tokenizer = BpeTokenizer(models)
+    private val russian = RuTextEncoder(models)
     private val mutex = Mutex()
 
     private var ortEnv: OrtEnvironment? = null
     private var ortSession: OrtSession? = null
 
-    /** True when encoding would need a download first. */
-    fun needsDownload(): Boolean = !models.isAvailable(ModelAsset.forText)
+    /**
+     * True when encoding [text] would need a download first.
+     *
+     * Takes the text because the two doors are fetched separately: the Russian encoder is 30 MB
+     * that someone who never searches in Russian should not be made to download.
+     */
+    fun needsDownload(text: String = ""): Boolean =
+        if (RuTextEncoder.handles(text)) russian.needsDownload()
+        else !models.isAvailable(ModelAsset.forText)
 
-    fun pendingDownloadBytes(): Long = models.pendingDownloadBytes(ModelAsset.forText)
+    fun pendingDownloadBytes(text: String = ""): Long =
+        if (RuTextEncoder.handles(text)) russian.pendingDownloadBytes()
+        else models.pendingDownloadBytes(ModelAsset.forText)
 
     /**
      * Encodes [text] into a unit-length CLAP embedding.
@@ -31,6 +50,7 @@ class ClapTextEncoder(private val models: ModelRepository) {
      *   produced a meaningless similarity for every track.
      */
     suspend fun encode(text: String): FloatArray? = withContext(Dispatchers.Default) {
+        if (RuTextEncoder.handles(text)) return@withContext russian.encode(text)
         val session = session() ?: return@withContext null
         val env = ortEnv ?: return@withContext null
 
@@ -86,6 +106,7 @@ class ClapTextEncoder(private val models: ModelRepository) {
         runCatching { ortSession?.close() }
         ortSession = null
         ortEnv = null
+        russian.release()
     }
 
     private fun normalize(v: FloatArray): FloatArray {
