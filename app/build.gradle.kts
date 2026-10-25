@@ -12,7 +12,7 @@ val hfModelRevision: String = providers.gradleProperty("auraai.hf.revision").get
 // Where the Russian query encoder comes from. It was trained for this app against its own CLAP
 // export, so there is no upstream to point at: it is published in this project's own repository.
 val ruModelRepo: String = providers.gradleProperty("auraai.hf.ruRepo")
-    .getOrElse("sharap/auraai-ru-encoder")
+    .getOrElse("sharapsoftware/auraai-ru-encoder")
 val ruModelRevision: String = providers.gradleProperty("auraai.hf.ruRevision").getOrElse("main")
 
 // The .onnx files in assets are ~438 MB: the two CLAP exports and the Russian query encoder. Build
