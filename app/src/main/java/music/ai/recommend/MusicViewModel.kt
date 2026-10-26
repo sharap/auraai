@@ -52,6 +52,7 @@ import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.ai.ModelProgress
 import music.ai.recommend.ai.ModelRepository
 import music.ai.recommend.ai.RuTextEncoder
+import music.ai.recommend.ai.TrackGroups
 import music.ai.recommend.ai.ScanStage
 import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.SmartAlbumBuilder
@@ -1230,7 +1231,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 waveTrackById = waveTracks.associateBy { it.id }
                 val songsById = library.associateBy { it.id }
 
-                val state = Wave.start(seed, waveTracks)
+                val state = Wave.start(seed, waveTracks, after = _currentSong.value?.id?.let { waveTrackById[it] })
                 val (first, queued) = Wave.next(
                     state = state,
                     tracks = waveTracks,
@@ -1270,8 +1271,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             MixTrack(
                 id = song.id,
                 vector = vectors.getValue(song.id),
-                group = song.artist.trim().lowercase()
-                    .takeIf { it.isNotEmpty() && it != "<unknown>" } ?: song.folderName.lowercase(),
+                group = TrackGroups.of(song.artist, song.title, song.folderName),
                 lastPlayedAt = lastPlayed[song.id]
             )
         }

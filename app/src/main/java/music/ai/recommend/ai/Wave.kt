@@ -129,12 +129,18 @@ object Wave {
      *
      * The library is needed here, not just when picking, because everything is compared with its
      * mean direction removed, and that mean is a property of the library.
+     *
+     * @param after the track that was playing when the wave was started, if any. Its act goes
+     *   straight into the cooldown: a stream started from a track by someone with a hundred of them
+     *   in the library would otherwise open with another of theirs, which is what "the wave gets
+     *   stuck on one artist" turned out to mean.
      */
-    fun start(seed: FloatArray, tracks: List<MixTrack>): WaveState {
+    fun start(seed: FloatArray, tracks: List<MixTrack>, after: MixTrack? = null): WaveState {
         val centre = centroid(tracks.map { it.vector })
         return WaveState(
             direction = normalize(subtract(seed, centre)),
-            centre = centre
+            centre = centre,
+            recentGroups = listOfNotNull(after?.group)
         )
     }
 

@@ -171,6 +171,44 @@ class WaveTest {
         assertEquals(20, next.size)
     }
 
+    /**
+     * Starting a wave from a track by someone who holds a hundred files in the library used to open
+     * with another of theirs: nothing had been played yet, so the cooldown was empty and their dense
+     * block filled the shortlist. The track that was playing counts as just heard.
+     */
+    @Test
+    fun aWaveDoesNotOpenWithTheActItWasStartedFrom() {
+        val random = Random(11)
+        val centre = normalize(FloatArray(dims) { random.nextFloat() * 2 - 1 })
+        // One neighbourhood, two thirds of it one act: the shape that caused the complaint.
+        val tracks = List(60) { i ->
+            MixTrack(
+                id = i.toLong(),
+                vector = normalize(FloatArray(dims) { centre[it] + (random.nextFloat() - 0.5f) * 0.2f }),
+                group = if (i < 40) "dominant" else "other${i % 7}"
+            )
+        }
+        val seed = tracks.first()
+
+        // The first pick is what the complaint was about: within one refill the cooldown already
+        // keeps the same act from coming twice, so it is only the opening track that was exposed.
+        fun firstPicks(state: WaveState) = (1..20).map {
+            Wave.next(state, tracks, count = 1, random = Random(it), now = now).first.single().group
+        }
+
+        val unseeded = firstPicks(Wave.start(seed.vector, tracks))
+        assertTrue(
+            "the premise fails: the act does not dominate the draw, ${unseeded.count { it == "dominant" }}/20",
+            unseeded.count { it == "dominant" } >= 15
+        )
+
+        val seeded = firstPicks(Wave.start(seed.vector, tracks, after = seed))
+        assertTrue(
+            "opened with the act it was started from: $seeded",
+            seeded.none { it == "dominant" }
+        )
+    }
+
     @Test
     fun fractionIsClamped() {
         assertEquals(0.5f, Wave.fractionOf(60_000, 120_000), 0.001f)

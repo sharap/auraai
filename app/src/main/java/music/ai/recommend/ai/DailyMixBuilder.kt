@@ -69,13 +69,14 @@ class DailyMixBuilder(
             MixTrack(
                 id = song.id,
                 vector = vectors.getValue(song.id),
-                // The artist keeps one act from filling the playlist; with no artist tag the
-                // folder is the next best thing, since libraries are usually filed by album.
-                group = song.artist.trim().lowercase()
-                    .takeIf { it.isNotEmpty() && it != "<unknown>" }
-                    ?: song.folderName.lowercase(),
+                // The artist keeps one act from filling the playlist. Most of this library has
+                // no artist tag, so it is read off the file name where it can be — see TrackGroups.
+                group = TrackGroups.of(song.artist, song.title, song.folderName),
                 lastPlayedAt = lastPlayed[song.id],
-                duplicateKey = "${song.artist.trim()}|${song.title.trim()}".lowercase()
+                // Named the same way, so one recording is caught whether or not it carries tags.
+                duplicateKey =
+                    "${TrackGroups.of(song.artist, song.title, song.folderName)}|" +
+                        TrackGroups.songInName(song.title).lowercase()
             )
         }
 
