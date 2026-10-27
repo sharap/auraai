@@ -101,6 +101,12 @@ settings behind them — changing them means building your own APK.
 | `RECENT_DAYS_FAMILIAR`, `RECENT_DAYS_NEW` | 3, 60 | The two ends of the "familiar — new" slider, in days. |
 | `UNPLAYED_BONUS` | 0.25 | How much a never-played track is favoured at the "new" end. |
 
+What counts as "the same artist" is decided in `ai/TrackGroups.kt`: the tag if the file carries one,
+otherwise the part before the dash in "Artist - Title", and only failing both the folder name. The
+order matters more than it sounds. In a library where most files are untagged, grouping by folder
+makes one big folder a single artist, and the cooldown then shuts out everything in it for five
+tracks — which is how a wave ends up circling one act.
+
 Four more sit in `MusicViewModel`, and they are about the queue rather than the taste:
 
 | Constant | Default | Effect |
