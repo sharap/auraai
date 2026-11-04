@@ -253,9 +253,18 @@ class AiScanner(
         return v
     }
 
-    /** Decode timing is measured separately from inference; see ProviderBenchmarkTest. */
-    internal fun decodeForBenchmark(song: Song, stats: DecodeStats? = null): FloatArray =
-        decodeAudioChunk(song, CHUNK_MS, stats)
+    /**
+     * Decode timing is measured separately from inference; see ProviderBenchmarkTest.
+     *
+     * @param startUsOverride where to take the excerpt from instead of the middle. Only an
+     *   experiment passes it — DecodeDumpTest, measuring how far an embedding moves when the window
+     *   shifts, which is what decides whether embeddings can be carried between devices at all.
+     */
+    internal fun decodeForBenchmark(
+        song: Song,
+        stats: DecodeStats? = null,
+        startUsOverride: Long? = null
+    ): FloatArray = decodeAudioChunk(song, CHUNK_MS, stats, startUsOverride)
 
     /** Counters for the decode, filled in only when a benchmark asks for them. */
     internal class DecodeStats {
@@ -281,7 +290,12 @@ class AiScanner(
      * Every callback runs on [codecThread]; the calling thread only waits and then reads, with the
      * latch providing the happens-before.
      */
-    private fun decodeAudioChunk(song: Song, durationMs: Long, stats: DecodeStats? = null): FloatArray {
+    private fun decodeAudioChunk(
+        song: Song,
+        durationMs: Long,
+        stats: DecodeStats? = null,
+        startUsOverride: Long? = null
+    ): FloatArray {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var callbackThread: HandlerThread? = null
@@ -293,7 +307,7 @@ class AiScanner(
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
             val duration = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
-            val startTimeUs = max(0L, (duration / 2) - (durationMs * 1000 / 2))
+            val startTimeUs = startUsOverride ?: max(0L, (duration / 2) - (durationMs * 1000 / 2))
             extractor.seekTo(startTimeUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return FloatArray(0)
