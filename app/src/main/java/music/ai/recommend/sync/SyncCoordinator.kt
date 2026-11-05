@@ -1,10 +1,5 @@
 package music.ai.recommend.sync
 
-import android.util.Log
-import music.ai.recommend.history.PlayEvent
-import music.ai.recommend.history.PlayHistory
-import music.ai.recommend.model.Song
-
 /**
  * The part that actually moves listening history between this device and the folder.
  *
@@ -18,17 +13,27 @@ import music.ai.recommend.model.Song
  * over rather than retried forever — there is nothing left to describe it by.
  *
  * Reading in: what the other devices wrote, folded in by [HistoryMerge], then matched against this
- * library, then written to the database — and only after all of that is the state saved. A crash
- * in the middle therefore costs a re-read, which costs nothing, instead of a batch that was marked
+ * library, then written to the store — and only after all of that is the state saved. A crash in
+ * the middle therefore costs a re-read, which costs nothing, instead of a batch that was marked
  * read and never stored. Listens that matched nothing are kept and tried again next time, since
  * the usual reason is a file that has not been copied over yet.
+ *
+ * Nothing here knows which app it is in. The two platforms keep history in quite different things
+ * and call a track by quite different names, and both differences stop at [HistoryStore] — which
+ * is the point, because this is the one file where a second copy could not be a copy, and where a
+ * difference between the two would be a difference in behaviour rather than in spelling.
+ *
+ * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
-class SyncCoordinator(
+class SyncCoordinator<Track>(
     private val deviceId: String,
     private val state: SyncState,
-    private val history: PlayHistory,
-    private val library: suspend () -> List<Song>,
-    private val folder: () -> SyncFolder?
+    private val store: HistoryStore<Track>,
+    private val folder: () -> SyncFolder?,
+    /** How long this app's history is kept, which is as far back as a merge looks. */
+    private val keepDays: Int = 365,
+    /** Where a word about something worth noticing goes; the platform decides what that means. */
+    private val note: (String) -> Unit = {}
 ) {
 
     private val writer = HistoryWriter(deviceId, Relay(), state.sequence)
@@ -58,11 +63,11 @@ class SyncCoordinator(
     suspend fun push(now: Long, force: Boolean = false): Pushed {
         if (folder() == null) return Pushed(0, writer.pending, 0)
         var skipped = 0
-        val fresh = history.notYetExported(offeredUpTo, PUSH_LIMIT)
+        val fresh = store.own(offeredUpTo, PUSH_LIMIT)
         if (fresh.isNotEmpty()) {
-            val keys = describeLibrary()
-            for (exportable in fresh) {
-                val key = keys[exportable.event.songId]
+            val keys = library()
+            for (listen in fresh) {
+                val key = keys[listen.track]
                 if (key == null) {
                     // The file is gone, so there is no way left to name it to anyone. Stepping
                     // over it keeps the watermark moving; waiting would stop the outbox for good.
@@ -70,14 +75,14 @@ class SyncCoordinator(
                 } else {
                     writer.offer(
                         PlayRecord(
-                            playedAt = exportable.event.playedAt,
-                            playedMs = exportable.event.playedMs,
-                            durationMs = exportable.event.durationMs,
+                            playedAt = listen.playedAt,
+                            playedMs = listen.playedMs,
+                            durationMs = listen.durationMs,
                             track = key
                         )
                     )
                 }
-                offeredUpTo = exportable.rowId
+                offeredUpTo = listen.rowId
             }
         }
 
@@ -94,11 +99,8 @@ class SyncCoordinator(
     suspend fun pull(now: Long): Pulled {
         val folder = folder() ?: return Pulled(0, state.unresolved.size, emptyMap(), null)
 
-        val known = history.fromOtherDevices(PlayHistory.KEEP_DAYS, now)
-            .map { (device, at) -> HistoryMerge.Known(device, at) }
-            .toSet()
-        val outcome = HistoryReader(deviceId, folder, state.progress)
-            .read(known, now, PlayHistory.KEEP_DAYS)
+        val known = store.heldFromOthers(now)
+        val outcome = HistoryReader(deviceId, folder, state.progress).read(known, now, keepDays)
 
         // Everything that ever failed to match is offered again: the usual reason is a file that
         // had not arrived yet, and by now it may have.
@@ -109,15 +111,17 @@ class SyncCoordinator(
             return Pulled(0, state.unresolved.size, outcome.merge.gaps, outcome)
         }
 
-        val matcher = TrackMatcher(describeLibrary().map { (id, key) -> TrackMatcher.Entry(id, key) })
-        state.aliases.forEach { (hash, id) -> matcher.remember(hash, id) }
+        val matcher = TrackMatcher(library().map { (track, key) -> TrackMatcher.Entry(track, key) })
+        state.aliases.forEach { (hash, text) ->
+            store.fromText(text)?.let { matcher.remember(hash, it) }
+        }
         val split = matcher.split(candidates)
 
         var takenIn = 0
         for ((device, resolved) in split.resolved.groupBy { it.incoming.deviceId }) {
-            takenIn += history.recordFromOtherDevice(device, resolved.map {
-                PlayEvent(
-                    songId = it.id,
+            takenIn += store.takeIn(device, resolved.map {
+                TakenListen(
+                    track = it.id,
                     playedAt = it.incoming.record.playedAt,
                     playedMs = it.incoming.record.playedMs,
                     durationMs = it.incoming.record.durationMs
@@ -126,38 +130,26 @@ class SyncCoordinator(
         }
 
         // Saved last, and only now: the progress map says these batches have been read, and that
-        // must not be true before the rows are in the database.
+        // must not be true before the rows are in the store.
         state.unresolved.clear()
         state.rememberUnresolved(split.unresolved.map { SyncState.Waiting(it.deviceId, it.record) })
         state.aliases.clear()
-        state.aliases.putAll(matcher.learnedAliases())
+        state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })
         state.save()
 
         if (outcome.merge.gaps.isNotEmpty()) {
-            Log.i(TAG, "Batches missing from the folder: ${outcome.merge.gaps}")
+            note("Batches missing from the folder: ${outcome.merge.gaps}")
         }
         return Pulled(takenIn, state.unresolved.size, outcome.merge.gaps, outcome)
     }
 
-    private suspend fun describeLibrary(): Map<Long, TrackKey> {
-        val songs = runCatching { library() }.getOrElse {
-            Log.w(TAG, "Could not read the library", it)
-            emptyList()
-        }
-        val keys = LinkedHashMap<Long, TrackKey>(songs.size * 2)
-        for (song in songs) {
-            keys[song.id] = TrackKey.describe(
-                artist = song.artist,
-                title = song.title,
-                fileName = song.path.substringAfterLast('/'),
-                durationMs = song.duration
-            )
-        }
-        return keys
+    /** The library, or nothing at all: a pass that cannot see it must not conclude anything. */
+    private suspend fun library(): Map<Track, TrackKey> = runCatching { store.library() }.getOrElse {
+        note("Could not read the library: $it")
+        emptyMap()
     }
 
     private companion object {
-        const val TAG = "SyncCoordinator"
 
         /** How many of this device's listens are described in one pass. */
         const val PUSH_LIMIT = 200

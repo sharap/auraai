@@ -26,9 +26,14 @@ import java.io.File
  * everything that arrives late — which on a device set up second is most of it.
  *
  * [aliases] so that a hash worked out the hard way, by tags or by the vectors, is worked out once.
+ * The local track is kept as text because only the platform knows how to spell one — a MediaStore
+ * id on the phone, a path on the desktop — and a state file written by either should at worst be
+ * unreadable to the other rather than wrong.
  *
  * Written through a temporary file and renamed, because a half-written state file read back would
  * be worse than none: a sequence that went backwards would collide with batches already out there.
+ *
+ * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
 class SyncState private constructor(
     private val file: File,
@@ -37,7 +42,7 @@ class SyncState private constructor(
     var exportedUpTo: Long,
     val progress: MutableMap<String, Int>,
     val unresolved: MutableList<Waiting>,
-    val aliases: MutableMap<String, Long>,
+    val aliases: MutableMap<String, String>,
     /** Whether this folder's provider can append to a document; null until it has been tried. */
     var appendWorks: Boolean?
 ) {
@@ -69,7 +74,7 @@ class SyncState private constructor(
             }
         })
         json.add("aliases", JsonObject().apply {
-            aliases.forEach { (hash, id) -> addProperty(hash, id) }
+            aliases.forEach { (hash, track) -> addProperty(hash, track) }
         })
         appendWorks?.let { json.addProperty("appendWorks", it) }
 
@@ -120,9 +125,11 @@ class SyncState private constructor(
                             PlayRecord.fromJson(record)?.let { add(Waiting(deviceId, it)) }
                         }
                     },
-                    aliases = HashMap<String, Long>().apply {
-                        json.getAsJsonObject("aliases")?.entrySet()?.forEach { (hash, id) ->
-                            put(hash, id.asLong)
+                    aliases = HashMap<String, String>().apply {
+                        json.getAsJsonObject("aliases")?.entrySet()?.forEach { (hash, track) ->
+                            // A file from before this was text holds numbers, which gson hands
+                            // back as their own digits, so nothing has to be migrated.
+                            put(hash, track.asString)
                         }
                     },
                     appendWorks = json.get("appendWorks")?.asBoolean

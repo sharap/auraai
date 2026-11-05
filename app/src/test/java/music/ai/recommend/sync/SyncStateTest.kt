@@ -38,7 +38,7 @@ class SyncStateTest {
         state.progress["phone/history/2027-01-15.jsonl"] = 7
         state.progress["phone/history/2027-01-14.jsonl"] = 19
         state.rememberUnresolved(listOf(waiting(1_700_000_000_000, "late"), waiting(1_700_000_001_000, "later")))
-        state.aliases["cc".repeat(32)] = 99L
+        state.aliases["cc".repeat(32)] = "99"
         state.appendWorks = false
         assertTrue(state.save())
 
@@ -50,8 +50,23 @@ class SyncStateTest {
         ), read.progress)
         assertEquals(listOf("late", "later"), read.unresolved.map { it.record.track.title })
         assertEquals("22".repeat(16), read.unresolved.first().deviceId)
-        assertEquals(mapOf("cc".repeat(32) to 99L), read.aliases)
+        assertEquals(mapOf("cc".repeat(32) to "99"), read.aliases)
         assertEquals(false, read.appendWorks)
+    }
+
+    @Test
+    fun aStateFileFromBeforeAliasesWereTextStillReads() {
+        // The aliases were numbers, because a track here is a MediaStore id; they became text so
+        // that the desktop, where a track is a path, can keep its own in the same file.
+        val file = stateFile()
+        file.parentFile!!.mkdirs()
+        val hash = "dd".repeat(32)
+        file.writeText("{\"v\":1,\"sequence\":3,\"exportedUpTo\":11,\"aliases\":{\"$hash\":99}}")
+
+        val read = SyncState.load(file)
+        assertEquals(3L, read.sequence)
+        assertEquals(11L, read.exportedUpTo)
+        assertEquals(mapOf(hash to "99"), read.aliases)
     }
 
     @Test

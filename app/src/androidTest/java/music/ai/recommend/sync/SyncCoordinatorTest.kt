@@ -71,10 +71,10 @@ class SyncCoordinatorTest {
         folder.deleteRecursively()
     }
 
-    private fun coordinator(deviceId: String, library: List<Song> = songs): SyncCoordinator {
+    private fun coordinator(deviceId: String, library: List<Song> = songs): SyncCoordinator<Long> {
         val state = SyncState.load(File(folder, "state-$deviceId.json"))
         val sink = SafSyncFolder.fromDirectory(context, folder, deviceId)
-        return SyncCoordinator(deviceId, state, history, { library }, { sink })
+        return SyncCoordinator(deviceId, state, PlayHistoryStore(history) { library }, { sink })
     }
 
     private fun listen(songId: Long, at: Long, playedMs: Long = 180_000) =
@@ -181,7 +181,7 @@ class SyncCoordinatorTest {
     fun nothingHappensWithoutAFolder() = runBlocking {
         history.record(listen(5001L, now - 300_000))
         val state = SyncState.load(File(folder, "state-none.json"))
-        val adrift = SyncCoordinator(first, state, history, { songs }, { null })
+        val adrift = SyncCoordinator(first, state, PlayHistoryStore(history) { songs }, { null })
         assertEquals(0, adrift.push(now, force = true).written)
         assertEquals(0, adrift.pull(now).takenIn)
         assertEquals(1, dao.count())

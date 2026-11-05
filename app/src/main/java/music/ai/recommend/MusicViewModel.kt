@@ -59,6 +59,7 @@ import music.ai.recommend.ai.SmartAlbumBuilder
 import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.history.PlayHistory
 import music.ai.recommend.sync.SafSyncFolder
+import music.ai.recommend.sync.PlayHistoryStore
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
 import music.ai.recommend.sync.SyncIdentity
@@ -329,7 +330,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val syncSummary: StateFlow<SyncSummary> = _syncSummary.asStateFlow()
 
     private val syncDirectory by lazy { File(getApplication<Application>().filesDir, "sync") }
-    private var syncCoordinator: SyncCoordinator? = null
+    private var syncCoordinator: SyncCoordinator<Long>? = null
     private var syncState: SyncState? = null
 
     init {
@@ -1753,16 +1754,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun syncDeviceId(): String? =
         SyncIdentity.loadOrCreate(File(syncDirectory, "device-id"))
 
-    private fun coordinator(): SyncCoordinator? {
+    private fun coordinator(): SyncCoordinator<Long>? {
         syncCoordinator?.let { return it }
         val deviceId = syncDeviceId() ?: return null
         val state = SyncState.load(File(syncDirectory, "state.json")).also { syncState = it }
         return SyncCoordinator(
             deviceId = deviceId,
             state = state,
-            history = playHistory,
-            library = { allSongs },
-            folder = { syncFolder() }
+            store = PlayHistoryStore(playHistory) { allSongs },
+            folder = { syncFolder() },
+            keepDays = PlayHistory.KEEP_DAYS,
+            note = { Log.i(TAG, it) }
         ).also { syncCoordinator = it }
     }
 
