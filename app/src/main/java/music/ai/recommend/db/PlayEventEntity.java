@@ -1,5 +1,6 @@
 package music.ai.recommend.db;
 
+import androidx.annotation.NonNull;
 import androidx.room.Entity;
 import androidx.room.Index;
 import androidx.room.PrimaryKey;
@@ -32,10 +33,24 @@ public class PlayEventEntity {
     /** Track length in milliseconds, or 0 when the player never reported one. */
     public long durationMs;
 
-    public PlayEventEntity(long songId, long playedAt, long playedMs, long durationMs) {
+    /**
+     * Which device heard it: empty for this one, and a sync device id for a listen that arrived
+     * from elsewhere.
+     *
+     * <p>The distinction is not for display. A device must export only its own listens, or the
+     * ones it took in would go back out under its name and a third device would count them twice;
+     * and it is what lets the merge recognise a batch it has already read. Rows written before
+     * sync existed are this device's by default, which is what they are.
+     */
+    @NonNull
+    public String deviceId;
+
+    public PlayEventEntity(long songId, long playedAt, long playedMs, long durationMs,
+                           @NonNull String deviceId) {
         this.songId = songId;
         this.playedAt = playedAt;
         this.playedMs = playedMs;
         this.durationMs = durationMs;
+        this.deviceId = deviceId;
     }
 }

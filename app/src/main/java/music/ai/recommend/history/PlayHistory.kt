@@ -47,9 +47,69 @@ class PlayHistory private constructor(context: Context) {
         _events.tryEmit(event)
         if (event.playedMs < MIN_LISTEN_MS) return@withContext
         try {
-            dao.insert(PlayEventEntity(event.songId, event.playedAt, event.playedMs, event.durationMs))
+            dao.insert(PlayEventEntity(event.songId, event.playedAt, event.playedMs, event.durationMs, ""))
         } catch (e: Exception) {
             Log.e(TAG, "Could not record a listen", e)
+        }
+    }
+
+    /**
+     * Listens heard on another device, already matched to tracks in this library.
+     *
+     * Kept apart from [record] on purpose: these do not go to [events], because the wave steers on
+     * what is playing here and now, and a listen from this morning's commute is history rather
+     * than a verdict. They are written in one go, since they arrive in batches.
+     */
+    suspend fun recordFromOtherDevice(deviceId: String, events: List<PlayEvent>): Int =
+        withContext(Dispatchers.IO) {
+            if (deviceId.isEmpty() || events.isEmpty()) return@withContext 0
+            try {
+                dao.insertAll(events.map {
+                    PlayEventEntity(it.songId, it.playedAt, it.playedMs, it.durationMs, deviceId)
+                })
+                events.size
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not take in ${events.size} listens from $deviceId", e)
+                0
+            }
+        }
+
+    /** One of this device's own listens, with the row id that says how far the outbox has got. */
+    data class Exportable(val rowId: Long, val event: PlayEvent)
+
+    /** This device's own listens past [afterId], oldest first, for the sync outbox. */
+    suspend fun notYetExported(afterId: Long, limit: Int): List<Exportable> =
+        withContext(Dispatchers.IO) {
+            try {
+                dao.notYetExported(afterId, limit).map {
+                    Exportable(it.id, PlayEvent(it.songId, it.playedAt, it.playedMs, it.durationMs))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not read what is left to export", e)
+                emptyList()
+            }
+        }
+
+    /** The newest row id, so an outbox starting for the first time starts from the present. */
+    suspend fun newestEventId(): Long = withContext(Dispatchers.IO) {
+        try {
+            dao.newestId()
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    /**
+     * Which listens from other devices this one already holds, as device and instant — what the
+     * merge turns away so that reading a file twice costs nothing.
+     */
+    suspend fun fromOtherDevices(days: Int = KEEP_DAYS, now: Long = System.currentTimeMillis()):
+        List<Pair<String, Long>> = withContext(Dispatchers.IO) {
+        try {
+            dao.fromOtherDevicesSince(now - days * DAY_MS).map { it.deviceId to it.playedAt }
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not read what came from elsewhere", e)
+            emptyList()
         }
     }
 

@@ -9,7 +9,7 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 4, exportSchema = false)
+@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 5, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
 
@@ -55,13 +55,27 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /**
+     * Records which device heard each listen, so that sync can tell its own from the rest.
+     *
+     * <p>A column with a default is the safest change SQLite has, and every row already there is
+     * this device's, which is exactly what the default says. Months of listening ride on this
+     * going well: analysis can be redone in an evening, history cannot be redone at all.
+     */
+    static final Migration MIGRATION_4_5 = new Migration(4, 5) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE play_events ADD COLUMN deviceId TEXT NOT NULL DEFAULT ''");
+        }
+    };
+
     public static AppDatabase getDatabase(final Context context) {
         if (INSTANCE == null) {
             synchronized (AppDatabase.class) {
                 if (INSTANCE == null) {
                     INSTANCE = Room.databaseBuilder(context.getApplicationContext(),
                                     AppDatabase.class, "music_database")
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                             .build();
                 }
             }
