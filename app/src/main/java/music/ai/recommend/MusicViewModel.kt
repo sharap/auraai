@@ -1877,6 +1877,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val tookVectors = if (pulled == null) null else
                 runCatching { coordinator.pullVectors(now) }
                     .getOrElse { Log.e(TAG, "Could not read the vectors in", it); null }
+            sentVectors?.let {
+                if (it.written + it.couldNotTravel + it.gone > 0) {
+                    Log.i(
+                        TAG,
+                        "Vectors out: ${it.written} written, ${it.couldNotTravel} cannot travel, " +
+                            "${it.gone} with nothing to name them by"
+                    )
+                }
+            }
             // The whole outcome, not only the refusals: "nothing was refused" says very little on
             // its own, since a vector for a track already analysed here never gets as far as being
             // judged. These four numbers are what a pass actually did.

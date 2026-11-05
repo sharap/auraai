@@ -9,7 +9,7 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 6, exportSchema = false)
+@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 7, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
 
@@ -84,13 +84,32 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /**
+     * Version 7 reconsiders every vector, because the column's meaning changed.
+     *
+     * It used to mean "dealt with", and a vector that arrived from another device was marked on
+     * arrival and deliberately never passed on: with two devices there is nobody to relay to, and
+     * it kept the folder from carrying everything twice. The cost of that turned out to be the
+     * folder being a cache a device can only contribute to and never be restored from — if the
+     * device that analysed a track loses its vectors, the one holding a copy will not offer it
+     * back. So it now means "this device has offered it", every device offers what it holds, and
+     * the folder carries each vector once per device. Zeroing the column makes the vectors already
+     * here go out once under the new meaning.
+     */
+    static final Migration MIGRATION_6_7 = new Migration(6, 7) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("UPDATE embeddings SET publishedAt = 0");
+        }
+    };
+
     public static AppDatabase getDatabase(final Context context) {
         if (INSTANCE == null) {
             synchronized (AppDatabase.class) {
                 if (INSTANCE == null) {
                     INSTANCE = Room.databaseBuilder(context.getApplicationContext(),
                                     AppDatabase.class, "music_database")
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                             .build();
                 }
             }

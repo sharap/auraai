@@ -64,6 +64,22 @@ class VectorMigrationTest {
         assertEquals(seeded, waiting.filter { it >= 90_000L })
     }
 
+    /**
+     * Hand-run: offers every vector this device holds to the others again.
+     *
+     * The same statement the 6→7 migration runs, kept as a hatch because it is the one repair this
+     * feature needs and there is no other way in: a folder is a cache a device can be restored
+     * from only if every device offers what it holds, and a marked row is never offered again.
+     * Useful after anything that leaves the marks saying more than the folder does.
+     */
+    @Test
+    fun offerEverythingAgain() {
+        val database = AppDatabase.getDatabase(context)
+        database.openHelper.writableDatabase.execSQL("UPDATE embeddings SET publishedAt = 0")
+        val waiting = database.embeddingDao().countNotPublished()
+        assertEquals(database.embeddingDao().getCount(), waiting)
+    }
+
     @Test
     fun removeTheSeededRows() {
         AppDatabase.getDatabase(context).openHelper.writableDatabase

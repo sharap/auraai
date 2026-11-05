@@ -74,15 +74,13 @@ class EmbeddingVectorStore(
 
     override suspend fun analysed(): Set<Long> = embeddings.ids()
 
-    override suspend fun takeIn(vectors: List<VectorStore.Held<Long>>): Int {
-        val stored = embeddings.putAll(vectors.associate { it.track to it.vector })
-        if (stored > 0) {
-            // These need not be offered back out, and marking them now also means a vector taken
-            // in is not mistaken later for one this device computed and never published.
-            embeddings.markPublished(vectors.map { it.track }, System.currentTimeMillis())
-        }
-        return stored
-    }
+    override suspend fun takeIn(vectors: List<VectorStore.Held<Long>>): Int =
+        // Left unoffered on purpose, so that this device will put them in the folder too. The
+        // folder then holds every vector once per device that has it, which is what makes it a
+        // cache anything can be restored from: a device that loses its own gets them back from
+        // whoever else was handed them, instead of analysing a library again. The price is the
+        // folder carrying each vector twice with two devices — a few megabytes for hours of work.
+        embeddings.putAll(vectors.associate { it.track to it.vector })
 
     /**
      * The duration as the container states it, in milliseconds — the same reading `AiScanner` uses

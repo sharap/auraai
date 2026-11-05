@@ -226,38 +226,61 @@ class SyncCoordinator<Track>(
         var written = 0
         var couldNotTravel = 0
         var gone = 0
+        // Tracks this library does not describe. They are stepped over and *not* marked, so the
+        // batch asked for grows by as many as have been met — otherwise they would sit at the head
+        // of the queue and the outbox would never reach past them.
+        val unnamed = HashSet<Track>()
         var rounds = 0
         while (rounds.toLong() * VectorWriter.BATCH_RECORDS < limit) {
             rounds++
-            val held = vectors.toPublish(VectorWriter.BATCH_RECORDS)
+            val held = vectors.toPublish(VectorWriter.BATCH_RECORDS + unnamed.size)
             if (held.isEmpty()) break
+            val handled = ArrayList<Track>(held.size)
             for (one in held) {
                 val key = keys[one.track]
-                val start = if (key == null) null else vectors.excerptStartMs(one.track)
-                if (key == null || start == null) {
-                    gone++
+                if (key == null) {
+                    // Nothing to name it to anyone by — and crucially, not marked as dealt with.
+                    // The library may simply not have been read yet, or be mid-rescan, and
+                    // retiring a vector on that basis loses it for good. Learnt the hard way: a
+                    // test that pushed with a three-track library retired four thousand of them.
+                    unnamed.add(one.track)
                     continue
                 }
-                val taken = vectorWriter.offer(
-                    VectorRecord(
-                        track = key,
-                        excerptStartMs = start,
-                        decoder = vectors.decoderFor(one.track),
-                        model = terms.model,
-                        analysisVersion = terms.analysisVersion,
-                        vector = one.vector
+                val start = vectors.excerptStartMs(one.track)
+                if (start == null) {
+                    // The library knows the track and the file will not open: that is gone, and
+                    // the answer will not change by waiting.
+                    gone++
+                    handled.add(one.track)
+                    continue
+                }
+                if (!vectorWriter.offer(
+                        VectorRecord(
+                            track = key,
+                            excerptStartMs = start,
+                            decoder = vectors.decoderFor(one.track),
+                            model = terms.model,
+                            analysisVersion = terms.analysisVersion,
+                            vector = one.vector
+                        )
                     )
-                )
-                if (!taken) couldNotTravel++
+                ) {
+                    couldNotTravel++
+                }
+                handled.add(one.track)
             }
             val wrote = vectorWriter.flush(now, force = true)
             if (wrote == 0 && vectorWriter.pending > 0) break      // the folder would not take it
             written += wrote
             state.vectorSequence = vectorWriter.sequence
-            // Including the ones that could not travel and the ones whose file has gone: the
-            // answer for those will not change while the analysis version stays the same.
-            vectors.markHandled(held.map { it.track })
+            // The ones that could not travel are marked along with the ones that did: a format
+            // with no shared decoder will not gain one without the analysis version changing, and
+            // reconsidering them every pass is a walk over the whole table for nothing.
+            vectors.markHandled(handled)
             state.save()
+            // No progress possible: everything on offer is unnamed, which means this library is
+            // not the one these vectors belong to yet.
+            if (handled.isEmpty()) break
         }
         return PushedVectors(written, couldNotTravel, gone)
     }
@@ -290,6 +313,16 @@ class SyncCoordinator<Track>(
             state.vectorTerms = fingerprint
         }
 
+        // A device holding no vectors at all has lost them — a wiped store, a file that would not
+        // read — and the folder is where they are. Nothing is risked by reading it again: there is
+        // nothing here to collide with, and this is the whole of what makes the folder a cache a
+        // device can be restored from rather than one it can only contribute to.
+        val analysed = vectors.analysed()
+        if (analysed.isEmpty() && state.progress.keys.any { it.contains("/${VectorWriter.DIRECTORY}/") }) {
+            note("No vectors held here; reading the folder's again")
+            state.progress.keys.removeAll { it.contains("/${VectorWriter.DIRECTORY}/") }
+        }
+
         val outcome = VectorReader(deviceId, folder, state.progress).read()
         if (outcome.records.isEmpty()) {
             state.progress.putAll(outcome.advanced)
@@ -297,7 +330,6 @@ class SyncCoordinator<Track>(
             return PulledVectors(0, emptyMap(), 0, 0, outcome.more)
         }
 
-        val analysed = vectors.analysed()
         val matcher = TrackMatcher(keys.map { (track, key) -> TrackMatcher.Entry(track, key) })
         state.aliases.forEach { (hash, text) ->
             store.fromText(text)?.let { matcher.remember(hash, it) }
@@ -339,11 +371,12 @@ class SyncCoordinator<Track>(
             note("Could not store ${taking.size} vectors")
             return PulledVectors(0, refused, unmatched, alreadyHeld, outcome.more)
         }
-        if (takenIn > 0) {
-            // Not offered back out: with two devices there is nobody to relay to, and the folder
-            // would carry every vector twice.
-            vectors.markHandled(taking.map { it.track })
-        }
+        // What came in is deliberately *not* marked as dealt with: this device will offer it in its
+        // own directory too. The folder then holds every vector once per device that has it, which
+        // is what makes it a cache a device can be restored from rather than one it can only
+        // contribute to — if whoever analysed a track loses it, the one holding a copy hands it
+        // back instead of the library being analysed again. The price is each vector carried twice
+        // with two devices, which against hours of analysis is nothing.
         state.progress.putAll(outcome.advanced)
         state.aliases.clear()
         state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })

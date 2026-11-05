@@ -44,6 +44,15 @@ class VectorCoordinatorTest {
     private lateinit var folder: File
     private lateinit var tracks: List<Song>
 
+    /**
+     * Whatever this device already held for the tracks the test borrows, to be put back after.
+     *
+     * The test picks real tracks out of the real library and writes vectors of its own over them,
+     * which on a device whose library has been analysed means overwriting somebody's work. Noticed
+     * the hard way: the first few runs of this left three tracks unanalysed and said nothing.
+     */
+    private var borrowed: Map<Long, FloatArray> = emptyMap()
+
     @Before
     fun findSomeMp3s() {
         folder = File(context.cacheDir, "vector-round-trip").apply {
@@ -52,13 +61,21 @@ class VectorCoordinatorTest {
         }
         tracks = mp3sFromLibrary(3)
         assumeTrue("нужны mp3 в фонотеке", tracks.size == 3)
-        runBlocking { clearSeeded() }
+        runBlocking {
+            borrowed = embeddings.all().filterKeys { id -> tracks.any { it.id == id } }
+            clearSeeded()
+        }
     }
 
     @After
     fun tidyUp() {
         folder.deleteRecursively()
-        runBlocking { clearSeeded() }
+        runBlocking {
+            clearSeeded()
+            // Put back what was borrowed. Their "offered" mark is not restored, so they go out to
+            // the folder once more — which costs three records and never a vector.
+            if (borrowed.isNotEmpty()) embeddings.putAll(borrowed)
+        }
     }
 
     /**
@@ -196,11 +213,69 @@ class VectorCoordinatorTest {
     @Test
     fun aVectorIsOfferedOnceAndThenLetAlone() = runBlocking {
         embeddings.put(tracks[0].id, vector(0))
-        val sender = coordinator(first)
-        assertEquals(1, sender.pushVectors(now).written)
-        // Marked as dealt with, so the next pass has nothing to say — a library of four thousand
+        assertEquals(1, coordinator(first).pushVectors(now).written)
+        // Marked as offered, so the next pass has nothing to say — a library of four thousand
         // would otherwise be rewritten into the folder on every pass.
         assertEquals(0, coordinator(first).pushVectors(now).written)
+    }
+
+    @Test
+    fun aVectorTakenInIsOfferedOnwards() = runBlocking {
+        // What makes the folder a cache a device can be restored from rather than one it can only
+        // contribute to: every device offers what it holds, so a vector ends up in the folder once
+        // per device that has it, and whoever analysed it can lose it and be handed it back.
+        for ((index, song) in tracks.withIndex()) embeddings.put(song.id, vector(index))
+        coordinator(first).pushVectors(now)
+        clearSeeded()
+        assertEquals(3, coordinator(second).pullVectors(now).takenIn)
+
+        val onwards = coordinator(second).pushVectors(now)
+        assertEquals("отдано дальше: $onwards", 3, onwards.written)
+        // And only once, or the folder would grow on every pass.
+        assertEquals(0, coordinator(second).pushVectors(now).written)
+    }
+
+    @Test
+    fun aDeviceThatHasLostItsVectorsReadsTheFolderAgain() = runBlocking {
+        // Only on a device that holds nothing of its own, because "lost them all" is the condition
+        // being tested and this store is the whole app's. On a phone with an analysed library the
+        // same rule is covered by the desktop port, over the same shared coordinator.
+        assumeTrue("фонотека уже проанализирована, условие не воспроизвести", embeddings.ids().isEmpty())
+
+        for ((index, song) in tracks.withIndex()) embeddings.put(song.id, vector(index))
+        coordinator(first).pushVectors(now)
+        clearSeeded()
+        assertEquals(3, coordinator(second).pullVectors(now).takenIn)
+
+        // Everything gone but the state file, which says the folder has been read to the end. That
+        // is the case the backup is for: a store wiped or a file that would not read, with the
+        // vectors sitting right there in the folder.
+        clearSeeded()
+        val back = coordinator(second).pullVectors(now)
+        assertEquals("принято обратно: $back", 3, back.takenIn)
+        for ((index, song) in tracks.withIndex()) {
+            assertTrue("вектор ${song.path} не вернулся", vector(index).contentEquals(embeddings.all()[song.id]))
+        }
+        // And once they are back, the folder is not read again on every pass.
+        assertEquals(0, coordinator(second).pullVectors(now).takenIn)
+    }
+
+    @Test
+    fun aPassWithAnIncompleteLibraryRetiresNothingElse() = runBlocking {
+        // The bug this is here for cost four thousand vectors. A pass whose library lists only a
+        // few tracks used to mark every other vector as dealt with — "nothing to name it by" — and
+        // a vector marked once is never offered again. A library can be short for ordinary
+        // reasons: not read yet, mid-rescan, MediaStore catching up.
+        val dao = music.ai.recommend.db.AppDatabase.getDatabase(context).embeddingDao()
+        for ((index, song) in tracks.withIndex()) embeddings.put(song.id, vector(index))
+        val waitingBefore = dao.countNotPublished()
+        assumeTrue("нужны неотправленные векторы помимо тестовых", waitingBefore > tracks.size + 10)
+
+        val pushed = coordinator(first).pushVectors(now, SyncCoordinator.PUBLISH_EVERYTHING)
+        assertEquals("отправлено: $pushed", 3, pushed.written)
+
+        // Exactly the three the library described left the queue, and nothing else was retired.
+        assertEquals(waitingBefore - tracks.size, dao.countNotPublished())
     }
 
     @Test
