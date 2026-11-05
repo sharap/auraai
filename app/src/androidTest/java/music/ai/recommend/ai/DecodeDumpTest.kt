@@ -80,6 +80,17 @@ class DecodeDumpTest {
             }
             if (samples.isEmpty()) continue
 
+            // The features too, when asked. With the samples identical on both devices this is
+            // what separates the two copies of the feature extractor from the inference engine
+            // underneath: it needs no model, so it costs nothing to check.
+            if (args.getString("features") == "true") {
+                val features = AudioProcessor().extractFeatures(samples)
+                ByteBuffer.allocate(features.size * 4).order(ByteOrder.LITTLE_ENDIAN).let { buffer ->
+                    buffer.asFloatBuffer().put(features)
+                    File(outputDir, "track$index.feat").writeBytes(buffer.array())
+                }
+            }
+
             val file = File(outputDir, "track$index.f32")
             // Little-endian float32, the same way the vectors are stored, so numpy reads it as it stands.
             ByteBuffer.allocate(samples.size * 4).order(ByteOrder.LITTLE_ENDIAN).let { buffer ->
@@ -198,6 +209,83 @@ class DecodeDumpTest {
         }
         File(outputDir, "manifest.tsv").writeText(manifest.toString())
         Log.i(tag, "swept into ${outputDir.absolutePath}, model=${modelFile.name}")
+    }
+
+    /**
+     * The last link in the chain, and the only one that cannot be made the same code on both sides.
+     *
+     * With the samples and the features now byte-for-byte identical on this phone and on the
+     * desktop, whatever is left between their embeddings is the inference engine: ONNX Runtime for
+     * Android against ONNX Runtime for the JVM, the same graph in fp32 but not the same build. That
+     * number is the floor on how well a carried vector can ever match a local one, so it is worth
+     * knowing rather than assuming.
+     *
+     * Uses the fp32 model explicitly, because the comparison only means anything if both sides run
+     * the same weights.
+     *
+     *     am instrument -w -e bench true \
+     *       -e class music.ai.recommend.ai.DecodeDumpTest#embedExcerpts \
+     *       music.ai.recommend.sync.test/androidx.test.runner.AndroidJUnitRunner
+     */
+    @Test
+    fun embedExcerpts() {
+        val args = InstrumentationRegistry.getArguments()
+        assumeTrue("pass -e bench true to run", args.getString("bench") == "true")
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val songs = music.ai.recommend.scanner.MusicScanner().scanMusic(context)
+            .flatMap { it.songs }
+            .distinctBy { it.id }
+            .sortedBy { it.path }
+        assumeTrue("no music on the device", songs.isNotEmpty())
+
+        val chosen = buildList {
+            for (extension in listOf("mp3", "m4a", "wav")) {
+                addAll(songs.filter { it.path.substringAfterLast('.', "").lowercase() == extension }
+                    .take(if (extension == "mp3") 4 else 2))
+            }
+        }
+
+        val models = ModelRepository.getInstance(context)
+        val modelFile = runBlocking { models.fileForInference(ModelAsset.AUDIO_MODEL) }
+        assumeTrue("no fp32 audio model on the device", modelFile != null)
+
+        val scanner = AiScanner(context, models, EmbeddingStore.getInstance(context))
+        val processor = AudioProcessor()
+        val env = OrtEnvironment.getEnvironment()
+        val session = env.createSession(modelFile!!.absolutePath, OrtSession.SessionOptions())
+        val outputDir = File(context.cacheDir, "embed").apply { mkdirs() }
+        val manifest = StringBuilder("file\tpath\tsamples\n")
+
+        try {
+            for ((index, song) in chosen.withIndex()) {
+                val pcm = runCatching { scanner.decodeForBenchmark(song) }.getOrElse { FloatArray(0) }
+                if (pcm.isEmpty()) continue
+                val features = processor.extractFeatures(pcm)
+                val vector = OnnxTensor.createTensor(
+                    env, FloatBuffer.wrap(features), longArrayOf(1, 1, 1001, 64)
+                ).use { tensor ->
+                    session.run(mapOf("input_features" to tensor)).use { output ->
+                        @Suppress("UNCHECKED_CAST")
+                        (output.get(0).value as Array<FloatArray>)[0]
+                    }
+                }
+                var norm = 0.0
+                for (v in vector) norm += (v * v).toDouble()
+                norm = kotlin.math.sqrt(norm)
+                val name = "embed$index.vec"
+                ByteBuffer.allocate(vector.size * 4).order(ByteOrder.LITTLE_ENDIAN).let { buffer ->
+                    for (v in vector) buffer.putFloat((v / norm).toFloat())
+                    File(outputDir, name).writeBytes(buffer.array())
+                }
+                manifest.append(listOf(name, song.path, pcm.size).joinToString("\t")).append('\n')
+                Log.i(tag, "$name: ${song.path}")
+            }
+        } finally {
+            runCatching { session.close() }
+        }
+        File(outputDir, "manifest.tsv").writeText(manifest.toString())
+        Log.i(tag, "embedded into ${outputDir.absolutePath} with ${modelFile.name}")
     }
 
     private class Probe(

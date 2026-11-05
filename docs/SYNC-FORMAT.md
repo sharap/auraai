@@ -115,6 +115,21 @@ A waveform difference comes out larger in the embedding than it went in: on one 
 differed by 0.0008 gave vectors 0.025 apart. That is the reason the two sides are made to produce
 the same samples rather than merely similar ones.
 
+With that done, the chain was checked link by link on a phone against this machine, on the same
+files:
+
+| link | mp3 |
+| --- | --- |
+| the samples the model is fed | identical, byte for byte |
+| the log-mel features computed from them | identical, byte for byte |
+| the embedding | cosine 1.0000000, individual numbers within 3e-07 |
+
+The last row is the one link that cannot be made the same code on both sides — ONNX Runtime for
+Android against ONNX Runtime for the JVM, the same graph in fp32 but not the same build — and it
+turns out to cost nothing beyond floating-point rounding. So an mp3 embedding made on one device is
+an mp3 embedding on the other, and the floor on carrying vectors is set by the decoder, which is
+now shared, rather than by anything underneath.
+
 The app treats 0.9985 as "the same embedding, no re-analysis needed", and two different tracks sit
 at about 0.27. So there is no tolerance to spend on the window: a near miss costs as much as a
 gross one. Hence the rule in `Excerpt.startMs`, which truncates the duration to whole seconds before
@@ -179,8 +194,7 @@ Three things must not drift, and each has a guard:
 | | |
 | --- | --- |
 | The excerpt contract | done on both sides, measured |
-| A shared mp3 decoder | done on both sides, byte-for-byte identical on this machine |
-| The same, confirmed on a phone | not yet |
+| A shared mp3 decoder | done on both sides, and confirmed on a phone: same samples, same features, same vector |
 | A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
 | Everything else here | designed, not written |
 
