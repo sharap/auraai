@@ -297,13 +297,16 @@ So: batches, not a stream.
 
 | what | when it is written |
 | --- | --- |
-| history | twenty records or fifteen minutes, whichever comes first, plus when playback stops and when the app goes to the background |
+| history | twenty records or half an hour, whichever comes first, plus when playback stops and when the app goes to the background |
 | playlists and favourites | at once — they are rare, and someone who adds a track and walks to their computer expects to find it there |
 | the daily mix | once, when it is built |
 | vectors | at the end of a scan, in blocks of about five hundred |
 
-On a library listened to a few dozen tracks a day that comes to three to five writes, each carrying
-ten or twenty events.
+With tracks of a few minutes it is always the half hour that gets there first, so that is the real
+knob: a couple of writes per hour of listening, a dozen on a heavy day, each carrying eight or ten
+events. The record count is there for the bursts, where a run of skips fills a batch in a minute.
+Neither is waited out often, because stopping playback and leaving the app both flush at once — the
+end of a listening session is reported when it ends, not half an hour later.
 
 ### Append, never rewrite
 
