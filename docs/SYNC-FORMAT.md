@@ -37,10 +37,20 @@ A track is resolved in this order, and the first answer wins:
    survives a tag being edited or a flac being turned into an mp3.
 3. **Nearest neighbour in embedding space**, accepted only above a similarity that leaves no room
    for doubt, and only when the duration agrees. This is a last resort for a file that was
-   re-encoded *and* retagged.
+   re-encoded *and* retagged, and it can only be applied where a vector is actually to hand —
+   which is in the vectors themselves, since a history record carries a key and not 512 floats.
+   What history gets from it is second-hand: a hash tied to a local track by any means at all is
+   remembered, and every later record carrying that hash resolves at once.
 
 A record that resolves to nothing is **kept, not dropped**, and offered to the matcher again after
-every scan: the file it refers to may simply not have arrived yet.
+every scan: the file it refers to may simply not have arrived yet. Dropping those would quietly
+lose the history of everything that arrives late, which is most of what arrives at all on a device
+set up second.
+
+Where several local tracks fit one description — duplicate files are ordinary — the closest
+duration wins, and ties go to whichever the library listed first. Either answer is right; giving
+the *same* answer twice is not optional, or one listen would land on a different track on every
+pass.
 
 Devices identify themselves by a UUID generated once, not by a name or a path. This also fixes two
 things that are wrong locally today, independently of sync: on Android, history is keyed by
@@ -375,7 +385,8 @@ Three things must not drift, and each has a guard:
 | The record format, the track key and the merge | written and tested, shared code on both sides |
 | The envelope's three fields | there, with sealing off |
 | The device id, the writer and the reader | written and tested, the folder behind an interface |
-| Attaching them to a real folder, and matching a key to a local track | next |
+| Matching a key to a local track | written and tested |
+| Attaching all of it to a real folder, and to the two apps | next |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 

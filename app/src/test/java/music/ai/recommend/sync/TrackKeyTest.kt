@@ -86,9 +86,16 @@ class TrackKeyTest {
     @Test
     fun theBucketAgreesWhereMatchingDoes() {
         // Anything that matches has to fall in the same bucket, or a lookup would never find it.
-        val a = key("Мельница", "Ночная кобыла", 210_000, hash = "11".repeat(32))
-        val b = key("мельница", "ночная кобыла", 210_400)
-        assertTrue(a.matches(b))
-        assertEquals(a.bucket, b.bucket)
+        // Including the two cases that nearly caught this out: one side carrying a hash and the
+        // other not, and two durations a millisecond apart on either side of a whole second.
+        val tagged = key("Мельница", "Ночная кобыла", 210_000, hash = "11".repeat(32))
+        val untagged = key("мельница", "ночная кобыла", 210_400)
+        assertTrue(tagged.matches(untagged))
+        assertEquals(tagged.bucket, untagged.bucket)
+
+        val below = key("A", "B", 210_999)
+        val above = key("A", "B", 211_001)
+        assertTrue(below.matches(above))
+        assertEquals(below.bucket, above.bucket)
     }
 }

@@ -43,11 +43,14 @@ data class TrackKey(
     }
 
     /**
-     * What to look the track up by when there are many of them. Two keys that [matches] must agree
-     * here, so the duration is coarsened to whole seconds and the hash is deliberately left out —
-     * a key with a hash and a key without one can still be the same track.
+     * What to look the track up by when there are many of them.
+     *
+     * Two keys that [matches] have to agree here or a lookup would never find them, which rules
+     * out both the hash — a key with one and a key without one can still be the same track — and
+     * the duration, since two readings a millisecond apart can fall either side of a second. So the
+     * bucket is the tags alone and the duration is checked inside it.
      */
-    val bucket: String get() = "$artist\u0000$title\u0000${durationMs / 1000}"
+    val bucket: String get() = "$artist\u0000$title"
 
     companion object {
 
