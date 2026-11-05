@@ -46,8 +46,15 @@ class EmbeddingStore private constructor(context: Context) {
          * extractor, the excerpt selection, the projection. Version 2 corrected the log-mel features
          * to match ClapFeatureExtractor; measured against text queries the peak similarity of a
          * matching description tripled, so version 1 embeddings are not worth keeping.
+         *
+         * Version 3 pinned the excerpt down to an exact range of samples, see [Excerpt]. Until then
+         * the window began wherever the seek landed and so came out short of ten seconds, which the
+         * feature extractor padded with silence; on the tracks measured that moved an embedding by
+         * a cosine of up to 0.14. Version 2 embeddings therefore describe a slightly different ten
+         * seconds of each track than version 3 does, and mixing the two would leave the similarity
+         * space half a step out of true.
          */
-        private const val ANALYSIS_VERSION = 2
+        private const val ANALYSIS_VERSION = 3
     }
 
 

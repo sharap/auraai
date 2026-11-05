@@ -24,7 +24,7 @@ import music.ai.recommend.model.Song
 import java.nio.FloatBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.math.max
+import kotlin.math.min
 
 /** What the scanner is doing right now, for the settings screen. */
 sealed interface ScanStage {
@@ -200,7 +200,7 @@ class AiScanner(
                 currentCoroutineContext().ensureActive()
 
                 val features = try {
-                    val pcm = decodeAudioChunk(song, CHUNK_MS)
+                    val pcm = decodeAudioChunk(song, Excerpt.LENGTH_MS)
                     if (pcm.isEmpty()) null else audioProcessor.extractFeatures(pcm)
                 } catch (e: CancellationException) {
                     throw e
@@ -264,7 +264,7 @@ class AiScanner(
         song: Song,
         stats: DecodeStats? = null,
         startUsOverride: Long? = null
-    ): FloatArray = decodeAudioChunk(song, CHUNK_MS, stats, startUsOverride)
+    ): FloatArray = decodeAudioChunk(song, Excerpt.LENGTH_MS, stats, startUsOverride)
 
     /** Counters for the decode, filled in only when a benchmark asks for them. */
     internal class DecodeStats {
@@ -279,7 +279,18 @@ class AiScanner(
     }
 
     /**
-     * Decodes [durationMs] from the middle of the track and returns mono 48 kHz samples.
+     * Decodes the excerpt [Excerpt] picks and returns exactly [Excerpt.SAMPLES] mono 48 kHz
+     * samples, unless the track is genuinely shorter than that.
+     *
+     * Both exactnesses are deliberate, and both were bought with measurements. The excerpt used to
+     * begin wherever `SEEK_TO_CLOSEST_SYNC` happened to land — up to tens of milliseconds past the
+     * point asked for — while its end stayed put, so it also came out short of ten seconds: 478981
+     * samples instead of 480000 on one mp3. Being short is the expensive part, because the feature
+     * extractor then takes the repeat-and-pad branch meant for tracks shorter than the excerpt and
+     * appends silence, which on that track moved the embedding by a cosine of 0.10. The late start
+     * cost another 0.04 on top. Neither is recoverable later, so the samples are pinned here:
+     * seek to the sync point *before* the target, drop the lead-in by its timestamp, and stop once
+     * ten seconds have been collected.
      *
      * Driven by MediaCodec's asynchronous callbacks rather than by polling. The polling form issued
      * a dequeueInput/dequeueOutput pair per compressed frame — for a ten-second excerpt that is
@@ -307,18 +318,20 @@ class AiScanner(
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
             val duration = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
-            val startTimeUs = startUsOverride ?: max(0L, (duration / 2) - (durationMs * 1000 / 2))
-            extractor.seekTo(startTimeUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            val startTimeUs = startUsOverride ?: (Excerpt.startMs(duration / 1000) * 1000)
+            // The previous sync point rather than the closest one. The closest may sit after the
+            // point asked for, and a window that starts late cannot be made whole afterwards;
+            // starting early can, because the lead-in is dropped by timestamp as it arrives.
+            extractor.seekTo(startTimeUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return FloatArray(0)
             val initialRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
             val initialChannels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
 
-            // Enough room for the requested span at the source rate, plus slack for a late sync frame.
             val sink = PcmSink(
-                buffer = FloatArray(((durationMs / 1000.0) * initialRate).toInt() + initialRate),
                 sampleRate = initialRate,
-                channels = initialChannels
+                channels = initialChannels,
+                startUs = startTimeUs
             )
             val endTimeUs = startTimeUs + durationMs * 1000
             val finished = CountDownLatch(1)
@@ -397,7 +410,7 @@ class AiScanner(
                                 mc.getOutputBuffer(index)?.let { out ->
                                     out.position(info.offset)
                                     out.limit(info.offset + info.size)
-                                    sink.append(out.asShortBuffer())
+                                    sink.append(out.asShortBuffer(), info.presentationTimeUs)
                                     stats?.let { it.outputs++ }
                                 }
                             }
@@ -438,7 +451,7 @@ class AiScanner(
             sink.failure?.let { throw it }
 
             stats?.let { it.samples = sink.size }
-            return resample(sink.toFloatArray(), sink.sampleRate, TARGET_SAMPLE_RATE)
+            return resample(sink.toFloatArray(), sink.sampleRate, Excerpt.SAMPLE_RATE)
         } catch (e: Exception) {
             Log.e(TAG, "Decoding failed for ${song.title}", e)
             return FloatArray(0)
@@ -451,20 +464,55 @@ class AiScanner(
     }
 
     /**
-     * Mono PCM accumulator. Only ever touched from the codec callback thread while decoding, and
-     * from the calling thread once the latch has been released.
+     * Mono PCM accumulator holding exactly one excerpt, and the place where the excerpt's start is
+     * pinned down.
+     *
+     * The decoder is fed from the sync point *before* the requested start, so the samples that come
+     * out first belong to the lead-in and have to go. How many of them there are follows from the
+     * timestamp the codec reports for its first buffer. They are dropped as they arrive rather than
+     * trimmed afterwards, which keeps the buffer the size of the excerpt instead of the size of the
+     * excerpt plus however far back the sync point happened to be.
+     *
+     * Only ever touched from the codec callback thread while decoding, and from the calling thread
+     * once the latch has been released.
      */
-    private class PcmSink(private val buffer: FloatArray, var sampleRate: Int, var channels: Int) {
+    private class PcmSink(sampleRate: Int, channels: Int, private val startUs: Long) {
+
+        private var buffer = FloatArray(Excerpt.sourceSamplesNeeded(sampleRate))
+
+        /**
+         * The rate the decoder actually produces, which need not be the one the container claims.
+         * Changing it resizes the buffer, because how many samples make ten seconds depends on it.
+         */
+        var sampleRate: Int = sampleRate
+            set(value) {
+                if (value == field || value <= 0) return
+                field = value
+                val wanted = Excerpt.sourceSamplesNeeded(value)
+                if (wanted > buffer.size) buffer = buffer.copyOf(wanted)
+            }
+
+        var channels: Int = channels
+
         var size = 0
             private set
 
         @Volatile
         var failure: Exception? = null
 
+        /** Lead-in samples still to be discarded; negative until the first buffer says how many. */
+        private var toDrop = -1
+
         val isFull: Boolean get() = size >= buffer.size
 
-        fun append(shorts: java.nio.ShortBuffer) {
+        fun append(shorts: java.nio.ShortBuffer, presentationTimeUs: Long) {
             val channelCount = channels.coerceAtLeast(1)
+            if (toDrop < 0) {
+                // A decoder that reports no timestamps, or one that began past the point asked for,
+                // leaves nothing to drop — taking what it gives is better than guessing.
+                val lateBy = startUs - presentationTimeUs
+                toDrop = if (lateBy <= 0) 0 else (lateBy * sampleRate / 1_000_000L).toInt()
+            }
             while (shorts.hasRemaining() && size < buffer.size) {
                 var sum = 0f
                 var read = 0
@@ -472,27 +520,41 @@ class AiScanner(
                     sum += shorts.get() / 32768f
                     read++
                 }
-                if (read > 0) buffer[size++] = sum / read
+                if (read == 0) break
+                if (toDrop > 0) toDrop-- else buffer[size++] = sum / read
             }
         }
 
         fun toFloatArray(): FloatArray = if (size == buffer.size) buffer else buffer.copyOf(size)
     }
 
+    /**
+     * Linear resampling to [to], cut to exactly one excerpt.
+     *
+     * The interpolation itself is left alone: measured against ffmpeg's polyphase filter on the
+     * same window it moves the embedding by a cosine of 0.0024, which is not worth a better
+     * resampler and certainly not worth invalidating every stored embedding for. The length is
+     * what changed. An excerpt one sample short of [Excerpt.SAMPLES] is read by the feature
+     * extractor as a track shorter than ten seconds and padded with silence, so the count is
+     * pinned here and only a genuinely short track comes back short.
+     */
     private fun resample(data: FloatArray, from: Int, to: Int): FloatArray {
-        if (from == to || data.isEmpty()) return data
+        if (data.isEmpty()) return data
+        if (from == to) {
+            return if (data.size <= Excerpt.SAMPLES) data else data.copyOf(Excerpt.SAMPLES)
+        }
         val ratio = from.toDouble() / to.toDouble()
-        val newSize = (data.size / ratio).toInt()
+        // The last output sample interpolates towards the sample after it, so the input has to
+        // reach one position past where that output sample lands.
+        val fits = ((data.size - 1) / ratio).toInt().coerceAtLeast(0)
+        val newSize = min(Excerpt.SAMPLES, fits)
         val resampled = FloatArray(newSize)
         for (i in 0 until newSize) {
             val oldPos = i * ratio
             val index = oldPos.toInt()
             val fraction = (oldPos - index).toFloat()
-            resampled[i] = if (index + 1 < data.size) {
-                data[index] * (1 - fraction) + data[index + 1] * fraction
-            } else {
-                data[data.size - 1]
-            }
+            val next = min(index + 1, data.size - 1)
+            resampled[i] = data[index] * (1 - fraction) + data[next] * fraction
         }
         return resampled
     }
@@ -508,8 +570,6 @@ class AiScanner(
     private companion object {
         const val TAG = "AiScanner"
         const val EMBEDDING_SIZE = 512
-        const val CHUNK_MS = 10_000L
-        const val TARGET_SAMPLE_RATE = 48000
         /** Upper bound on one track's decode, so a stuck codec cannot hang the scan. */
         const val DECODE_TIMEOUT_SECONDS = 30L
     }

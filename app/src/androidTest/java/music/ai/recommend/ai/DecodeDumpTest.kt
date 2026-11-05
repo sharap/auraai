@@ -101,9 +101,6 @@ class DecodeDumpTest {
     }
 
     private companion object {
-        /** Must match AiScanner.CHUNK_MS, whose companion is private. */
-        const val CHUNK_MS = 10_000L
-
         /** Offsets from the usual start, in milliseconds. Dense where the two sides differ. */
         val OFFSETS_MS = listOf(-2000, -1000, -500, -250, -150, -60, -25, 0, 25, 60, 150, 250, 500, 1000, 2000)
     }
@@ -223,7 +220,7 @@ class DecodeDumpTest {
                 }
                 return Probe(
                     durationUs = duration,
-                    startUs = max(0L, (duration / 2) - (CHUNK_MS * 1000 / 2)),
+                    startUs = Excerpt.startMs(duration / 1000) * 1000,
                     sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
                         format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     } else {
