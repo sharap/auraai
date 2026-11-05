@@ -314,6 +314,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var allSongs: List<Song> = emptyList()
     private var allSongsById: Map<Long, Song> = emptyMap()
 
+    /** What the settings screen shows about sync. */
+    data class SyncSummary(
+        val folder: String? = null,
+        val deviceId: String = "",
+        val sent: Int = 0,
+        val takenIn: Int = 0,
+        val waiting: Int = 0,
+        val busy: Boolean = false,
+        val lastRunAt: Long = 0L
+    )
+
+    private val _syncSummary = MutableStateFlow(SyncSummary())
+    val syncSummary: StateFlow<SyncSummary> = _syncSummary.asStateFlow()
+
+    private val syncDirectory by lazy { File(getApplication<Application>().filesDir, "sync") }
+    private var syncCoordinator: SyncCoordinator? = null
+    private var syncState: SyncState? = null
+
     init {
         // Two cheap scalar reads; everything else is a SharedPreferences read plus a Gson parse,
         // and the playlists blob grows with the library. Doing that during ViewModel construction
@@ -1719,24 +1737,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun formatEtr(seconds: Long): String = "%02d:%02d".format(seconds / 60, seconds % 60)
 
     // ---- Carrying listening history to and from the other device -------------------------------
-
-    /** What the settings screen shows about sync. */
-    data class SyncSummary(
-        val folder: String? = null,
-        val deviceId: String = "",
-        val sent: Int = 0,
-        val takenIn: Int = 0,
-        val waiting: Int = 0,
-        val busy: Boolean = false,
-        val lastRunAt: Long = 0L
-    )
-
-    private val _syncSummary = MutableStateFlow(SyncSummary())
-    val syncSummary: StateFlow<SyncSummary> = _syncSummary.asStateFlow()
-
-    private val syncDirectory by lazy { File(getApplication<Application>().filesDir, "sync") }
-    private var syncCoordinator: SyncCoordinator? = null
-    private var syncState: SyncState? = null
+    //
+    // The state this holds is declared above `init`, not here with its functions: Kotlin
+    // initialises properties in declaration order and runs `init` among them, so a flag declared
+    // below the init block that called for it is still null when it is read. That is how this
+    // arrived the first time — the app would not open at all.
 
     /** The folder itself, rebuilt whenever the choice changes and null until one is made. */
     private fun syncFolder(): SyncFolder? {
