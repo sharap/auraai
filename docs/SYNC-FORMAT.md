@@ -349,9 +349,17 @@ Three things must not drift, and each has a guard:
   an mp3 has stopped being comparable and the analysis version has to be raised.
 - `ANALYSIS_VERSION` must be the same number on both sides. A vector carries it and is refused if it
   differs, so a mistake here costs a re-analysis rather than a wrong answer.
-- The merge itself gets **one fixture, two implementations**: the same input logs and the same
-  expected result, committed in both repositories, so neither side can quietly decide something
-  different about ordering or ties.
+- The merge itself gets **one fixture, two implementations**:
+  `app/src/test/resources/sync/history-fixture.jsonl` is a day's file with every case a reader has
+  to survive put in on purpose — a listen told of twice, a device whose clock is two days fast, a
+  listen older than the local store keeps, a record naming no track, a missing batch, a batch sealed
+  in a way this version cannot read, a line left half-written, and the reader's own batch. The
+  expected answer is asserted in `HistoryMergeTest`. If the desktop port folds the same file in and
+  gets a different answer, one of the two is wrong, and the history is the one thing in either app
+  that cannot be recomputed.
+- `sync/TrackKey.kt`, `sync/PlayRecord.kt`, `sync/SyncBatch.kt` and `sync/HistoryMerge.kt` exist in
+  both repositories and must be identical apart from the line naming which side the copy is on,
+  exactly like the two excerpt files. Diff them.
 
 ## Status
 
@@ -360,7 +368,9 @@ Three things must not drift, and each has a guard:
 | The excerpt contract | done on both sides, measured |
 | A shared mp3 decoder | done on both sides, and confirmed on a phone: same samples, same features, same vector |
 | A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
-| The envelope's three fields | to be written with the first record, sealing off |
+| The record format, the track key and the merge | written and tested, shared code on both sides |
+| The envelope's three fields | there, with sealing off |
+| Writing and reading the files, and the device id | next |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 
