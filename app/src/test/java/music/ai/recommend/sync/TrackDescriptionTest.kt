@@ -1,6 +1,7 @@
 package music.ai.recommend.sync
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -34,6 +35,53 @@ class TrackDescriptionTest {
         val key = describe("<unknown>", "", "Мельница - Ночная кобыла.mp3")
         assertEquals("мельница", key.artist)
         assertEquals("ночная кобыла", key.title)
+    }
+
+    @Test
+    fun everyWordForNoTagsIsNotAnArtist() {
+        // Each of these is what some tag reader puts there when the file says nothing, and they
+        // have to be recognised on both sides or the same track gets two descriptions: the artist
+        // read out of the file's name on the device that knew the word, and the word itself on the
+        // one that did not. Found in a real exchange — the desktop had written "unknown artist"
+        // into a day's file for most of a collection, where the phone would have written the name.
+        for (said in listOf("<unknown>", "Unknown Artist", "unknown artist", "Unknown", "UNKNOWN")) {
+            val key = describe(said, "", "Мельница - Ночная кобыла.mp3")
+            assertEquals(said, "мельница", key.artist)
+            assertEquals(said, "ночная кобыла", key.title)
+        }
+    }
+
+    @Test
+    fun theTwoPlatformsDescribeTheSameFileTheSameWay() {
+        // The property that actually matters, stated as a test rather than as a hope. Each row is
+        // one file as the two scanners read it: MediaStore on the phone, jaudiotagger on the
+        // desktop, which disagree about what to put where a tag says nothing. The keys must come
+        // out equal, because the whole of identity-by-tags rests on it.
+        val files = listOf(
+            // no tags at all: both fall back to the file's name for the title
+            Triple("Мельница - Ночная кобыла.mp3", "Мельница - Ночная кобыла", 210_000L),
+            Triple("Norma Tale - Кисточка.mp3", "Norma Tale - Кисточка", 190_000L),
+            Triple("Epic Score - Liberators.mp3", "Epic Score - Liberators", 157_000L)
+        )
+        for ((fileName, titleFallback, duration) in files) {
+            val onThePhone = TrackKey.describe("<unknown>", titleFallback, fileName, duration)
+            val onTheDesktop = TrackKey.describe("Unknown Artist", titleFallback, fileName, duration)
+            assertEquals(fileName, onThePhone, onTheDesktop)
+            assertTrue(fileName, onThePhone.matches(onTheDesktop))
+        }
+
+        // And a file that was read on one side and not on the other: the desktop says "Unknown"
+        // for a file it could not open, where it would otherwise have had the tags.
+        val unreadable = TrackKey.describe("Unknown", "Мельница - Ночная кобыла", "Мельница - Ночная кобыла.mp3", 210_000)
+        val read = TrackKey.describe("<unknown>", "Мельница - Ночная кобыла", "Мельница - Ночная кобыла.mp3", 210_000)
+        assertEquals(read, unreadable)
+    }
+
+    @Test
+    fun aBandActuallyCalledSomethingUnknownIsStillAnArtist() {
+        // The words are refused whole, not as a substring: these are real names.
+        assertEquals("unknown mortal orchestra", describe("Unknown Mortal Orchestra", "Swim and Sleep", "x.mp3").artist)
+        assertEquals("the unknown", describe("The Unknown", "Nothing", "x.mp3").artist)
     }
 
     @Test

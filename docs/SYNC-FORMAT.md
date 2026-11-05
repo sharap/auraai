@@ -371,9 +371,21 @@ Three things must not drift, and each has a guard:
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
 - Everything under `sync/` exists in both repositories and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Nine files so
-  far: the record and its track key, the batch envelope, the merge, the device id, the writer and
-  the reader, and the two interfaces that keep the folder itself out of all of it.
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Fourteen files:
+  the record and its track key, the batch envelope, the merge, the device id, the writer and the
+  reader, the matcher, the state kept between runs, the coordinator, and the interfaces that keep
+  the folder and the history store out of all of it.
+- Two files under `sync/` are deliberately **not** copies, and say so in their own first lines:
+  `SafSyncFolder` and `FileSyncFolder`, which are how each platform reaches a folder — the storage
+  access framework on one side, ordinary files on the other. Everything above them sees only
+  `SyncFolder`.
+- `SyncCoordinator` is where the order of operations *is* the correctness, and it is the one file
+  that could not have been a copy: history is a Room table keyed by MediaStore id on one side and an
+  appended log keyed by path on the other. So it is generic over what a platform calls a track, and
+  reaches history through `HistoryStore`, which each side implements over its own storage —
+  `PlayHistoryStore` and `PlayLogStore`, neither of them shared. A difference between two copies of
+  this file would have been a difference in behaviour rather than in spelling, which is why there is
+  only one.
 
 ## Status
 
@@ -386,7 +398,9 @@ Three things must not drift, and each has a guard:
 | The envelope's three fields | there, with sealing off |
 | The device id, the writer and the reader | written and tested, the folder behind an interface |
 | Matching a key to a local track | written and tested |
-| Attaching all of it to a real folder, and to the two apps | next |
+| Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
+| The listening history knowing which device heard it | done on both sides, with the older store converted in place |
+| Carrying vectors, playlists, favourites, the daily mix | not started |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 

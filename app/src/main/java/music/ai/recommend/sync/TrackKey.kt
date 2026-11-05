@@ -81,7 +81,7 @@ data class TrackKey(
             hash: String? = null
         ): TrackKey {
             val bare = fileName.substringBeforeLast('.').trim()
-            val fromTags = normalise(artist).takeIf { it.isNotEmpty() && !it.equals(UNKNOWN, true) }
+            val fromTags = normalise(artist).takeIf { it.isNotEmpty() && it !in NOTHING_SAID }
             val split = if (fromTags == null) splitArtistAndTitle(bare) else null
             return TrackKey(
                 hash = hash,
@@ -91,8 +91,20 @@ data class TrackKey(
             )
         }
 
-        /** Android's own word for a track whose tags say nothing; it is not an artist. */
-        private const val UNKNOWN = "<unknown>"
+        /**
+         * What a tag reader puts where an artist should be when the file does not say.
+         *
+         * None of these is an artist, and every one of them has to be recognised on both sides or
+         * identity breaks exactly where it was most needed. MediaStore says `<unknown>`; the
+         * desktop's tag reader is given `Unknown Artist`, or `Unknown` for a file it could not
+         * open at all. Taking any of them at face value would describe the same track two
+         * different ways — artist `unknown artist` on one device, and on the other the artist read
+         * out of the file's name, because there the word was recognised. The two would never
+         * match, and the files with no artist tag are most of this collection.
+         *
+         * Compared after [normalise], which lowercases, so these are written in lower case.
+         */
+        private val NOTHING_SAID = setOf("<unknown>", "unknown", "unknown artist")
 
         private val SEPARATOR = Regex("""\s+[-\u2013\u2014]\s+""")
 
