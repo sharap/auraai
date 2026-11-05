@@ -227,6 +227,11 @@ dependencies {
     implementation(libs.google.code.gson)
     implementation(libs.coil.compose)
     implementation(libs.onnxruntime.android)
+    // Analysis only, for mp3. The platform decoder is fine for playback but not for analysis: an
+    // embedding is only worth carrying between devices if both decoded the same samples, and
+    // MediaCodec's mp3 output begins 576 samples later than ffmpeg's while its VBR seek lands
+    // hundreds of samples off. A decoder that is the same code on both sides has neither problem.
+    implementation(libs.jlayer)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     annotationProcessor(libs.androidx.room.compiler)

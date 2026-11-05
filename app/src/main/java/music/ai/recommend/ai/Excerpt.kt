@@ -60,4 +60,37 @@ object Excerpt {
         val exact = SAMPLES.toLong() * sourceRate / SAMPLE_RATE
         return (exact + 2).toInt()
     }
+
+    /**
+     * Resamples mono audio from [sourceRate] to [SAMPLE_RATE], cut to exactly one excerpt.
+     *
+     * Linear interpolation, and deliberately so. Against ffmpeg's polyphase filter it moves an
+     * embedding by a cosine of 0.002, while two different high-quality resamplers agree to 1.0000 —
+     * so the quality on offer is not the point. What is the point is that both devices run this
+     * function rather than two different good ones, because the model turns small differences in
+     * the signal into larger ones in the embedding: on one wav a difference of 0.0008 in the
+     * waveform came out as 0.025 in the vector.
+     *
+     * Returns fewer than [SAMPLES] only when the input genuinely holds less audio than that.
+     */
+    fun resample(data: FloatArray, sourceRate: Int): FloatArray {
+        if (data.isEmpty()) return data
+        if (sourceRate == SAMPLE_RATE || sourceRate <= 0) {
+            return if (data.size <= SAMPLES) data else data.copyOf(SAMPLES)
+        }
+        val ratio = sourceRate.toDouble() / SAMPLE_RATE
+        // The last output sample interpolates towards the sample after it, so the input has to
+        // reach one position past where that output sample lands.
+        val fits = ((data.size - 1) / ratio).toInt().coerceAtLeast(0)
+        val size = if (fits < SAMPLES) fits else SAMPLES
+        val resampled = FloatArray(size)
+        for (i in 0 until size) {
+            val position = i * ratio
+            val index = position.toInt()
+            val fraction = (position - index).toFloat()
+            val next = if (index + 1 < data.size) index + 1 else data.size - 1
+            resampled[i] = data[index] * (1 - fraction) + data[next] * fraction
+        }
+        return resampled
+    }
 }

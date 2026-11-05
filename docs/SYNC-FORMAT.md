@@ -85,7 +85,17 @@ A vector is accepted only when **all** of these match the receiving device's own
 
 - the **model** it was produced by, including which variant (quantised or full);
 - the **analysis version**, which is bumped whenever anything that changes an embedding changes;
-- the **excerpt** — the start, in milliseconds, of the ten seconds that were listened to.
+- the **excerpt** — the start, in milliseconds, of the ten seconds that were listened to;
+- the **decoder** that turned the file into samples.
+
+That last one is why, for the moment, **only mp3 travels**. An mp3 goes through `ai/Mp3Excerpt.kt`,
+which is the same code in both apps, so both get the same samples by construction. Everything else
+goes through the platform — MediaCodec on the phone, ffmpeg on the desktop — and those are two
+different decoders whose agreement is a matter of luck rather than design. Measured on this pair of
+devices they happen to agree well (m4a 0.9979, wav 0.9977, and the same ten nearest neighbours out
+of ten), but nothing guarantees that the next phone's vendor has not improved its decoder, and a
+vector that is wrong in a way nobody notices is worse than a vector that was never sent. So those
+formats are analysed locally on each device until there is a shared decoder for them too.
 
 The excerpt is the part that took measuring, and the reason it is in the record rather than assumed.
 `ai/Excerpt.kt` decides it, and that file exists twice, once in each repository, and must stay
@@ -97,8 +107,13 @@ identical. The numbers behind it, measured on one mp3 with everything else held 
 | window twenty-one milliseconds apart | 0.9585 |
 | window anywhere from 20 ms to 2 s apart | 0.94–0.96 |
 | excerpt one thousand samples short of ten seconds | 0.8988 |
+| mono mix 3 dB apart, which is what `-ac 1` does against a plain average | 0.975 |
 | linear interpolation against ffmpeg's polyphase resampler | 0.9973–0.9988 |
 | two different high-quality resamplers | 1.0000 |
+
+A waveform difference comes out larger in the embedding than it went in: on one wav, signals that
+differed by 0.0008 gave vectors 0.025 apart. That is the reason the two sides are made to produce
+the same samples rather than merely similar ones.
 
 The app treats 0.9985 as "the same embedding, no re-analysis needed", and two different tracks sit
 at about 0.27. So there is no tolerance to spend on the window: a near miss costs as much as a
@@ -147,8 +162,12 @@ socket instead of a folder.
 
 Three things must not drift, and each has a guard:
 
-- `ai/Excerpt.kt` exists in both repositories and must be identical apart from the line naming which
-  side it is on. Diff it.
+- `ai/Excerpt.kt` and `ai/Mp3Excerpt.kt` exist in both repositories and must be identical apart from
+  the line naming which side it is on. Diff them.
+- The mp3 decoder has a golden test, `Mp3ExcerptTest`, which decodes a committed 25-second fixture
+  and checks the sha256 of the result. It runs on the Android side, where the tests run, and it
+  pins the behaviour of the canonical copy: if it fails after a change, every embedding made from
+  an mp3 has stopped being comparable and the analysis version has to be raised.
 - `ANALYSIS_VERSION` must be the same number on both sides. A vector carries it and is refused if it
   differs, so a mistake here costs a re-analysis rather than a wrong answer.
 - The merge itself gets **one fixture, two implementations**: the same input logs and the same
@@ -160,6 +179,9 @@ Three things must not drift, and each has a guard:
 | | |
 | --- | --- |
 | The excerpt contract | done on both sides, measured |
+| A shared mp3 decoder | done on both sides, byte-for-byte identical on this machine |
+| The same, confirmed on a phone | not yet |
+| A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
 | Everything else here | designed, not written |
 
 The excerpt had to come first. Until the two sides agreed on which samples to listen to, a synced

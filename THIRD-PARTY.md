@@ -2,7 +2,10 @@
 
 Aura AI itself is GPL-3.0-or-later. This file records what it builds on and under which terms.
 Apache-2.0, MIT, BSD and CC0 components can all be combined into a GPL-3.0 work; the obligation
-that comes with them is attribution, which is what this file provides.
+that comes with them is attribution, which is what this file provides. One component, JLayer, is
+LGPL-2.1-or-later, which its own section 3 allows to be taken under the GNU GPL version 2 or any
+later version — so it travels into this GPL-3.0 work on those terms, and its source is available
+from its author and from Maven Central alongside the artifact.
 
 ## Model weights
 
@@ -59,6 +62,7 @@ tokenizer is useless without it.
 | ONNX Runtime for Android | MIT |
 | Coil | Apache-2.0 |
 | Gson | Apache-2.0 |
+| [JLayer](http://www.javazoom.net/javalayer/javalayer.html) (mp3 decoding for analysis) | LGPL-2.1-or-later |
 | JUnit 4 (tests only) | EPL-1.0 |
 | Espresso, AndroidX Test (tests only) | Apache-2.0 |
 

@@ -21,10 +21,10 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import music.ai.recommend.model.Song
+import java.io.File
 import java.nio.FloatBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.math.min
 
 /** What the scanner is doing right now, for the settings screen. */
 sealed interface ScanStage {
@@ -200,7 +200,7 @@ class AiScanner(
                 currentCoroutineContext().ensureActive()
 
                 val features = try {
-                    val pcm = decodeAudioChunk(song, Excerpt.LENGTH_MS)
+                    val pcm = decodeExcerpt(song)
                     if (pcm.isEmpty()) null else audioProcessor.extractFeatures(pcm)
                 } catch (e: CancellationException) {
                     throw e
@@ -264,7 +264,33 @@ class AiScanner(
         song: Song,
         stats: DecodeStats? = null,
         startUsOverride: Long? = null
-    ): FloatArray = decodeAudioChunk(song, Excerpt.LENGTH_MS, stats, startUsOverride)
+    ): FloatArray = decodeExcerpt(song, stats, startUsOverride)
+
+    /**
+     * The excerpt, from whichever decoder is right for the file.
+     *
+     * mp3 goes to [Mp3Excerpt] rather than to the platform: MediaCodec's mp3 output starts 576
+     * samples later than ffmpeg's and its seek over a variable bitrate lands hundreds of samples
+     * further off, which is enough to make an embedding from this device unusable on another. A
+     * file that will not decode that way still falls back here, because a local embedding is worth
+     * more than none; what it cannot do is travel, and the sync record says which decoder made it.
+     *
+     * @param startUsOverride only an experiment passes it, and it needs the platform path, which
+     *   is the one whose window is being measured.
+     */
+    private fun decodeExcerpt(
+        song: Song,
+        stats: DecodeStats? = null,
+        startUsOverride: Long? = null
+    ): FloatArray {
+        if (startUsOverride == null && Mp3Excerpt.handles(song.path)) {
+            val samples = runCatching { Mp3Excerpt.decode(File(song.path)) }
+                .getOrElse { FloatArray(0) }
+            if (samples.isNotEmpty()) return samples
+            Log.w(TAG, "Shared mp3 decoder gave nothing for ${song.title}, using the platform one")
+        }
+        return decodeAudioChunk(song, Excerpt.LENGTH_MS, stats, startUsOverride)
+    }
 
     /** Counters for the decode, filled in only when a benchmark asks for them. */
     internal class DecodeStats {
@@ -461,7 +487,7 @@ class AiScanner(
             sink.failure?.let { throw it }
 
             stats?.let { it.samples = sink.size }
-            return resample(sink.toFloatArray(), sink.sampleRate, Excerpt.SAMPLE_RATE)
+            return Excerpt.resample(sink.toFloatArray(), sink.sampleRate)
         } catch (e: Exception) {
             Log.e(TAG, "Decoding failed for ${song.title}", e)
             return FloatArray(0)
@@ -536,37 +562,6 @@ class AiScanner(
         }
 
         fun toFloatArray(): FloatArray = if (size == buffer.size) buffer else buffer.copyOf(size)
-    }
-
-    /**
-     * Linear resampling to [to], cut to exactly one excerpt.
-     *
-     * The interpolation itself is left alone: measured against ffmpeg's polyphase filter on the
-     * same window it moves the embedding by a cosine of 0.0024, which is not worth a better
-     * resampler and certainly not worth invalidating every stored embedding for. The length is
-     * what changed. An excerpt one sample short of [Excerpt.SAMPLES] is read by the feature
-     * extractor as a track shorter than ten seconds and padded with silence, so the count is
-     * pinned here and only a genuinely short track comes back short.
-     */
-    private fun resample(data: FloatArray, from: Int, to: Int): FloatArray {
-        if (data.isEmpty()) return data
-        if (from == to) {
-            return if (data.size <= Excerpt.SAMPLES) data else data.copyOf(Excerpt.SAMPLES)
-        }
-        val ratio = from.toDouble() / to.toDouble()
-        // The last output sample interpolates towards the sample after it, so the input has to
-        // reach one position past where that output sample lands.
-        val fits = ((data.size - 1) / ratio).toInt().coerceAtLeast(0)
-        val newSize = min(Excerpt.SAMPLES, fits)
-        val resampled = FloatArray(newSize)
-        for (i in 0 until newSize) {
-            val oldPos = i * ratio
-            val index = oldPos.toInt()
-            val fraction = (oldPos - index).toFloat()
-            val next = min(index + 1, data.size - 1)
-            resampled[i] = data[index] * (1 - fraction) + data[next] * fraction
-        }
-        return resampled
     }
 
     private fun selectAudioTrack(extractor: MediaExtractor): Int {
