@@ -123,6 +123,10 @@ class SyncCoordinator<Track>(
         val keys = library()
         if (keys.isEmpty()) return Pulled(0, state.unresolved.size, emptyMap(), null)
 
+        // Notes about files that were never ours to read — a temporary of Syncthing's, by the look
+        // of it — would otherwise sit in the state for good. Cheap to do here and nowhere else to.
+        state.progress.keys.removeAll { !DayFile.isOurs(it.substringAfter('/')) }
+
         val known = store.heldFromOthers(now)
         val outcome = HistoryReader(deviceId, folder, state.progress).read(known, now, keepDays)
 

@@ -249,6 +249,47 @@ class VectorTransportTest {
     }
 
     @Test
+    fun whatSyncthingLeavesBehindIsNotRead() {
+        // Found on a live exchange: a phone had read twelve lines out of a file Syncthing was
+        // still transferring, and kept a note of its progress through a name that would not exist
+        // a second later. A file being filled block by block is the one place where "only the last
+        // line can be half-written" stops being true.
+        val folder = Folder()
+        val writer = VectorWriter(Folder.OWNER, folder)
+        writer.offer(record("настоящая"))
+        writer.flush(now, force = true)
+        // As Syncthing names a transfer in progress, and as it used to.
+        folder.put(Folder.OWNER, "vectors/.syncthing.2026-11-05.jsonl.tmp", listOf("половина стр"))
+        folder.put(Folder.OWNER, "vectors/~syncthing~2026-11-05.jsonl.tmp", listOf("и ещё"))
+        folder.put(Folder.OWNER, "vectors/2026-11-05.jsonl.tmp", listOf("и это"))
+
+        val progress = HashMap<String, Int>()
+        val outcome = pass(folder, progress)
+        assertEquals(listOf("настоящая"), outcome.records.map { it.record.track.title })
+        assertEquals(0, outcome.linesUnreadable)
+        assertEquals(setOf("${Folder.OWNER}/vectors/2026-11-05.jsonl"), progress.keys)
+    }
+
+    @Test
+    fun bothShapesOfADayAreOurs() {
+        assertTrue(DayFile.isOurs("history/2026-11-05.jsonl"))
+        assertTrue(DayFile.isOurs("vectors/2026-11-05.jsonl"))
+        assertTrue(DayFile.isOurs("history/2026-11-05/0003.jsonl"))
+        for (other in listOf(
+            "vectors/.syncthing.2026-11-05.jsonl.tmp",
+            "vectors/~syncthing~2026-11-05.jsonl.tmp",
+            "vectors/2026-11-05.jsonl.tmp",
+            "vectors/2026-11-05.jsonl.bak",
+            "vectors/readme.txt",
+            "vectors/2026-11.jsonl",
+            "vectors/2026-11-05/.hidden.jsonl",
+            "2026-11-05.jsonl"
+        )) {
+            assertFalse(other, DayFile.isOurs(other))
+        }
+    }
+
+    @Test
     fun historyAndVectorsDoNotStepOnEachOther() {
         // One progress map, one device directory, two readers. The keys carry the file's own
         // directory, so neither can mark the other's file as read.

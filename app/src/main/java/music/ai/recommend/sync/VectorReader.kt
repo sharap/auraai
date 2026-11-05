@@ -72,6 +72,9 @@ class VectorReader(
             if (deviceId == ownDeviceId) continue
             if (!SyncIdentity.isValid(deviceId)) continue
             for (path in source.files(deviceId, VectorWriter.DIRECTORY).sorted()) {
+                // Anything else in the folder is somebody else's business — above all a file
+                // Syncthing is still transferring. See [DayFile].
+                if (!DayFile.isOurs(path)) continue
                 if (records.size >= maxRecords) {
                     more = true
                     continue

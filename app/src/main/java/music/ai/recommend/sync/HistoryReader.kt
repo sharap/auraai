@@ -62,6 +62,9 @@ class HistoryReader(
             if (deviceId == ownDeviceId) continue
             if (!SyncIdentity.isValid(deviceId)) continue
             for (path in source.files(deviceId, DIRECTORY).sorted()) {
+                // Anything else in the folder is somebody else's business — above all a file
+                // Syncthing is still transferring. See [DayFile].
+                if (!DayFile.isOurs(path)) continue
                 val key = "$deviceId/$path"
                 var consumed = progress[key] ?: 0
                 if (oldestDay != null && isBefore(path, oldestDay)) {
