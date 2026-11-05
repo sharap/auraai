@@ -33,14 +33,19 @@ val bundleModels: Boolean = providers.gradleProperty("auraai.bundleModels")
 val signReleaseWithDebugKey: Boolean = providers.gradleProperty("auraai.signReleaseWithDebugKey")
     .getOrElse("true").toBoolean()
 
-// A build that installs beside the real app instead of replacing it. Developing anything that
-// changes what an embedding means — the excerpt alignment that cross-device sync needs — otherwise
-// throws away the analysed library on the phone every time a branch is tried, and that is hours.
-// With -Pauraai.appIdSuffix=sync the package becomes music.ai.recommend.sync: its own storage, its
-// own database, its own launcher entry, and the installed app untouched. Signature and version code
-// stop mattering too, because nothing is being replaced.
-val appIdSuffix: String = providers.gradleProperty("auraai.appIdSuffix").orNull
-    ?.trim()?.removePrefix(".").orEmpty()
+// A debug build installs beside the real app instead of replacing it: music.ai.recommend.debug,
+// with its own storage, its own database and its own launcher entry. That is what makes trying a
+// branch cheap — anything that changes what an embedding means would otherwise throw away the
+// analysed library on the phone, which is hours — and it also takes the signature and the version
+// code out of the way, since nothing is being replaced.
+//
+// -Pauraai.appIdSuffix=sync gives a different one, for two dev builds side by side. The empty
+// value, -Pauraai.appIdSuffix=, puts the debug build back on top of the real package, which is the
+// one way to read the installed app's own database: a debuggable build signed with the release key
+// installs over it and keeps the data. See docs and the release notes for that procedure.
+val appIdSuffix: String = providers.gradleProperty("auraai.appIdSuffix")
+    .map { it.trim().removePrefix(".") }
+    .getOrElse("debug")
 
 // Instrumented tests only reach the installed app when both carry the same signature, so a
 // debug-signed test APK cannot examine a release install. With -Pauraai.testWithReleaseKey=true the
@@ -114,12 +119,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        if (appIdSuffix.isNotEmpty()) {
-            applicationIdSuffix = ".$appIdSuffix"
-        }
-        // The launcher entry has to say which of the two it is, or the wrong one gets opened.
-        manifestPlaceholders["appLabel"] =
-            if (appIdSuffix.isEmpty()) "@string/app_name" else "Aura AI · $appIdSuffix"
+        // Release keeps the name the app is published under; see the debug block for the rest.
+        manifestPlaceholders["appLabel"] = "@string/app_name"
 
         buildConfigField("String", "HF_MODEL_REPO", "\"$hfModelRepo\"")
         buildConfigField("String", "HF_MODEL_REVISION", "\"$hfModelRevision\"")
@@ -155,6 +156,14 @@ android {
 
     buildTypes {
         debug {
+            // Per build type and not in defaultConfig, where it would rename the published app
+            // too the moment anyone passed the property to a release build.
+            if (appIdSuffix.isNotEmpty()) {
+                applicationIdSuffix = ".$appIdSuffix"
+                // The launcher entry has to say which of the two it is, or the wrong one gets
+                // opened — and the wrong one here is the one with the real library in it.
+                manifestPlaceholders["appLabel"] = "Aura AI · $appIdSuffix"
+            }
             if (testWithReleaseKey && hasKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }

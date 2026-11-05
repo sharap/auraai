@@ -46,7 +46,8 @@ Useful build flags (see `gradle.properties`):
 | `-Pauraai.abi=arm64-v8a` | Package native libraries for one architecture only. |
 | `-Pauraai.abiSplits=false` | One APK carrying every architecture. |
 | `-Pauraai.signReleaseWithDebugKey=false` | Required for a distributable build; wire up a real signing config. |
-| `-Pauraai.appIdSuffix=sync` | Build as `music.ai.recommend.sync`, a second app that installs beside the real one with its own storage and launcher entry. For work that invalidates stored embeddings, so that trying a branch does not cost the phone hours of re-analysis. |
+| `-Pauraai.appIdSuffix=sync` | A debug build is `music.ai.recommend.debug` by default and installs beside the real app, with its own storage and launcher entry — so trying a branch never costs the phone its analysed library. This gives a different suffix, for two dev builds at once. |
+| `-Pauraai.appIdSuffix=` | Puts the debug build back on the real package. The one way to read the installed app's own database: signed with the release key (above) it installs over the release build and keeps the data. |
 | `-Pauraai.hf.repo=…` | Where the CLAP weights are fetched from. |
 | `-Pauraai.hf.ruRepo=…` | Where the Russian query encoder is fetched from. |
 
