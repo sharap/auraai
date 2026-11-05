@@ -58,6 +58,61 @@ data class TrackKey(
         const val DURATION_SLACK_MS = 1_000L
 
         /**
+         * Describes a track in this library the way the other device will hear about it.
+         *
+         * Tags first, and the file's name when there are none — in this collection most files
+         * carry no artist tag at all and are named `Artist - Title (version)`, so refusing to read
+         * the name would leave half the library nameless and unmatchable.
+         *
+         * The parsing is deliberately its own and not the wave's `TrackGroups`, which does
+         * something that looks the same. Grouping is a matter of taste and may be tuned whenever
+         * the stream feels wrong; identity may not be tuned at all, because changing it silently
+         * unmatches history that was already matched. Two jobs that happen to resemble each other.
+         *
+         * @param fileName the file's own name, with or without its extension; the path is not
+         *   used, since where a file sits is exactly what cannot be relied on.
+         * @param hash sha256 of the file when it is known, which settles everything on its own.
+         */
+        fun describe(
+            artist: String,
+            title: String,
+            fileName: String,
+            durationMs: Long,
+            hash: String? = null
+        ): TrackKey {
+            val bare = fileName.substringBeforeLast('.').trim()
+            val fromTags = normalise(artist).takeIf { it.isNotEmpty() && !it.equals(UNKNOWN, true) }
+            val split = if (fromTags == null) splitArtistAndTitle(bare) else null
+            return TrackKey(
+                hash = hash,
+                durationMs = durationMs,
+                artist = fromTags ?: split?.first.orEmpty(),
+                title = normalise(title).ifEmpty { split?.second ?: normalise(bare) }
+            )
+        }
+
+        /** Android's own word for a track whose tags say nothing; it is not an artist. */
+        private const val UNKNOWN = "<unknown>"
+
+        private val SEPARATOR = Regex("""\s+[-\u2013\u2014]\s+""")
+
+        /**
+         * `Artist - Title` split on a dash with space either side, which is what distinguishes a
+         * separator from the hyphen inside `Nu-Virgos` or `Jean-Michel Jarre`. Only the first dash
+         * counts, so `A - B - C` is an artist and a title containing a dash.
+         */
+        private fun splitArtistAndTitle(name: String): Pair<String, String>? {
+            val match = SEPARATOR.find(name) ?: return null
+            val artist = normalise(name.substring(0, match.range.first))
+            val title = normalise(name.substring(match.range.last + 1))
+            if (artist.isEmpty() || title.isEmpty()) return null
+            // A leading track number is not an artist.
+            if (artist.all { it.isDigit() }) return null
+            if (artist.none { it.isLetter() }) return null
+            return artist to title
+        }
+
+        /**
          * Lower case, one spelling of each letter, one kind of space and dash, nothing else.
          *
          * Normalisation has to be the same on both devices down to the character, because it

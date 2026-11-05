@@ -28,7 +28,7 @@ class SafSyncFolder private constructor(
      * pass and the next, and a stale handle would fail in less obvious ways than a null.
      */
     private val root: () -> DocumentFile?
-) : SyncSink, SyncSource {
+) : SyncFolder {
 
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
