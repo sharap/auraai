@@ -147,6 +147,107 @@ the fact that ffmpeg mixes to mono with a clip at ±1 while Android averages cha
 left alone deliberately, because closing it would mean putting the worse resampler on both sides to
 buy nothing that can be observed.
 
+## What this protects, and from whom
+
+The listening history is the most sensitive thing either app holds. It is not a record of taste but
+a minute-by-minute record of behaviour: when the phone's owner wakes up, when they commute, when
+they are at home, when they are awake at three in the morning. Four thousand plays describe a
+routine better than a calendar does. Playlists and favourites are personal but tame beside it. The
+vectors themselves say nothing, but what they are keyed by — a file hash, an artist and a title —
+is a complete inventory of someone's library.
+
+So the question is not whether this needs protecting but where the protection belongs.
+
+| | on the wire | at rest |
+| --- | --- | --- |
+| Syncthing, which carries it today | TLS, mutual, pinned to each device's own key — already covered | the sync folder is plain text, and on Android it sits in shared storage |
+| direct transfer over the local network, which is next | nothing, unless built | — |
+
+Two things follow. First, there is no gap on the wire today, and building a second layer of
+transport security under Syncthing would be effort spent twice. Second, there is a gap **at rest**
+that is easy to overlook: the sync folder is not app-private. On Android any app holding the
+storage permission can read it. Encrypting a channel and then writing plain text into a shared
+folder locks the door and leaves the window open.
+
+And the local network is the case that makes the decision. It is often not the owner's own network —
+a café, a hotel, an office — where anyone attached to it can read what passes, and, worse, write.
+A forged history is the expensive case: history is a grow-only set, so anything that merges into it
+stays, and a poisoned wave is noticed a week later and cannot be undone.
+
+### The payload is encrypted, not the channel
+
+Each batch of records is sealed with AEAD — AES-256-GCM, which both platforms have in hardware —
+under one symmetric key shared by the owner's devices and established once when they are paired.
+Every transport then becomes a dumb pipe, and it stops mattering who carries the bytes: Syncthing
+and its relays, a socket on a hostile network, a USB stick.
+
+This is a stronger invariant than "TLS on the local network, and Syncthing is trusted", and it is
+also less work, because it removes a question rather than answering it. Three consequences are worth
+spelling out:
+
+- **Integrity comes free, and signatures are not needed.** A batch that authenticates under the
+  shared key was written by something holding that key, which is to say by one of the owner's own
+  devices. Public-key signatures would additionally prove *which* device wrote a batch, and in a
+  system whose devices all belong to one person that is a distinction without a difference — the
+  device id travels inside the sealed plaintext, which is enough to merge by. This also sidesteps
+  Ed25519, which Android only exposes from API 33 while this app supports 23.
+- **The local-network transport barely needs crypto of its own.** It moves opaque sealed blobs, so
+  it cannot leak content however hostile the network. A pinned TLS channel over the top is still
+  worth having, to keep device identifiers and traffic patterns off the air, but nothing load-
+  bearing rests on it. In particular there must be **no fallback to an unprotected connection**:
+  the classic way to reduce a secure protocol to an insecure one is to break the secure attempt and
+  let the client retry in the clear.
+- **Losing the key costs nothing but re-pairing.** The sync files are a transport, not an archive:
+  every record in them also lives in the device's own database in the clear. A device that forgets
+  the key has lost its outbox, not its history.
+
+### What the envelope has to carry
+
+Each line of a `.jsonl` file is one sealed batch rather than one record, so that the cost of a nonce
+and an authentication tag is paid per batch instead of per play:
+
+| field | why |
+| --- | --- |
+| `d` | the writing device's id, also the directory the file sits in |
+| `n` | that device's batch counter, so a missing batch is visible as a gap |
+| `e` | what sealed it: `none` until a key exists, then `a256gcm` |
+| `iv` | the nonce: the device id's first four bytes, then `n` as eight — so it cannot repeat |
+| `ct` | the sealed batch, or the records themselves when `e` is `none` |
+
+`d`, `n` and `e` are the associated data, so a batch cannot be moved to another device's file or
+renumbered without the seal failing. A truncated line loses that batch and nothing else, which is
+the same property the plain-text form had.
+
+What this does not do is prove that nothing was **removed from the end**. A reader cannot tell a
+deleted tail from a tail that has not synced yet, and no scheme fixes that without an online
+channel to ask the other device what it believes it wrote. Gaps in the middle are caught by `n`;
+the tail is accepted as a known limit.
+
+### Keys and pairing
+
+The device id is a random 128-bit value generated once — it needs no cryptographic structure, since
+the shared key does the authenticating. The shared key lives in the Android keystore, hardware-backed
+and non-exportable for use, with a copy sealed under it for the one operation that needs the key
+itself: showing it to a new device. On the desktop it is a file no wider than its owner.
+
+Pairing is the one window an attacker on a hostile network could climb through, because before it
+there is nothing to authenticate against. So it is explicit and short-range: one device shows a code
+bound to the key, the other has it typed in or read by camera. Anything that pairs silently over the
+network pairs with whoever answers first.
+
+Discovery deserves the same care for a different reason. A device announcing itself over mDNS tells
+the whole café that its owner runs this app, and usually what their phone is called. So: no
+announcing by default, announcing only while the sync screen is open, and under a name that means
+nothing.
+
+### What of this is needed now
+
+Almost none of it, which is the point of writing it down early. Syncthing already protects the wire,
+and the first version can write `e: "none"` and still be correct. What cannot wait is the envelope
+itself: three fields reserved now against a format change later, at the moment when the data has
+become worth keeping. Keys, pairing, discovery and the socket all belong with the network transport,
+and not before it.
+
 ## Transport
 
 One file per device, so that there is exactly one writer per file and Syncthing never has to merge
@@ -161,17 +262,18 @@ anything:
 ```
 
 JSON Lines for everything but the vectors: a file that was copied while being written loses its last
-line, and a reader that skips a line it cannot parse loses one record instead of the file. The
-vectors are fixed-size records in a binary file for the same reason — a truncated tail is a whole
-number of records plus a remainder to ignore.
+line, and a reader that skips a line it cannot parse loses one record instead of the file. Each line
+is one sealed batch, as described above, which keeps that property. The vectors are fixed-size
+records in a binary file for the same reason — a truncated tail is a whole number of records plus a
+remainder to ignore — and are sealed in blocks rather than per record.
 
 A device reads every directory but its own and writes only its own. There is no locking, no leader
 and no server. Android reaches the folder through the storage access framework, so the user picks
 it once and the grant persists.
 
 Syncthing is the transport today, because that is what is already running. Direct transfer over the
-local network is the obvious next step and changes none of the above: the same files, handed over a
-socket instead of a folder.
+local network is the obvious next step and changes none of the above: the same sealed batches,
+handed over a socket instead of a folder, which is most of why sealing them is worth doing.
 
 ## Keeping the two implementations honest
 
@@ -196,6 +298,8 @@ Three things must not drift, and each has a guard:
 | The excerpt contract | done on both sides, measured |
 | A shared mp3 decoder | done on both sides, and confirmed on a phone: same samples, same features, same vector |
 | A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
+| The envelope's three fields | to be written with the first record, sealing off |
+| Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 
 The excerpt had to come first. Until the two sides agreed on which samples to listen to, a synced
