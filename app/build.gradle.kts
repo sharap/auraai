@@ -33,6 +33,15 @@ val bundleModels: Boolean = providers.gradleProperty("auraai.bundleModels")
 val signReleaseWithDebugKey: Boolean = providers.gradleProperty("auraai.signReleaseWithDebugKey")
     .getOrElse("true").toBoolean()
 
+// A build that installs beside the real app instead of replacing it. Developing anything that
+// changes what an embedding means — the excerpt alignment that cross-device sync needs — otherwise
+// throws away the analysed library on the phone every time a branch is tried, and that is hours.
+// With -Pauraai.appIdSuffix=sync the package becomes music.ai.recommend.sync: its own storage, its
+// own database, its own launcher entry, and the installed app untouched. Signature and version code
+// stop mattering too, because nothing is being replaced.
+val appIdSuffix: String = providers.gradleProperty("auraai.appIdSuffix").orNull
+    ?.trim()?.removePrefix(".").orEmpty()
+
 // Instrumented tests only reach the installed app when both carry the same signature, so a
 // debug-signed test APK cannot examine a release install. With -Pauraai.testWithReleaseKey=true the
 // debug build type — and the androidTest APK with it — is signed with the release key instead.
@@ -104,6 +113,13 @@ android {
         versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        if (appIdSuffix.isNotEmpty()) {
+            applicationIdSuffix = ".$appIdSuffix"
+        }
+        // The launcher entry has to say which of the two it is, or the wrong one gets opened.
+        manifestPlaceholders["appLabel"] =
+            if (appIdSuffix.isEmpty()) "@string/app_name" else "Aura AI · $appIdSuffix"
 
         buildConfigField("String", "HF_MODEL_REPO", "\"$hfModelRepo\"")
         buildConfigField("String", "HF_MODEL_REVISION", "\"$hfModelRevision\"")

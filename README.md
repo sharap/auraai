@@ -46,6 +46,7 @@ Useful build flags (see `gradle.properties`):
 | `-Pauraai.abi=arm64-v8a` | Package native libraries for one architecture only. |
 | `-Pauraai.abiSplits=false` | One APK carrying every architecture. |
 | `-Pauraai.signReleaseWithDebugKey=false` | Required for a distributable build; wire up a real signing config. |
+| `-Pauraai.appIdSuffix=sync` | Build as `music.ai.recommend.sync`, a second app that installs beside the real one with its own storage and launcher entry. For work that invalidates stored embeddings, so that trying a branch does not cost the phone hours of re-analysis. |
 | `-Pauraai.hf.repo=…` | Where the CLAP weights are fetched from. |
 | `-Pauraai.hf.ruRepo=…` | Where the Russian query encoder is fetched from. |
 

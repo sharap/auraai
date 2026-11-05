@@ -20,14 +20,14 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@drawable/app_icon"
-        android:label="@string/app_name"
+        android:label="${appLabel}"
         android:roundIcon="@drawable/app_icon"
         android:supportsRtl="true"
         android:theme="@style/Theme.AiMusic">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
+            android:label="${appLabel}"
             android:theme="@style/Theme.AiMusic"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

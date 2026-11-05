@@ -66,9 +66,15 @@ class DecodeDumpTest {
         val outputDir = File(context.cacheDir, "decode-dump").apply { mkdirs() }
         val manifest = StringBuilder()
 
+        // -e startUs 0 takes the excerpt from the very beginning instead of the middle, which is
+        // the one window that involves no seeking at all. Comparing that against ffmpeg's first ten
+        // seconds separates a seek that lands in the wrong place from the two sides disagreeing
+        // about where a track starts -- an mp3 carries an encoder delay that ffmpeg skips.
+        val startOverride = args.getString("startUs")?.toLongOrNull()
+
         for ((index, song) in chosen.withIndex()) {
             val probe = probe(song.path)
-            val samples = runCatching { scanner.decodeForBenchmark(song) }.getOrElse {
+            val samples = runCatching { scanner.decodeForBenchmark(song, null, startOverride) }.getOrElse {
                 Log.w(tag, "decode failed for ${song.path}", it)
                 FloatArray(0)
             }
@@ -85,7 +91,7 @@ class DecodeDumpTest {
                     file.name,
                     song.path,
                     probe.durationUs,
-                    probe.startUs,
+                    startOverride ?: probe.startUs,
                     probe.sampleRate,
                     probe.channels,
                     samples.size
