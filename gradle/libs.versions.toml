@@ -16,8 +16,10 @@ onnxruntime = "1.16.0"
 room = "2.6.1"
 ksp = "2.0.21-1.0.27"
 jlayer = "1.0.1"
+documentfile = "1.1.0"
 
 [libraries]
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 jlayer = { group = "javazoom", name = "jlayer", version.ref = "jlayer" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
