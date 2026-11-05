@@ -1867,7 +1867,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 
-    private companion object {
+    // Not private only so that the instrumented test can ask for the same preference key the app
+    // writes under, rather than repeat the string and drift from it.
+    internal companion object {
         const val TAG = "MusicViewModel"
         const val PROGRESS_INTERVAL_MS = 500L
         const val GLOBAL_PLAIN_RESULTS = 20
