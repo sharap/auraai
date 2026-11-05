@@ -206,8 +206,13 @@ class SyncCoordinator<Track>(
      *
      * The tracks are marked as dealt with only once their batch is on disk. A crash in between
      * therefore costs those vectors being offered again, which the folder absorbs.
+     *
+     * @param limit how many to offer in this pass, [publishLimit] by default. The end of an
+     *   analysis passes [PUBLISH_EVERYTHING]: whatever was just scanned should go out as one piece
+     *   rather than in dribbles that wait for somebody to come back to the app. That is the moment
+     *   the work exists and the moment the owner is least surprised to find the device busy.
      */
-    suspend fun pushVectors(now: Long): PushedVectors {
+    suspend fun pushVectors(now: Long, limit: Int = publishLimit): PushedVectors {
         val vectors = vectors ?: return PushedVectors(0, 0, 0)
         if (folder() == null) return PushedVectors(0, 0, 0)
         val terms = vectors.terms() ?: return PushedVectors(0, 0, 0)
@@ -218,7 +223,7 @@ class SyncCoordinator<Track>(
         var couldNotTravel = 0
         var gone = 0
         var rounds = 0
-        while (rounds * VectorWriter.BATCH_RECORDS < publishLimit) {
+        while (rounds.toLong() * VectorWriter.BATCH_RECORDS < limit) {
             rounds++
             val held = vectors.toPublish(VectorWriter.BATCH_RECORDS)
             if (held.isEmpty()) break
@@ -348,12 +353,17 @@ class SyncCoordinator<Track>(
         emptyMap()
     }
 
-    private companion object {
+    // Not private: the two constants below are what a caller passes in, and a platform deciding
+    // its own pace has to be able to name them.
+    companion object {
 
         /** How many of this device's listens are described in one pass. */
         const val PUSH_LIMIT = 200
 
         /** What a device pays for a pass if it does not say; see [publishLimit]. */
         const val DEFAULT_PUBLISH_LIMIT = 500
+
+        /** Everything there is, for the end of an analysis; see [pushVectors]. */
+        const val PUBLISH_EVERYTHING = Int.MAX_VALUE
     }
 }

@@ -1811,7 +1811,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // hour of analysis sits unshared until the owner happens to come back to the screen.
             var wasScanning = false
             isAiScanning.collect { scanning ->
-                if (wasScanning && !scanning) syncPass(force = true, takeIn = true)
+                // Whether it ran out of tracks or the owner stopped it, everything analysed goes
+                // out as one piece. Five hundred at a time is right for a pass nobody asked for;
+                // here the work has just been done, the device is already busy, and holding the
+                // rest back until somebody happens to open the app is what makes this feel jerky.
+                if (wasScanning && !scanning) {
+                    syncPass(force = true, takeIn = true, allVectors = true)
+                }
                 wasScanning = scanning
             }
         }
@@ -1828,6 +1834,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * @param takeIn false for a pass that only has something to say. A listen finishing is one of
      *   those: it comes every few minutes, and reading the whole folder each time would be work
      *   for nothing.
+     * @param allVectors for the end of an analysis: everything just scanned goes out at once
+     *   instead of five hundred at a time. See [SyncCoordinator.pushVectors].
      * @param throttled for the passes a person causes without meaning to — pausing, coming back to
      *   the app — which arrive in flurries. See [PULL_THROTTLE_MS]. A pass the owner asked for,
      *   and the one after a scan, are never throttled.
@@ -1835,7 +1843,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun syncPass(
         force: Boolean,
         takeIn: Boolean,
-        throttled: Boolean = false
+        throttled: Boolean = false,
+        allVectors: Boolean = false
     ) = withContext(Dispatchers.IO) {
         val coordinator = coordinator() ?: return@withContext
         syncGate.withLock {
@@ -1858,8 +1867,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // nothing. During a backfill this is the expensive part of a pass — a few hundred file
             // reads to name their excerpts — and in the steady state it costs one empty query.
             val sentVectors = if (pulled == null) null else
-                runCatching { coordinator.pushVectors(now) }
-                    .getOrElse { Log.e(TAG, "Could not write the vectors out", it); null }
+                runCatching {
+                    // Without a limit when it is not the end of an analysis, so the coordinator's
+                    // own choice stands: naming the default here would quietly override whatever a
+                    // platform decided for itself.
+                    if (allVectors) coordinator.pushVectors(now, SyncCoordinator.PUBLISH_EVERYTHING)
+                    else coordinator.pushVectors(now)
+                }.getOrElse { Log.e(TAG, "Could not write the vectors out", it); null }
             val tookVectors = if (pulled == null) null else
                 runCatching { coordinator.pullVectors(now) }
                     .getOrElse { Log.e(TAG, "Could not read the vectors in", it); null }

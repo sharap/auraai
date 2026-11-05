@@ -182,23 +182,31 @@ includes the ones that could not travel at all — a format with no shared decod
 answer will not change while the analysis version does not. When the analysis version does change
 every vector is thrown away and the marks go with them.
 
-### The excerpt start is asked of the platform, not worked out from the key
+### The excerpt start comes from the decoder, not from the platform
 
-The window has to be the one the analysis actually used, and each platform's analyser reads a
-duration from its own place: the container through MediaExtractor on the phone, the tag reader on
-the desktop. On the desktop those are the same reading, because the AI scanner is handed the
-library scanner's value. On the phone they are not — everything else in the app, including the key a
-track travels under, takes the duration from MediaStore.
+The window has to be the one the vector was actually made from, and for a shared decoder that is
+the decoder's own: `Mp3Excerpt.decode` picks it from the frame walk's count of the samples, not
+from whatever the platform says the track's length is. So `Mp3Excerpt.startMs` is what names it,
+and the platform is only asked for formats whose vectors do not travel anyway.
 
-Measured over 400 mp3s of this library: the two readings agree exactly for 182 of them, differ by at
-most one millisecond for the rest, and `Excerpt.startMs` puts all 400 in the same bucket. Which is
-not good enough. One millisecond crosses a two-second bucket boundary for about one track in two
-thousand, so a four thousand track library has a couple of them — and for those a vector would be
-believed on terms describing a different ten seconds, at a cosine of about 0.95 where 0.9985 is the
-bar. So `VectorStore.excerptStartMs` is a platform question, answered by the same reading the
-analyser uses. On the phone that costs one file open per track of a pass; `DurationAgreementTest`
-keeps the measurement, and guards that the two readings remain two roundings of one measurement
-rather than becoming two different ones.
+Naming it from the platform's duration was tried first and is wrong, which a live exchange said
+plainly: a phone refused every vector a desktop sent, sixty and sixty-six in two passes, as
+describing a different ten seconds — when each described exactly the right one. For an mp3 the
+container's duration comes from a Xing header or an estimate while the frame walk counts the frames,
+and the two are not a millisecond apart but a second or more. On real files from this library the
+window named from MediaStore disagrees with the decoder's for two tracks in three.
+
+The vectors were never wrong — the decoder made them from its own window either way. The *check*
+was wrong, and it refused what it should have taken. Which is the shape of error worth noticing: a
+guard comparing the wrong quantity looks like caution and costs the whole feature.
+
+Done this way the check also means something better than it used to. Two devices holding the same
+file get the same window by construction, so a disagreement no longer means "the two read the
+duration differently" — it means the files are different, another encode of the same recording,
+whose samples differ too. The question went from one worth arguing about to one worth asking.
+
+It costs a walk over the file's frame headers, which is sequential reading and no decoding, once per
+track on each side.
 
 ## What this protects, and from whom
 
