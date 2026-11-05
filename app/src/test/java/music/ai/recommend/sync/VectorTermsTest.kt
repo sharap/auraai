@@ -26,7 +26,7 @@ class VectorTermsTest {
         decoder: String = Mp3Excerpt.DECODER,
         model: String = fp32,
         version: Int = 3,
-        start: Int = 100_000,
+        start: Long = 100_000L,
         floats: FloatArray = vector
     ) = VectorRecord(
         track = TrackKey(null, 210_000, "мельница", "ночная кобыла"),
@@ -37,7 +37,7 @@ class VectorTermsTest {
         vector = floats
     )
 
-    private fun judge(record: VectorRecord, localDecoder: String = Mp3Excerpt.DECODER, start: Int = 100_000) =
+    private fun judge(record: VectorRecord, localDecoder: String = Mp3Excerpt.DECODER, start: Long = 100_000L) =
         terms.judge(record, localDecoder, start)
 
     @Test
@@ -82,9 +82,9 @@ class VectorTermsTest {
     fun aDisagreementAboutWhichTenSecondsIsRefusedRatherThanPaperedOver() {
         // Twenty-one milliseconds apart costs a cosine of 0.9585 where 0.9985 is the bar, so this
         // is not a rounding difference to shrug at. One millisecond is enough to refuse.
-        assertEquals(VectorVerdict.OtherExcerpt, judge(record(start = 100_001)))
-        assertEquals(VectorVerdict.OtherExcerpt, judge(record(start = 99_000)))
-        assertEquals(VectorVerdict.Usable, judge(record(start = 100_000)))
+        assertEquals(VectorVerdict.OtherExcerpt, judge(record(start = 100_001L)))
+        assertEquals(VectorVerdict.OtherExcerpt, judge(record(start = 99_000L)))
+        assertEquals(VectorVerdict.Usable, judge(record(start = 100_000L)))
     }
 
     @Test

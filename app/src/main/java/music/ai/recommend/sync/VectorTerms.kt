@@ -50,7 +50,7 @@ data class VectorTerms(
      * @param localExcerptStartMs what this device works out for its own copy, from its own reading
      *   of the duration.
      */
-    fun judge(record: VectorRecord, localDecoder: String, localExcerptStartMs: Int): VectorVerdict =
+    fun judge(record: VectorRecord, localDecoder: String, localExcerptStartMs: Long): VectorVerdict =
         when {
             record.model != model -> VectorVerdict.OtherModel
             record.analysisVersion != analysisVersion -> VectorVerdict.OtherVersion

@@ -59,6 +59,7 @@ import music.ai.recommend.ai.SmartAlbumBuilder
 import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.history.PlayHistory
 import music.ai.recommend.sync.SafSyncFolder
+import music.ai.recommend.sync.EmbeddingVectorStore
 import music.ai.recommend.sync.PlayHistoryStore
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
@@ -321,6 +322,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val deviceId: String = "",
         val sent: Int = 0,
         val takenIn: Int = 0,
+        /** Embeddings offered to the other devices, and taken from them. */
+        val vectorsSent: Int = 0,
+        val vectorsTakenIn: Int = 0,
+        /** True while a library's worth of vectors is still working its way across. */
+        val vectorsWaiting: Boolean = false,
         val waiting: Int = 0,
         val busy: Boolean = false,
         val lastRunAt: Long = 0L
@@ -1774,7 +1780,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             store = PlayHistoryStore(playHistory) { allSongs },
             folder = { syncFolder() },
             keepDays = PlayHistory.KEEP_DAYS,
-            note = { Log.i(TAG, it) }
+            note = { Log.i(TAG, it) },
+            vectors = EmbeddingVectorStore(embeddings, modelRepository) { allSongs }
         ).also { syncCoordinator = it }
     }
 
@@ -1835,6 +1842,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // the next real one wait out the throttle for nothing.
                 runCatching { coordinator.pull(now).also { if (it.read != null) lastPullAt = now } }
                     .getOrElse { Log.e(TAG, "Could not read the history in", it); null }
+
+            // Vectors on the same moments as a full pass, and never on a finished listen: there is
+            // nothing new to publish then, and reading a library's worth of them would be work for
+            // nothing. During a backfill this is the expensive part of a pass — a few hundred file
+            // reads to name their excerpts — and in the steady state it costs one empty query.
+            val sentVectors = if (pulled == null) null else
+                runCatching { coordinator.pushVectors(now) }
+                    .getOrElse { Log.e(TAG, "Could not write the vectors out", it); null }
+            val tookVectors = if (pulled == null) null else
+                runCatching { coordinator.pullVectors(now) }
+                    .getOrElse { Log.e(TAG, "Could not read the vectors in", it); null }
+            tookVectors?.refused?.takeIf { it.isNotEmpty() }?.let { Log.i(TAG, "Vectors refused: $it") }
+
             _syncSummary.value = _syncSummary.value.let {
                 it.copy(
                     // Totals since this run started, not of the last pass: most passes happen on
@@ -1843,11 +1863,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     sent = it.sent + sent,
                     takenIn = it.takenIn + (pulled?.takenIn ?: 0),
                     waiting = pulled?.waiting ?: it.waiting,
+                    vectorsSent = it.vectorsSent + (sentVectors?.written ?: 0),
+                    vectorsTakenIn = it.vectorsTakenIn + (tookVectors?.takenIn ?: 0),
+                    vectorsWaiting = tookVectors?.more ?: it.vectorsWaiting,
                     lastRunAt = now
                 )
             }
             // Listens taken in change what counts as recently played, which the daily mix uses.
             if ((pulled?.takenIn ?: 0) > 0) refreshDailyMix()
+            // Vectors taken in are tracks that have become analysed without being scanned, which
+            // is what the smart albums and the daily mix are built from.
+            if ((tookVectors?.takenIn ?: 0) > 0) {
+                refreshScannedIds()
+                refreshSmartAlbums()
+                refreshDailyMix()
+            }
         }
     }
 

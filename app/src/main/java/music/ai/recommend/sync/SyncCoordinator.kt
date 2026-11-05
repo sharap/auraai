@@ -33,10 +33,14 @@ class SyncCoordinator<Track>(
     /** How long this app's history is kept, which is as far back as a merge looks. */
     private val keepDays: Int = 365,
     /** Where a word about something worth noticing goes; the platform decides what that means. */
-    private val note: (String) -> Unit = {}
+    private val note: (String) -> Unit = {},
+    /** This device's embeddings, or null for a build that does not carry vectors at all. */
+    private val vectors: VectorStore<Track>? = null
 ) {
 
     private val writer = HistoryWriter(deviceId, Relay(), state.sequence)
+
+    private val vectorWriter = VectorWriter(deviceId, Relay(), state.vectorSequence)
 
     /** Rows handed to the writer but not yet on disk; lost on restart, which re-reads them. */
     private var offeredUpTo = state.exportedUpTo
@@ -115,6 +119,7 @@ class SyncCoordinator<Track>(
         val retry = state.unresolved.map { HistoryMerge.Incoming(it.deviceId, 0L, it.record) }
         val candidates = retry + outcome.merge.accepted
         if (candidates.isEmpty()) {
+            state.progress.putAll(outcome.advanced)
             state.save()
             return Pulled(0, state.unresolved.size, outcome.merge.gaps, outcome)
         }
@@ -136,9 +141,16 @@ class SyncCoordinator<Track>(
                 )
             })
         }
+        if (split.resolved.isNotEmpty() && takenIn == 0) {
+            // Nothing was stored, so nothing may be written down as read. The folder is left as it
+            // was found and the next pass meets the same batch.
+            note("Could not store ${split.resolved.size} listens")
+            return Pulled(0, state.unresolved.size, outcome.merge.gaps, outcome)
+        }
 
         // Saved last, and only now: the progress map says these batches have been read, and that
         // must not be true before the rows are in the store.
+        state.progress.putAll(outcome.advanced)
         state.unresolved.clear()
         state.rememberUnresolved(split.unresolved.map { SyncState.Waiting(it.deviceId, it.record) })
         state.aliases.clear()
@@ -151,6 +163,160 @@ class SyncCoordinator<Track>(
         return Pulled(takenIn, state.unresolved.size, outcome.merge.gaps, outcome)
     }
 
+    data class PushedVectors(
+        val written: Int,
+        /** Held for a format with no shared decoder, so they will never travel. */
+        val couldNotTravel: Int,
+        /** The file is gone, or its duration cannot be read, so there is nothing to name it by. */
+        val gone: Int
+    )
+
+    data class PulledVectors(
+        val takenIn: Int,
+        /** Offered but refused, counted by reason; see [VectorVerdict]. */
+        val refused: Map<VectorVerdict, Int>,
+        /** For tracks this library does not hold. Most of somebody else's library, usually. */
+        val unmatched: Int,
+        /** Already analysed here, so there was nothing to gain. */
+        val alreadyHeld: Int,
+        /** True when the pass stopped at its limit and more is waiting. */
+        val more: Boolean
+    )
+
+    /**
+     * Offers this device's embeddings to the others.
+     *
+     * A vector is a cache entry, so the order of operations is laxer than for history in one place
+     * and stricter in another. Laxer: a batch written twice costs a duplicate in the folder and
+     * nothing else, since the receiver stores a track's vector once. Stricter: everything the
+     * vector was made from has to be named, and the excerpt has to be the one the analysis really
+     * used, which is why the platform is asked rather than the key.
+     *
+     * The tracks are marked as dealt with only once their batch is on disk. A crash in between
+     * therefore costs those vectors being offered again, which the folder absorbs.
+     */
+    suspend fun pushVectors(now: Long): PushedVectors {
+        val vectors = vectors ?: return PushedVectors(0, 0, 0)
+        if (folder() == null) return PushedVectors(0, 0, 0)
+        val terms = vectors.terms() ?: return PushedVectors(0, 0, 0)
+        val keys = library()
+        if (keys.isEmpty()) return PushedVectors(0, 0, 0)
+
+        var written = 0
+        var couldNotTravel = 0
+        var gone = 0
+        var rounds = 0
+        while (rounds * VectorWriter.BATCH_RECORDS < PUBLISH_LIMIT) {
+            rounds++
+            val held = vectors.toPublish(VectorWriter.BATCH_RECORDS)
+            if (held.isEmpty()) break
+            for (one in held) {
+                val key = keys[one.track]
+                val start = if (key == null) null else vectors.excerptStartMs(one.track)
+                if (key == null || start == null) {
+                    gone++
+                    continue
+                }
+                val taken = vectorWriter.offer(
+                    VectorRecord(
+                        track = key,
+                        excerptStartMs = start,
+                        decoder = vectors.decoderFor(one.track),
+                        model = terms.model,
+                        analysisVersion = terms.analysisVersion,
+                        vector = one.vector
+                    )
+                )
+                if (!taken) couldNotTravel++
+            }
+            val wrote = vectorWriter.flush(now, force = true)
+            if (wrote == 0 && vectorWriter.pending > 0) break      // the folder would not take it
+            written += wrote
+            state.vectorSequence = vectorWriter.sequence
+            // Including the ones that could not travel and the ones whose file has gone: the
+            // answer for those will not change while the analysis version stays the same.
+            vectors.markHandled(held.map { it.track })
+            state.save()
+        }
+        return PushedVectors(written, couldNotTravel, gone)
+    }
+
+    /**
+     * Takes in embeddings the others have offered.
+     *
+     * Each one is judged on the terms it carries against this device's own, and a refusal costs
+     * nothing: the track is analysed here instead, which is what would have happened anyway. The
+     * progress map is advanced only after the vectors are stored, so a store that fails means the
+     * batch is met again rather than lost.
+     */
+    suspend fun pullVectors(now: Long): PulledVectors {
+        val vectors = vectors ?: return PulledVectors(0, emptyMap(), 0, 0, false)
+        val folder = folder() ?: return PulledVectors(0, emptyMap(), 0, 0, false)
+        val terms = vectors.terms() ?: return PulledVectors(0, emptyMap(), 0, 0, false)
+        val keys = library()
+        if (keys.isEmpty()) return PulledVectors(0, emptyMap(), 0, 0, false)
+
+        val outcome = VectorReader(deviceId, folder, state.progress).read()
+        if (outcome.records.isEmpty()) {
+            state.progress.putAll(outcome.advanced)
+            state.save()
+            return PulledVectors(0, emptyMap(), 0, 0, outcome.more)
+        }
+
+        val analysed = vectors.analysed()
+        val matcher = TrackMatcher(keys.map { (track, key) -> TrackMatcher.Entry(track, key) })
+        state.aliases.forEach { (hash, text) ->
+            store.fromText(text)?.let { matcher.remember(hash, it) }
+        }
+
+        val taking = ArrayList<VectorStore.Held<Track>>()
+        val refused = HashMap<VectorVerdict, Int>()
+        var unmatched = 0
+        var alreadyHeld = 0
+        for (incoming in outcome.records) {
+            val track = matcher.resolve(incoming.record.track)
+            if (track == null) {
+                unmatched++
+                continue
+            }
+            if (track in analysed) {
+                alreadyHeld++
+                continue
+            }
+            val start = vectors.excerptStartMs(track)
+            if (start == null) {
+                // The file is here by name and not by content yet, or not at all. Nothing to
+                // compare the excerpt against, so nothing to accept.
+                unmatched++
+                continue
+            }
+            val verdict = terms.judge(incoming.record, vectors.decoderFor(track), start)
+            if (verdict != VectorVerdict.Usable) {
+                refused[verdict] = (refused[verdict] ?: 0) + 1
+                continue
+            }
+            taking.add(VectorStore.Held(track, incoming.record.vector))
+        }
+
+        val takenIn = if (taking.isEmpty()) 0 else vectors.takeIn(taking)
+        if (taking.isNotEmpty() && takenIn == 0) {
+            // Nothing was stored. The folder is left looking unread, so the next pass meets the
+            // same batch instead of it being lost.
+            note("Could not store ${taking.size} vectors")
+            return PulledVectors(0, refused, unmatched, alreadyHeld, outcome.more)
+        }
+        if (takenIn > 0) {
+            // Not offered back out: with two devices there is nobody to relay to, and the folder
+            // would carry every vector twice.
+            vectors.markHandled(taking.map { it.track })
+        }
+        state.progress.putAll(outcome.advanced)
+        state.aliases.clear()
+        state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })
+        state.save()
+        return PulledVectors(takenIn, refused, unmatched, alreadyHeld, outcome.more)
+    }
+
     /** The library, or nothing at all: a pass that cannot see it must not conclude anything. */
     private suspend fun library(): Map<Track, TrackKey> = runCatching { store.library() }.getOrElse {
         note("Could not read the library: $it")
@@ -161,5 +327,14 @@ class SyncCoordinator<Track>(
 
         /** How many of this device's listens are described in one pass. */
         const val PUSH_LIMIT = 200
+
+        /**
+         * How many vectors one pass offers.
+         *
+         * A library's backfill is four thousand of them and about eleven megabytes, so it is spread
+         * over passes rather than done in one: five hundred is four or five seconds of folder
+         * writing and gets a whole library across in a day's ordinary use.
+         */
+        const val PUBLISH_LIMIT = 500
     }
 }

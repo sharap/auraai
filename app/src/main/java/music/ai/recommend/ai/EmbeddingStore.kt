@@ -54,7 +54,10 @@ class EmbeddingStore private constructor(context: Context) {
          * seconds of each track than version 3 does, and mixing the two would leave the similarity
          * space half a step out of true.
          */
-        private const val ANALYSIS_VERSION = 3
+        internal const val ANALYSIS_VERSION = 3
+
+        /** How many numbers one of these has. CLAP's audio tower projects to 512. */
+        internal const val DIMENSIONS = 512
     }
 
 
@@ -114,6 +117,60 @@ class EmbeddingStore private constructor(context: Context) {
         dao.insert(EmbeddingEntity(songId, vector.toBlob()))
         cache?.put(songId, vector)
         Unit
+    }
+
+    /**
+     * Several at once, which is how vectors arrive from another device: a few hundred in one pass,
+     * and a transaction's worth of inserts rather than a few hundred separate ones.
+     *
+     * @return how many were stored, so a caller can tell a failure from an empty batch.
+     */
+    suspend fun putAll(vectors: Map<Long, FloatArray>): Int = withContext(Dispatchers.IO) {
+        if (vectors.isEmpty()) return@withContext 0
+        try {
+            dao.insertAll(vectors.map { (songId, vector) -> EmbeddingEntity(songId, vector.toBlob()) })
+            cache?.putAll(vectors)
+            vectors.size
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to store ${vectors.size} embeddings from elsewhere", e)
+            0
+        }
+    }
+
+    /**
+     * Drops these vectors, cache and table together.
+     *
+     * The cache is the reason this exists as a method rather than as a query somebody runs: it is
+     * read by search, by the wave and by the scan, and a row deleted behind its back stays
+     * analysed as far as all three are concerned.
+     */
+    suspend fun remove(songIds: List<Long>) = withContext(Dispatchers.IO) {
+        if (songIds.isEmpty()) return@withContext
+        try {
+            dao.delete(songIds)
+            cache?.let { held -> songIds.forEach { held.remove(it) } }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to drop ${songIds.size} embeddings", e)
+        }
+    }
+
+    /** Vectors not yet offered to the other devices; see [EmbeddingEntity.publishedAt]. */
+    suspend fun notPublished(limit: Int): Map<Long, FloatArray> = withContext(Dispatchers.IO) {
+        try {
+            dao.notPublished(limit).associate { it.songId to it.vector.toFloatArray() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read what is left to publish", e)
+            emptyMap()
+        }
+    }
+
+    /** Records that these have been dealt with, whether or not they could travel. */
+    suspend fun markPublished(songIds: List<Long>, at: Long) = withContext(Dispatchers.IO) {
+        try {
+            if (songIds.isNotEmpty()) dao.markPublished(songIds, at)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to mark ${songIds.size} embeddings as published", e)
+        }
     }
 
     suspend fun clear() = withContext(Dispatchers.IO) {

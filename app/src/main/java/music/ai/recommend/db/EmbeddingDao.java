@@ -28,6 +28,24 @@ public interface EmbeddingDao {
     @Query("SELECT COUNT(*) FROM embeddings")
     int getCount();
 
+    /**
+     * Vectors not yet offered to the other devices, oldest row first.
+     *
+     * Ordered by songId only so that the answer is stable: a pass that keeps being interrupted
+     * should keep making progress through the library rather than revisiting the same corner.
+     */
+    @Query("SELECT * FROM embeddings WHERE publishedAt = 0 ORDER BY songId LIMIT :limit")
+    List<EmbeddingEntity> notPublished(int limit);
+
+    @Query("UPDATE embeddings SET publishedAt = :at WHERE songId IN (:songIds)")
+    void markPublished(List<Long> songIds, long at);
+
+    @Query("SELECT COUNT(*) FROM embeddings WHERE publishedAt = 0")
+    int countNotPublished();
+
     @Query("DELETE FROM embeddings")
     void deleteAll();
+
+    @Query("DELETE FROM embeddings WHERE songId IN (:songIds)")
+    void delete(List<Long> songIds);
 }

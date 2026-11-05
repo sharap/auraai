@@ -24,7 +24,7 @@ class VectorRecordTest {
     private fun key(artist: String = "мельница", title: String = "ночная кобыла", duration: Long = 210_000) =
         TrackKey(hash = null, durationMs = duration, artist = artist, title = title)
 
-    private fun record(vector: FloatArray, start: Int = 100_000) = VectorRecord(
+    private fun record(vector: FloatArray, start: Long = 100_000L) = VectorRecord(
         track = key(),
         excerptStartMs = start,
         decoder = Mp3Excerpt.DECODER,
@@ -121,7 +121,7 @@ class VectorRecordTest {
         val hash = "ab".repeat(32)
         val withHash = VectorRecord(
             track = TrackKey(hash, 210_000, "мельница", "ночная кобыла"),
-            excerptStartMs = 100_000,
+            excerptStartMs = 100_000L,
             decoder = Mp3Excerpt.DECODER,
             model = model,
             analysisVersion = 3,
@@ -143,6 +143,6 @@ class VectorRecordTest {
         assertEquals(record(clapSized(1)), record(clapSized(1)))
         assertEquals(record(clapSized(1)).hashCode(), record(clapSized(1)).hashCode())
         assertTrue(record(clapSized(1)) != record(clapSized(2)))
-        assertTrue(record(clapSized(1), start = 1) != record(clapSized(1), start = 2))
+        assertTrue(record(clapSized(1), start = 1L) != record(clapSized(1), start = 2L))
     }
 }

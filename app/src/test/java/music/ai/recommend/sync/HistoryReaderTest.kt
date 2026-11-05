@@ -52,8 +52,19 @@ class HistoryReaderTest {
         return SyncBatch(deviceId, sequence, SyncBatch.SEALING_NONE, records.map { it.toJson() }).encode()
     }
 
-    private fun reader(folder: Folder, progress: MutableMap<String, Int> = HashMap()) =
-        HistoryReader(own, folder, progress) to progress
+    /**
+     * The reader as its caller uses it: read, then record what the pass consumed.
+     *
+     * The reader does not touch the progress map itself — a store that fails has to leave the
+     * folder looking unread — so whoever calls it folds the answer in afterwards, and so does this.
+     */
+    private class Pass(private val reader: HistoryReader, val progress: MutableMap<String, Int>) {
+        fun read(known: Set<HistoryMerge.Known>, now: Long, keepDays: Int): HistoryReader.Outcome =
+            reader.read(known, now, keepDays).also { progress.putAll(it.advanced) }
+    }
+
+    private fun reader(folder: Folder, progress: MutableMap<String, Int> = HashMap()): Pair<Pass, MutableMap<String, Int>> =
+        Pass(HistoryReader(own, folder, progress), progress) to progress
 
     @Test
     fun anEmptyFolderYieldsNothing() {

@@ -20,7 +20,7 @@ import com.google.gson.JsonObject
 class VectorRecord(
     val track: TrackKey,
     /** The start of the ten seconds that were listened to; see `Excerpt.startMs`. */
-    val excerptStartMs: Int,
+    val excerptStartMs: Long,
     /** What turned the file into samples, e.g. `jlayer-1.0.1`. */
     val decoder: String,
     /** sha256 of the model file that produced it, which is the only exact name a variant has. */
@@ -46,7 +46,7 @@ class VectorRecord(
 
     override fun hashCode(): Int {
         var result = track.hashCode()
-        result = 31 * result + excerptStartMs
+        result = 31 * result + excerptStartMs.hashCode()
         result = 31 * result + decoder.hashCode()
         result = 31 * result + model.hashCode()
         result = 31 * result + analysisVersion
@@ -97,7 +97,7 @@ class VectorRecord(
                         artist = key.get("a")?.asString.orEmpty(),
                         title = title
                     ),
-                    excerptStartMs = json.get("s")?.asInt ?: return null,
+                    excerptStartMs = json.get("s")?.asLong ?: return null,
                     decoder = decoder,
                     model = model,
                     analysisVersion = json.get("av")?.asInt ?: return null,

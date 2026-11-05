@@ -9,7 +9,7 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 5, exportSchema = false)
+@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 6, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
 
@@ -69,13 +69,28 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /**
+     * Version 6 records whether a vector has been offered to the other devices.
+     *
+     * Zero for every row already there, which says "not offered yet" — true by construction, since
+     * before this version there was nothing to offer them to. The first sync pass after an upgrade
+     * therefore walks the whole library, a few hundred vectors at a time, which is the intended
+     * behaviour and the only way a device that was analysed first can hand its work to a second.
+     */
+    static final Migration MIGRATION_5_6 = new Migration(5, 6) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE embeddings ADD COLUMN publishedAt INTEGER NOT NULL DEFAULT 0");
+        }
+    };
+
     public static AppDatabase getDatabase(final Context context) {
         if (INSTANCE == null) {
             synchronized (AppDatabase.class) {
                 if (INSTANCE == null) {
                     INSTANCE = Room.databaseBuilder(context.getApplicationContext(),
                                     AppDatabase.class, "music_database")
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                             .build();
                 }
             }

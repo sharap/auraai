@@ -10,8 +10,8 @@ import java.io.File
  *
  * Four things, and each exists for a reason worth naming.
  *
- * [sequence] so that batch numbers keep rising across restarts, which is what makes a gap in the
- * other device's file mean a lost batch rather than a reboot.
+ * [sequence] and [vectorSequence] so that batch numbers keep rising across restarts, which is what
+ * makes a gap in the other device's file mean a lost batch rather than a reboot.
  *
  * [exportedUpTo] so that this device's own listens go out once: history rows are numbered as they
  * are inserted, so one number says where the outbox got to, and a batch prepared but never written
@@ -38,6 +38,12 @@ import java.io.File
 class SyncState private constructor(
     private val file: File,
     var sequence: Long,
+    /**
+     * The batch counter for vectors, kept apart from [sequence] because they are two streams of
+     * files. One counter for both would leave gaps in each — a reader of one would see the numbers
+     * the other had spent and conclude that batches had been lost.
+     */
+    var vectorSequence: Long,
     /** The highest history row id already written to the folder. */
     var exportedUpTo: Long,
     val progress: MutableMap<String, Int>,
@@ -64,6 +70,7 @@ class SyncState private constructor(
         val json = JsonObject()
         json.addProperty("v", 1)
         json.addProperty("sequence", sequence)
+        json.addProperty("vectorSequence", vectorSequence)
         json.addProperty("exportedUpTo", exportedUpTo)
         json.add("progress", JsonObject().apply {
             progress.forEach { (path, lines) -> addProperty(path, lines) }
@@ -101,7 +108,7 @@ class SyncState private constructor(
          * trying to rescue half of it.
          */
         fun load(file: File): SyncState {
-            val empty = SyncState(file, 0L, 0L, HashMap(), ArrayList(), HashMap(), null)
+            val empty = SyncState(file, 0L, 0L, 0L, HashMap(), ArrayList(), HashMap(), null)
             val json = try {
                 if (!file.isFile) return empty
                 JsonParser.parseString(file.readText()) as? JsonObject ?: return empty
@@ -112,6 +119,7 @@ class SyncState private constructor(
                 SyncState(
                     file = file,
                     sequence = json.get("sequence")?.asLong ?: 0L,
+                    vectorSequence = json.get("vectorSequence")?.asLong ?: 0L,
                     exportedUpTo = json.get("exportedUpTo")?.asLong ?: 0L,
                     progress = HashMap<String, Int>().apply {
                         json.getAsJsonObject("progress")?.entrySet()?.forEach { (path, lines) ->

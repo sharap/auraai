@@ -59,13 +59,27 @@ class VectorTransportTest {
 
     private fun vector(seed: Int) = FloatArray(512) { ((it + seed) % 13) * 0.07f + 0.01f }
 
+    /**
+     * A pass as the coordinator makes it: read, then record what was consumed.
+     *
+     * The reader does not touch the progress map itself — a store that fails has to leave the
+     * folder looking unread — so every caller folds the answer in afterwards, and so does this.
+     */
+    private fun pass(
+        folder: Folder,
+        progress: MutableMap<String, Int>,
+        reader: String = desktop,
+        maxRecords: Int = VectorReader.MAX_RECORDS
+    ): VectorReader.Outcome =
+        VectorReader(reader, folder, progress).read(maxRecords).also { progress.putAll(it.advanced) }
+
     private fun record(
         title: String,
         decoder: String = Mp3Excerpt.DECODER,
         floats: FloatArray = vector(1)
     ) = VectorRecord(
         track = TrackKey(null, 210_000, "мельница", title),
-        excerptStartMs = 100_000,
+        excerptStartMs = 100_000L,
         decoder = decoder,
         model = model,
         analysisVersion = 3,
@@ -143,7 +157,7 @@ class VectorTransportTest {
         assertEquals(2, writer.flush(now, force = true))
 
         val progress = HashMap<String, Int>()
-        val outcome = VectorReader(desktop, folder, progress).read()
+        val outcome = pass(folder, progress)
         assertEquals(2, outcome.records.size)
         assertEquals(listOf("один", "два"), outcome.records.map { it.record.track.title })
         assertEquals(listOf(Folder.OWNER), outcome.records.map { it.deviceId }.distinct())
@@ -151,7 +165,7 @@ class VectorTransportTest {
         assertFalse(outcome.more)
 
         // Read again and nothing comes twice.
-        val again = VectorReader(desktop, folder, progress).read()
+        val again = pass(folder, progress)
         assertEquals(0, again.records.size)
         assertEquals(1, again.filesSkipped)
     }
@@ -163,7 +177,7 @@ class VectorTransportTest {
         writer.offer(record("свой"))
         writer.flush(now, force = true)
 
-        val outcome = VectorReader(Folder.OWNER, folder, HashMap()).read()
+        val outcome = pass(folder, HashMap(), reader = Folder.OWNER)
         assertEquals(0, outcome.records.size)
         assertEquals(0, outcome.filesRead)
     }
@@ -177,12 +191,12 @@ class VectorTransportTest {
         repeat(4) { assertEquals(VectorWriter.BATCH_RECORDS, writer.flush(now)) }
 
         val progress = HashMap<String, Int>()
-        val first = VectorReader(desktop, folder, progress).read(maxRecords = 60)
+        val first = pass(folder, progress, maxRecords = 60)
         // The line being read is always finished, so a batch is never half taken.
         assertEquals(100, first.records.size)
         assertTrue(first.more)
 
-        val second = VectorReader(desktop, folder, progress).read(maxRecords = 60)
+        val second = pass(folder, progress, maxRecords = 60)
         assertEquals(100, second.records.size)
         assertFalse("больше ничего быть не должно", second.more)
 
@@ -190,7 +204,7 @@ class VectorTransportTest {
         val titles = (first.records + second.records).map { it.record.track.title }
         assertEquals(200, titles.size)
         assertEquals(200, titles.toSet().size)
-        assertEquals(0, VectorReader(desktop, folder, progress).read().records.size)
+        assertEquals(0, pass(folder, progress).records.size)
     }
 
     @Test
@@ -203,7 +217,7 @@ class VectorTransportTest {
         folder.put(phone, "vectors/2026-11-05.jsonl", listOf(truncated))
 
         val progress = HashMap<String, Int>()
-        val first = VectorReader(desktop, folder, progress).read()
+        val first = pass(folder, progress)
         assertEquals(listOf("целая"), first.records.map { it.record.track.title })
         assertEquals(1, first.linesUnreadable)
         assertEquals(1, progress["$phone/vectors/2026-11-05.jsonl"])
@@ -212,7 +226,7 @@ class VectorTransportTest {
         folder.contents["$phone/vectors/2026-11-05.jsonl"]!!.let { lines ->
             lines[1] = SyncBatch(phone, 2, SyncBatch.SEALING_NONE, listOf(record("обрезанная").toJson())).encode()
         }
-        val second = VectorReader(desktop, folder, progress).read()
+        val second = pass(folder, progress)
         assertEquals(listOf("обрезанная"), second.records.map { it.record.track.title })
     }
 
@@ -225,13 +239,13 @@ class VectorTransportTest {
         folder.unreadable.add("${Folder.OWNER}/vectors/2026-11-05.jsonl")
 
         val progress = HashMap<String, Int>()
-        val blocked = VectorReader(desktop, folder, progress).read()
+        val blocked = pass(folder, progress)
         assertEquals(0, blocked.records.size)
         assertEquals(1, blocked.filesUnavailable)
         assertTrue("ничего не должно считаться прочитанным", progress.isEmpty())
 
         folder.unreadable.clear()
-        assertEquals(1, VectorReader(desktop, folder, progress).read().records.size)
+        assertEquals(1, pass(folder, progress).records.size)
     }
 
     @Test
@@ -246,8 +260,9 @@ class VectorTransportTest {
         ))
 
         val progress = HashMap<String, Int>()
-        val vectors = VectorReader(desktop, folder, progress).read()
+        val vectors = pass(folder, progress)
         val history = HistoryReader(desktop, folder, progress).read(emptySet(), now, 30)
+            .also { progress.putAll(it.advanced) }
         assertEquals(1, vectors.records.size)
         assertEquals(1, history.merge.accepted.size)
         assertEquals(

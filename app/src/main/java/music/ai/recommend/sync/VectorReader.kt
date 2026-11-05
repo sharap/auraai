@@ -16,10 +16,10 @@ package music.ai.recommend.sync
  * happens over a few passes and nothing is lost in between, because progress is only ever recorded
  * for lines actually handed over.
  *
- * [progress] is how many lines of each file have been taken in. The caller owns it and is expected
- * to persist it — **after** the vectors have been stored, not before, so that a failure in between
- * costs a re-read rather than a lost batch. It is shared with the history reader, and the keys
- * cannot collide because they carry the file's own directory.
+ * [progress] is how many lines of each file have been taken in. It is read here and never written:
+ * what this pass consumed comes back in [Outcome.advanced], for the caller to fold in **after** the
+ * vectors are stored. A store that fails must leave the folder looking unread. The map is shared
+ * with the history reader, and the keys cannot collide because they carry the file's own directory.
  *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
@@ -43,7 +43,16 @@ class VectorReader(
         /** Lines that would not decode, the half-written tails among them. */
         val linesUnreadable: Int,
         /** True when the limit was reached and there is more waiting in the folder. */
-        val more: Boolean
+        val more: Boolean,
+        /**
+         * How many lines of each file this pass consumed, for the caller to fold into [progress]
+         * **after** the vectors are stored.
+         *
+         * Handed back rather than written here on purpose: a store that fails must leave the folder
+         * looking unread, or the batch is marked read and never arrives. Recording it inside the
+         * read would make that window last until the next restart.
+         */
+        val advanced: Map<String, Int>
     )
 
     /**
@@ -124,8 +133,7 @@ class VectorReader(
             }
         }
 
-        progress.putAll(advanced)
-        return Outcome(records, filesRead, filesSkipped, filesUnavailable, linesUnreadable, more)
+        return Outcome(records, filesRead, filesSkipped, filesUnavailable, linesUnreadable, more, advanced)
     }
 
     companion object {

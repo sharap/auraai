@@ -16,10 +16,11 @@ package music.ai.recommend.sync
  * in a file that is only ever appended to the only line that can be half-written is the last one,
  * and anything else there is damage that will not improve by waiting.
  *
- * [progress] is how many lines of each file have been taken in. The caller owns it and is expected
- * to persist it — **after** the records have been stored, not before, so that a failure in between
- * costs a re-read rather than a lost batch. Losing the map entirely costs a re-read of everything
- * and no records, since the merge turns away what is already held.
+ * [progress] is how many lines of each file have been taken in. It is read here and never written:
+ * what this pass consumed comes back in [Outcome.advanced], for the caller to fold in **after** the
+ * records have been stored. A store that fails has to leave the folder looking unread, or the batch
+ * is marked read and never arrives. Losing the map entirely costs a re-read of everything and no
+ * records, since the merge turns away what is already held.
  *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
@@ -38,7 +39,9 @@ class HistoryReader(
         /** Files that could not be read this time and will be met again. */
         val filesUnavailable: Int,
         /** Lines that would not decode, the half-written tails among them. */
-        val linesUnreadable: Int
+        val linesUnreadable: Int,
+        /** How many lines of each file this pass consumed, for the caller to record afterwards. */
+        val advanced: Map<String, Int>
     )
 
     /**
@@ -98,8 +101,7 @@ class HistoryReader(
         }
 
         val merge = HistoryMerge.merge(batches, known, ownDeviceId, now, keepDays)
-        progress.putAll(advanced)
-        return Outcome(merge, filesRead, filesSkipped, filesUnavailable, linesUnreadable)
+        return Outcome(merge, filesRead, filesSkipped, filesUnavailable, linesUnreadable, advanced)
     }
 
     private companion object {

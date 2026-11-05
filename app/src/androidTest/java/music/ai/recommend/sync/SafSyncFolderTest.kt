@@ -147,15 +147,20 @@ class SafSyncFolderTest {
 
         val progress = HashMap<String, Int>()
         val reader = HistoryReader(own, folder(own), progress)
-        val first = reader.read(emptySet(), now, 365)
+        // The reader hands back what it consumed instead of recording it — a store that fails has
+        // to leave the folder looking unread — so this does what its caller does.
+        fun pass(held: Set<HistoryMerge.Known>, at: Long) =
+            reader.read(held, at, 365).also { progress.putAll(it.advanced) }
+
+        val first = pass(emptySet(), now)
         assertEquals(1, first.merge.accepted.size)
 
         val held = first.merge.accepted.map { HistoryMerge.Known(it.deviceId, it.record.playedAt) }.toSet()
-        assertEquals(0, reader.read(held, now, 365).filesRead)
+        assertEquals(0, pass(held, now).filesRead)
 
         writer.offer(listen(now + 60_000, "second"))
         writer.flush(now + 60_000, force = true)
-        val third = reader.read(held, now + 60_000, 365)
+        val third = pass(held, now + 60_000)
         assertEquals(listOf("second"), third.merge.accepted.map { it.record.track.title })
         assertEquals(0, third.merge.alreadyHeld)
     }
