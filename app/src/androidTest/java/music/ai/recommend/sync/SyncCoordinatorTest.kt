@@ -188,6 +188,33 @@ class SyncCoordinatorTest {
     }
 
     @Test
+    fun aPassWithoutALibraryTakesNothingAndMarksNothingRead() = runBlocking {
+        // The expensive mistake would be the quiet one. With no library nothing can be placed, so
+        // every record would go to the waiting list — which is capped — while the progress map
+        // would say those batches had been read. A folder holding more than the cap would lose its
+        // oldest for good. So the pass does not happen: on the next one, with a library, the same
+        // records are read and placed.
+        history.record(listen(5001L, now - 300_000))
+        assertEquals(1, coordinator(first).push(now, force = true).written)
+
+        val stateFile = File(folder, "state-$second.json")
+        val notScannedYet = SyncCoordinator(
+            second,
+            SyncState.load(stateFile),
+            PlayHistoryStore(history) { emptyList() },
+            { SafSyncFolder.fromDirectory(context, folder, second) }
+        )
+        val nothing = notScannedYet.pull(now)
+        assertEquals(0, nothing.takenIn)
+        assertEquals(0, nothing.waiting)
+        assertEquals("папка не должна быть прочитана", null, nothing.read)
+
+        // Nothing was written down as read, so the same records arrive once the library is there.
+        assertEquals(1, coordinator(second).pull(now).takenIn)
+        assertEquals(1, dao.fromOtherDevicesSince(0).size)
+    }
+
+    @Test
     fun theOutboxCarriesOnWhereItLeftOff() = runBlocking {
         history.record(listen(5001L, now - 300_000))
         coordinator(first).push(now, force = true)

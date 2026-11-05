@@ -99,6 +99,14 @@ class SyncCoordinator<Track>(
     suspend fun pull(now: Long): Pulled {
         val folder = folder() ?: return Pulled(0, state.unresolved.size, emptyMap(), null)
 
+        // Asked first, and the pass abandoned if there is none. Reading without a library is not
+        // harmless: nothing could be placed, so every record would go to the waiting list — which
+        // is capped — while the progress map would say those batches had been read. A folder
+        // holding more records than the cap would lose its oldest for good. A library that is
+        // merely not scanned yet is the ordinary case on a device starting up.
+        val keys = library()
+        if (keys.isEmpty()) return Pulled(0, state.unresolved.size, emptyMap(), null)
+
         val known = store.heldFromOthers(now)
         val outcome = HistoryReader(deviceId, folder, state.progress).read(known, now, keepDays)
 
@@ -111,7 +119,7 @@ class SyncCoordinator<Track>(
             return Pulled(0, state.unresolved.size, outcome.merge.gaps, outcome)
         }
 
-        val matcher = TrackMatcher(library().map { (track, key) -> TrackMatcher.Entry(track, key) })
+        val matcher = TrackMatcher(keys.map { (track, key) -> TrackMatcher.Entry(track, key) })
         state.aliases.forEach { (hash, text) ->
             store.fromText(text)?.let { matcher.remember(hash, it) }
         }
