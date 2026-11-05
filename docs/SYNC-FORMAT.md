@@ -177,10 +177,22 @@ of stalling a phone with eleven megabytes of parsing and four thousand matches a
 lost in between: progress is recorded only for lines actually handed over, and only after the
 vectors are stored.
 
-A vector is offered once. Each row of the embeddings table records when it was published, which
-includes the ones that could not travel at all — a format with no shared decoder — because that
-answer will not change while the analysis version does not. When the analysis version does change
-every vector is thrown away and the marks go with them.
+Every device offers every vector it holds, including ones it was handed by somebody else. The folder
+therefore carries each vector once per device that has it — twice over, with two devices — and that
+is deliberate: it makes the folder a cache a device can be *restored* from rather than one it can
+only contribute to. A device that loses its vectors is handed them back by whoever it gave them to,
+instead of analysing a library again. Against hours of analysis, a few megabytes is nothing. A
+device that holds no vectors at all also forgets how far it had read, since otherwise "read to the
+end" would outlive the store it was read into.
+
+Each row records when it was offered, so it is offered once. That mark is also set for a vector that
+could not travel at all — a format with no shared decoder — because that answer will not change
+while the analysis version does not. It is **not** set for a vector whose track this library cannot
+describe: a library can be short for ordinary reasons, not read yet or mid-rescan, and a vector
+retired on that basis is lost for good. This was learnt by losing four thousand of them to a test
+whose library had three tracks in it. Such vectors are stepped over instead, and the batch asked for
+grows by as many as have been met, so they cannot sit at the head of the queue and block the rest.
+When the analysis version changes every vector is thrown away and the marks go with them.
 
 ### The excerpt start comes from the decoder, not from the platform
 
