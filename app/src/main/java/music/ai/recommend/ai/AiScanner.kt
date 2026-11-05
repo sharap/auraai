@@ -333,7 +333,14 @@ class AiScanner(
                 channels = initialChannels,
                 startUs = startTimeUs
             )
-            val endTimeUs = startTimeUs + durationMs * 1000
+            // Input stops when the excerpt is full, not when the clock says the window ended.
+            // Bounding it by time meant that whatever the lead-in cost at the front was simply
+            // missing from the back: an m4a came out 1900 samples short that way, and a shortfall
+            // is read by the feature extractor as a track shorter than ten seconds and finished
+            // with silence — worth a cosine of 0.15 on that track. The time bound stays as a
+            // backstop a second past the window, so a decoder that emits nothing cannot walk the
+            // whole file.
+            val inputLimitUs = startTimeUs + durationMs * 1000 + 1_000_000
             val finished = CountDownLatch(1)
 
             callbackThread = HandlerThread("aura-decode").apply { start() }
@@ -369,7 +376,10 @@ class AiScanner(
                                     if (filled == 0) firstTimestamp = extractor.sampleTime
                                     filled += size
                                     extractor.advance()
-                                    if (extractor.sampleTime > endTimeUs || extractor.sampleTime < 0) {
+                                    if (sink.isFull ||
+                                        extractor.sampleTime > inputLimitUs ||
+                                        extractor.sampleTime < 0
+                                    ) {
                                         inputDone = true
                                         break
                                     }
