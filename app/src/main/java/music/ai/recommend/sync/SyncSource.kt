@@ -16,11 +16,15 @@ interface SyncSource {
     fun devices(): List<String>
 
     /**
-     * Relative paths of one device's files, as [HistoryWriter.dayFile] spells them — forward
+     * Relative paths of one device's files under [inside], as `dayFile` spells them — forward
      * slashes, and either `history/2026-11-05.jsonl` or, where appending is not available,
      * `history/2026-11-05/0003.jsonl`.
+     *
+     * [inside] is `history` or `vectors`: one device's directory holds both, they are read by
+     * different readers, and neither should have to step over the other's files. A name it does not
+     * know about returns nothing rather than failing — that is a newer version's business.
      */
-    fun files(deviceId: String): List<String>
+    fun files(deviceId: String, inside: String): List<String>
 
     /**
      * Every line of one file.

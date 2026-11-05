@@ -18,8 +18,8 @@ class HistoryReaderTest {
 
         override fun devices(): List<String> = contents.keys.map { it.substringBefore('/') }.distinct()
 
-        override fun files(deviceId: String): List<String> = contents.keys
-            .filter { it.startsWith("$deviceId/") }
+        override fun files(deviceId: String, inside: String): List<String> = contents.keys
+            .filter { it.startsWith("$deviceId/$inside/") }
             .map { it.substringAfter('/') }
 
         override fun lines(deviceId: String, relativePath: String): List<String>? {

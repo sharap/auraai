@@ -58,7 +58,7 @@ class HistoryReader(
         for (deviceId in source.devices().sorted()) {
             if (deviceId == ownDeviceId) continue
             if (!SyncIdentity.isValid(deviceId)) continue
-            for (path in source.files(deviceId).sorted()) {
+            for (path in source.files(deviceId, DIRECTORY).sorted()) {
                 val key = "$deviceId/$path"
                 var consumed = progress[key] ?: 0
                 if (oldestDay != null && isBefore(path, oldestDay)) {
@@ -105,6 +105,9 @@ class HistoryReader(
     private companion object {
 
         const val DAY_MS = 24 * 60 * 60 * 1000L
+
+        /** The directory history files live in, inside a device's own. */
+        const val DIRECTORY = "history"
 
         /** `history/2026-11-05.jsonl` and `history/2026-11-05/0003.jsonl` alike. */
         val DAY_IN_PATH = Regex("""history/(\d{4}-\d{2}-\d{2})""")

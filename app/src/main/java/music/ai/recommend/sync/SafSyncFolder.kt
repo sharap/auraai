@@ -82,19 +82,19 @@ class SafSyncFolder private constructor(
         emptyList()
     }
 
-    override fun files(deviceId: String): List<String> = try {
-        val history = directory("$VERSION_PREFIX$deviceId/$HISTORY", create = false)
-        history?.listFiles()?.flatMap { child ->
+    override fun files(deviceId: String, inside: String): List<String> = try {
+        val root = directory("$VERSION_PREFIX$deviceId/$inside", create = false)
+        root?.listFiles()?.flatMap { child ->
             val name = child.name ?: return@flatMap emptyList()
             when {
                 child.isDirectory -> child.listFiles().mapNotNull { part ->
-                    part.name?.let { "$HISTORY/$name/$it" }
+                    part.name?.let { "$inside/$name/$it" }
                 }
-                else -> listOf("$HISTORY/$name")
+                else -> listOf("$inside/$name")
             }
         }.orEmpty()
     } catch (e: Exception) {
-        Log.w(TAG, "Could not list $deviceId", e)
+        Log.w(TAG, "Could not list $deviceId/$inside", e)
         emptyList()
     }
 
@@ -202,7 +202,6 @@ class SafSyncFolder private constructor(
 
         private const val TAG = "SafSyncFolder"
         private const val VERSION_PREFIX = "aura/v1/"
-        private const val HISTORY = "history"
         private const val MIME = "application/x-ndjson"
         private val FIRST = byteArrayOf('a'.code.toByte())
         private val SECOND = byteArrayOf('b'.code.toByte())

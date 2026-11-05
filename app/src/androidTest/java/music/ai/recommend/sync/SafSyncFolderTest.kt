@@ -55,7 +55,7 @@ class SafSyncFolderTest {
         val folder = folder(own)
         assertTrue(folder.isUsable())
         assertEquals(emptyList<String>(), folder.devices())
-        assertEquals(emptyList<String>(), folder.files(other))
+        assertEquals(emptyList<String>(), folder.files(other, "history"))
         assertNull(folder.lines(other, "history/2027-01-15.jsonl"))
     }
 
@@ -98,7 +98,7 @@ class SafSyncFolderTest {
             assertEquals(1, writer.flush(now + batch * 1000L, force = true))
         }
         // Either shape is allowed; what matters is that all three batches are there and in order.
-        val paths = sink.files(other)
+        val paths = sink.files(other, "history")
         assertTrue("файлы: $paths", paths.isNotEmpty())
         assertTrue("все в дне 2027-01-15: $paths", paths.all { it.startsWith("history/2027-01-15") })
 
@@ -123,7 +123,7 @@ class SafSyncFolderTest {
         writer.flush(now + 1000, force = true)
         assertEquals(verdict, sink.appendWorks)
 
-        val paths = sink.files(other)
+        val paths = sink.files(other, "history")
         if (verdict == true) {
             assertEquals(listOf("history/2027-01-15.jsonl"), paths)
             assertEquals(2, sink.lines(other, paths.single())!!.size)
