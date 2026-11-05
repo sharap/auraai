@@ -106,6 +106,20 @@ class MainActivity : ComponentActivity() {
                     if (permissionsGranted) viewModel.loadMusic()
                 }
 
+                // The sync folder is read whenever the app comes to the front, so that what the
+                // other device heard is already counted by the time the owner starts a wave or
+                // opens a playlist. ON_START rather than ON_RESUME: it is once per return to the
+                // front, where ON_RESUME also fires when a dialog above the app is dismissed. An
+                // observer added to a lifecycle that is already started is given the events it
+                // missed, so the first open is covered too.
+                DisposableEffect(Unit) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_START) viewModel.syncOnOpen()
+                    }
+                    lifecycle.addObserver(observer)
+                    onDispose { lifecycle.removeObserver(observer) }
+                }
+
                 if (!permissionsGranted) {
                     StartScreen(onGrantPermissions = { launcher.launch(permissions) })
 

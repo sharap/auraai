@@ -334,6 +334,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** One pass over the folder at a time; see [syncPass]. */
     private val syncGate = Mutex()
+
+    /** When the folder was last read, so passes nobody asked for do not read it over and over. */
+    private var lastPullAt = 0L
     private var syncState: SyncState? = null
 
     init {
@@ -1792,7 +1795,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             isPlaying.collect { playing ->
                 // The end of a listening session: say what was heard, and take in what the other
                 // device has said since, in time for the next wave to steer on it.
-                if (!playing) syncPass(force = true, takeIn = true)
+                if (!playing) syncPass(force = true, takeIn = true, throttled = true)
             }
         }
         refreshSyncSummary()
@@ -1808,8 +1811,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * @param takeIn false for a pass that only has something to say. A listen finishing is one of
      *   those: it comes every few minutes, and reading the whole folder each time would be work
      *   for nothing.
+     * @param throttled for the passes a person causes without meaning to — pausing, coming back to
+     *   the app — which arrive in flurries. See [PULL_THROTTLE_MS]. A pass the owner asked for,
+     *   and the one after a scan, are never throttled.
      */
-    private suspend fun syncPass(force: Boolean, takeIn: Boolean) = withContext(Dispatchers.IO) {
+    private suspend fun syncPass(
+        force: Boolean,
+        takeIn: Boolean,
+        throttled: Boolean = false
+    ) = withContext(Dispatchers.IO) {
         val coordinator = coordinator() ?: return@withContext
         syncGate.withLock {
             val now = System.currentTimeMillis()
@@ -1818,8 +1828,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // A pass with nothing to take in happens often — a listen finishing is one — and
             // reading the whole folder each time would be work for nothing. A pass before the
             // library is scanned is turned away by the coordinator itself.
-            val pulled = if (!takeIn) null else
-                runCatching { coordinator.pull(now) }
+            val tooSoon = throttled && now - lastPullAt < PULL_THROTTLE_MS
+            val pulled = if (!takeIn || tooSoon) null else
+                // Marked as read only when the folder really was read: the coordinator turns a
+                // pass away when there is no library yet, and counting that as a read would make
+                // the next real one wait out the throttle for nothing.
+                runCatching { coordinator.pull(now).also { if (it.read != null) lastPullAt = now } }
                     .getOrElse { Log.e(TAG, "Could not read the history in", it); null }
             _syncSummary.value = _syncSummary.value.let {
                 it.copy(
@@ -1867,6 +1881,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().remove(KEY_SYNC_FOLDER).apply()
         syncCoordinator = null
         refreshSyncSummary()
+    }
+
+    /**
+     * The app came to the front. Read the folder, so that what the other device heard is already
+     * counted by the time the owner starts a wave or opens a playlist — which is the whole of why
+     * this moment is worth reacting to. Nothing is forced out: coming back to the app says nothing
+     * new about what was played.
+     */
+    fun syncOnOpen() {
+        viewModelScope.launch { syncPass(force = false, takeIn = true, throttled = true) }
     }
 
     /** A pass the owner asked for, which is the same pass with a spinner on it. */
@@ -1932,6 +1956,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
         const val KEY_WAVE_NOVELTY = "wave_novelty"
         const val KEY_SYNC_FOLDER = "sync_folder"
+
+        /**
+         * How soon after one read the folder may be read again by a pass nobody asked for.
+         *
+         * The moments that ask for a read are moments a person creates — a pause, a glance at
+         * another app and back — and they arrive in flurries. Reading is cheap but not free: on a
+         * phone it is storage access framework calls and, with the folder on a share, a wake-up. A
+         * minute is the shortest gap worth having, and nothing a person is waiting for is behind
+         * it: what they will look at is already in the database from the read a moment ago.
+         */
+        const val PULL_THROTTLE_MS = 60_000L
 
         /** Below this a track is not a match for the query under any reading. */
         const val MIN_SEARCH_SIMILARITY = 0.15f
