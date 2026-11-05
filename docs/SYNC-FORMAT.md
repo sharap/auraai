@@ -157,6 +157,49 @@ the fact that ffmpeg mixes to mono with a clip at ±1 while Android averages cha
 left alone deliberately, because closing it would mean putting the worse resampler on both sides to
 buy nothing that can be observed.
 
+### How a vector travels
+
+`aura/v1/<device>/vectors/<day>.jsonl`, in the same batch envelope as history and named for the day
+of the writing for the same reason: a file that is appended to and then finished is one Syncthing
+stops carrying. The day says nothing about the vectors inside — a vector has no date — it only
+bounds the file.
+
+One record carries the track key, the excerpt start, the decoder, the model's sha256, the analysis
+version, and the 512 floats as base64 of little-endian fp32. That is about 2.8 KB a record against
+roughly 7 KB as a JSON array of numbers, and a library is four thousand of them: eleven megabytes
+either way is the thing being optimised. Fifty records to a batch, which is a line of about 137 KB —
+a little over Syncthing's block size, so an append moves a block or two instead of rewriting the
+file.
+
+Both sides bound the work. A sender offers at most five hundred vectors a pass and a reader takes at
+most five hundred, so a first exchange — a whole library — spreads over a handful of passes instead
+of stalling a phone with eleven megabytes of parsing and four thousand matches at once. Nothing is
+lost in between: progress is recorded only for lines actually handed over, and only after the
+vectors are stored.
+
+A vector is offered once. Each row of the embeddings table records when it was published, which
+includes the ones that could not travel at all — a format with no shared decoder — because that
+answer will not change while the analysis version does not. When the analysis version does change
+every vector is thrown away and the marks go with them.
+
+### The excerpt start is asked of the platform, not worked out from the key
+
+The window has to be the one the analysis actually used, and each platform's analyser reads a
+duration from its own place: the container through MediaExtractor on the phone, the tag reader on
+the desktop. On the desktop those are the same reading, because the AI scanner is handed the
+library scanner's value. On the phone they are not — everything else in the app, including the key a
+track travels under, takes the duration from MediaStore.
+
+Measured over 400 mp3s of this library: the two readings agree exactly for 182 of them, differ by at
+most one millisecond for the rest, and `Excerpt.startMs` puts all 400 in the same bucket. Which is
+not good enough. One millisecond crosses a two-second bucket boundary for about one track in two
+thousand, so a four thousand track library has a couple of them — and for those a vector would be
+believed on terms describing a different ten seconds, at a cosine of about 0.95 where 0.9985 is the
+bar. So `VectorStore.excerptStartMs` is a platform question, answered by the same reading the
+analyser uses. On the phone that costs one file open per track of a pass; `DurationAgreementTest`
+keeps the measurement, and guards that the two readings remain two roundings of one measurement
+rather than becoming two different ones.
+
 ## What this protects, and from whom
 
 The listening history is the most sensitive thing either app holds. It is not a record of taste but
@@ -371,14 +414,16 @@ Three things must not drift, and each has a guard:
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
 - Everything under `sync/` exists in both repositories and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Fourteen files:
-  the record and its track key, the batch envelope, the merge, the device id, the writer and the
-  reader, the matcher, the state kept between runs, the coordinator, and the interfaces that keep
-  the folder and the history store out of all of it.
-- Two files under `sync/` are deliberately **not** copies, and say so in their own first lines:
-  `SafSyncFolder` and `FileSyncFolder`, which are how each platform reaches a folder — the storage
-  access framework on one side, ordinary files on the other. Everything above them sees only
-  `SyncFolder`.
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Nineteen files:
+  the records and the track key, the batch envelope, the merge, the device id, the two writers and
+  the two readers, the matcher, the terms a vector is believed on, the state kept between runs, the
+  coordinator, and the interfaces that keep the folder and the two stores out of all of it.
+- Three pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
+  the folder (`SafSyncFolder` against `FileSyncFolder`), the history store (`PlayHistoryStore`
+  against `PlayLogStore`) and the vector store (`EmbeddingVectorStore` against `DaoVectorStore`).
+  Each is how one platform answers a question only it can: how to reach a folder, where listens are
+  kept, where vectors are kept and what decoder and excerpt a file of its own would have. Everything
+  above them sees only the interfaces.
 - `SyncCoordinator` is where the order of operations *is* the correctness, and it is the one file
   that could not have been a copy: history is a Room table keyed by MediaStore id on one side and an
   appended log keyed by path on the other. So it is generic over what a platform calls a track, and
@@ -400,7 +445,8 @@ Three things must not drift, and each has a guard:
 | Matching a key to a local track | written and tested |
 | Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
 | The listening history knowing which device heard it | done on both sides, with the older store converted in place |
-| Carrying vectors, playlists, favourites, the daily mix | not started |
+| Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |
+| Carrying playlists, favourites, the daily mix | not started |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 
