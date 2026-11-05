@@ -254,11 +254,11 @@ One file per device, so that there is exactly one writer per file and Syncthing 
 anything:
 
 ```
-<sync folder>/aura/v1/<device uuid>/history.jsonl
-                                   /ops.jsonl
-                                   /dailymix.jsonl
-                                   /vectors.bin
-                                   /manifest.json
+<sync folder>/aura/v1/<device id>/history/2026-11-05.jsonl
+                                 /ops.jsonl
+                                 /dailymix.jsonl
+                                 /vectors/0001.bin
+                                 /manifest.json
 ```
 
 JSON Lines for everything but the vectors: a file that was copied while being written loses its last
@@ -274,6 +274,68 @@ it once and the grant persists.
 Syncthing is the transport today, because that is what is already running. Direct transfer over the
 local network is the obvious next step and changes none of the above: the same sealed batches,
 handed over a socket instead of a folder, which is most of why sealing them is worth doing.
+
+## How often it is written
+
+The thing to notice first is that the file is an outbox, not a journal. Every record in it also sits
+in the device's own database, so a phone that dies before a flush loses nothing permanently — the
+records simply arrive later. Write frequency therefore buys **freshness on the other device and
+nothing else**, which turns an anxious question into an easy one: how stale may the other device be?
+
+Minutes to tens of minutes. History feeds the wave's sense of novelty — how many days a track is
+held back — and the daily mix. Half an hour behind means nothing. A day behind means the desktop
+offers something that was played on the phone that morning.
+
+What frequent writing does cost is power, not space. History grows slowly: a few dozen plays a day
+at some eighty bytes sealed is about three megabytes a year. But Syncthing watches the folder and
+notices a change within about ten seconds, and then starts an exchange. On a phone that is a radio
+wake-up, which costs disproportionately: the modem stays in a high-power state for seconds after
+each transmission. Ten of those a day is nothing; a thousand is the same information at a hundred
+times the price.
+
+So: batches, not a stream.
+
+| what | when it is written |
+| --- | --- |
+| history | twenty records or fifteen minutes, whichever comes first, plus when playback stops and when the app goes to the background |
+| playlists and favourites | at once — they are rare, and someone who adds a track and walks to their computer expects to find it there |
+| the daily mix | once, when it is built |
+| vectors | at the end of a scan, in blocks of about five hundred |
+
+On a library listened to a few dozen tracks a day that comes to three to five writes, each carrying
+ten or twenty events.
+
+### Append, never rewrite
+
+Syncthing transfers the blocks of a file that changed. Appending changes the last block and adds
+new ones; rewriting changes the file. So anything that tidies, compacts or re-sorts a log turns a
+cheap sync into an expensive one, every time, for as long as the log exists. The rule is therefore
+flat: a file that has been synced once is never written again except at its end.
+
+Which is why history is kept **one file per day**:
+
+```
+history/2026-11-05.jsonl
+```
+
+Yesterday's file is finished forever. Syncthing stops touching it, a reader that has consumed it can
+tell so from its name alone without opening it, the number of files stays in the hundreds rather
+than the thousands, and retention — dropping what is older than some cutoff — falls on a day
+boundary naturally.
+
+It also sidesteps a platform detail. On Android the folder is reached through the storage access
+framework, and appending to an existing document is not something every provider there supports. If
+append turns out to be unavailable, a day's records can be written as several whole files inside the
+day's directory — `2026-11-05/0003.jsonl` — and nothing else in the design changes, because a day
+only ever holds three to five of them anyway.
+
+### Reading
+
+The mirror image, with a belt and braces. A device re-reads the others on start, on a change to the
+folder — debounced by about ten seconds, so that a burst of writes is one read — and on a sweep
+every half hour regardless. The sweep is there because a file observer over a storage-access-
+framework tree is not reliable on every Android version, and a periodic look costs less than
+finding out which versions.
 
 ## Keeping the two implementations honest
 
