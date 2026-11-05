@@ -360,9 +360,10 @@ Three things must not drift, and each has a guard:
   expected answer is asserted in `HistoryMergeTest`. If the desktop port folds the same file in and
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
-- `sync/TrackKey.kt`, `sync/PlayRecord.kt`, `sync/SyncBatch.kt` and `sync/HistoryMerge.kt` exist in
-  both repositories and must be identical apart from the line naming which side the copy is on,
-  exactly like the two excerpt files. Diff them.
+- Everything under `sync/` exists in both repositories and must be identical apart from the line
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Nine files so
+  far: the record and its track key, the batch envelope, the merge, the device id, the writer and
+  the reader, and the two interfaces that keep the folder itself out of all of it.
 
 ## Status
 
@@ -373,7 +374,8 @@ Three things must not drift, and each has a guard:
 | A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
 | The record format, the track key and the merge | written and tested, shared code on both sides |
 | The envelope's three fields | there, with sealing off |
-| Writing and reading the files, and the device id | next |
+| The device id, the writer and the reader | written and tested, the folder behind an interface |
+| Attaching them to a real folder, and matching a key to a local track | next |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 
