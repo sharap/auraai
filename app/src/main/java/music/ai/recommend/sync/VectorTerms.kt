@@ -62,6 +62,16 @@ data class VectorTerms(
             else -> VectorVerdict.Usable
         }
 
+    /**
+     * These terms as one line, for remembering what a folder was last read on.
+     *
+     * The decoder is not in it: it belongs to a file rather than to a device, and a vector refused
+     * over one is refused for that track alone. These three are the device's own, and all three can
+     * change under it — the owner switches to the other export of the model, or a new version of
+     * the app changes what an embedding means.
+     */
+    fun fingerprint(): String = "$model/$analysisVersion/$dimensions"
+
     companion object {
 
         /**

@@ -25,6 +25,9 @@ import java.io.File
  * copied over yet, or not scanned yet, and throwing those away would quietly lose the history of
  * everything that arrives late — which on a device set up second is most of it.
  *
+ * [vectorTerms] so that a change in what this device will believe a vector on makes it read the
+ * folder's vectors again instead of standing by a refusal it would no longer make.
+ *
  * [aliases] so that a hash worked out the hard way, by tags or by the vectors, is worked out once.
  * The local track is kept as text because only the platform knows how to spell one — a MediaStore
  * id on the phone, a path on the desktop — and a state file written by either should at worst be
@@ -50,7 +53,16 @@ class SyncState private constructor(
     val unresolved: MutableList<Waiting>,
     val aliases: MutableMap<String, String>,
     /** Whether this folder's provider can append to a document; null until it has been tried. */
-    var appendWorks: Boolean?
+    var appendWorks: Boolean?,
+    /**
+     * The terms vectors were last read on, as [VectorTerms.fingerprint] spells them.
+     *
+     * Kept so that a change of them can undo the reading. A vector refused because it was made by
+     * another export of the model is refused for good otherwise: the batch holding it is marked
+     * read and never offered again, so the day the owner switches to the model the other device
+     * uses, a library's worth of work that was sitting right there would stay unclaimed.
+     */
+    var vectorTerms: String?
 ) {
 
     /** A listen whose track this library could not place yet. */
@@ -84,6 +96,7 @@ class SyncState private constructor(
             aliases.forEach { (hash, track) -> addProperty(hash, track) }
         })
         appendWorks?.let { json.addProperty("appendWorks", it) }
+        vectorTerms?.let { json.addProperty("vectorTerms", it) }
 
         file.parentFile?.mkdirs()
         val temporary = File(file.parentFile, file.name + ".new")
@@ -108,7 +121,7 @@ class SyncState private constructor(
          * trying to rescue half of it.
          */
         fun load(file: File): SyncState {
-            val empty = SyncState(file, 0L, 0L, 0L, HashMap(), ArrayList(), HashMap(), null)
+            val empty = SyncState(file, 0L, 0L, 0L, HashMap(), ArrayList(), HashMap(), null, null)
             val json = try {
                 if (!file.isFile) return empty
                 JsonParser.parseString(file.readText()) as? JsonObject ?: return empty
@@ -140,7 +153,8 @@ class SyncState private constructor(
                             put(hash, track.asString)
                         }
                     },
-                    appendWorks = json.get("appendWorks")?.asBoolean
+                    appendWorks = json.get("appendWorks")?.asBoolean,
+                    vectorTerms = json.get("vectorTerms")?.asString
                 )
             } catch (e: RuntimeException) {
                 empty

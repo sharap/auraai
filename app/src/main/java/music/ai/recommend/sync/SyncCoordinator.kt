@@ -256,6 +256,19 @@ class SyncCoordinator<Track>(
         val keys = library()
         if (keys.isEmpty()) return PulledVectors(0, emptyMap(), 0, 0, false)
 
+        // What this device will believe a vector on, and whether that has changed since the folder
+        // was last read. If it has, every refusal made on the old terms is undone by forgetting
+        // where the reading got to: the usual cause is the owner switching to the other export of
+        // the model, and on the other side of that switch a whole library is suddenly usable.
+        val fingerprint = terms.fingerprint()
+        if (state.vectorTerms != fingerprint) {
+            if (state.vectorTerms != null) {
+                note("Vector terms changed, reading the folder's vectors again")
+            }
+            state.progress.keys.removeAll { it.contains("/${VectorWriter.DIRECTORY}/") }
+            state.vectorTerms = fingerprint
+        }
+
         val outcome = VectorReader(deviceId, folder, state.progress).read()
         if (outcome.records.isEmpty()) {
             state.progress.putAll(outcome.advanced)

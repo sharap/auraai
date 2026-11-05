@@ -35,6 +35,8 @@ class SyncStateTest {
         val file = stateFile()
         val state = SyncState.load(file)
         state.sequence = 42
+        state.vectorSequence = 7
+        state.vectorTerms = "abc/3/512"
         state.progress["phone/history/2027-01-15.jsonl"] = 7
         state.progress["phone/history/2027-01-14.jsonl"] = 19
         state.rememberUnresolved(listOf(waiting(1_700_000_000_000, "late"), waiting(1_700_000_001_000, "later")))
@@ -44,6 +46,9 @@ class SyncStateTest {
 
         val read = SyncState.load(file)
         assertEquals(42L, read.sequence)
+        // The two counters are separate streams: one for both would leave gaps in each.
+        assertEquals(7L, read.vectorSequence)
+        assertEquals("abc/3/512", read.vectorTerms)
         assertEquals(mapOf(
             "phone/history/2027-01-15.jsonl" to 7,
             "phone/history/2027-01-14.jsonl" to 19
