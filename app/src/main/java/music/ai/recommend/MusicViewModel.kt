@@ -58,12 +58,18 @@ import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.SmartAlbumBuilder
 import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.history.PlayHistory
+import music.ai.recommend.sync.SafSyncFolder
+import music.ai.recommend.sync.SyncCoordinator
+import music.ai.recommend.sync.SyncFolder
+import music.ai.recommend.sync.SyncIdentity
+import music.ai.recommend.sync.SyncState
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
 import music.ai.recommend.scanner.MusicScanner
 import music.ai.recommend.ui.theme.BackgroundTone
 import music.ai.recommend.ui.theme.measureBackgroundTone
 import kotlin.math.roundToInt
+import androidx.core.net.toUri
 import java.io.File
 import java.lang.reflect.Type
 
@@ -318,6 +324,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         initializeController()
         refreshScannedIds()
         observeScan()
+        observeSync()
 
         viewModelScope.launch(Dispatchers.IO) {
             loadFavorites()
@@ -1711,6 +1718,143 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun formatEtr(seconds: Long): String = "%02d:%02d".format(seconds / 60, seconds % 60)
 
+    // ---- Carrying listening history to and from the other device -------------------------------
+
+    /** What the settings screen shows about sync. */
+    data class SyncSummary(
+        val folder: String? = null,
+        val deviceId: String = "",
+        val sent: Int = 0,
+        val takenIn: Int = 0,
+        val waiting: Int = 0,
+        val busy: Boolean = false,
+        val lastRunAt: Long = 0L
+    )
+
+    private val _syncSummary = MutableStateFlow(SyncSummary())
+    val syncSummary: StateFlow<SyncSummary> = _syncSummary.asStateFlow()
+
+    private val syncDirectory by lazy { File(getApplication<Application>().filesDir, "sync") }
+    private var syncCoordinator: SyncCoordinator? = null
+    private var syncState: SyncState? = null
+
+    /** The folder itself, rebuilt whenever the choice changes and null until one is made. */
+    private fun syncFolder(): SyncFolder? {
+        val uri = prefs.getString(KEY_SYNC_FOLDER, null)?.toUri() ?: return null
+        val deviceId = syncDeviceId() ?: return null
+        return SafSyncFolder.fromTree(getApplication(), uri, deviceId)
+    }
+
+    private fun syncDeviceId(): String? =
+        SyncIdentity.loadOrCreate(File(syncDirectory, "device-id"))
+
+    private fun coordinator(): SyncCoordinator? {
+        syncCoordinator?.let { return it }
+        val deviceId = syncDeviceId() ?: return null
+        val state = SyncState.load(File(syncDirectory, "state.json")).also { syncState = it }
+        return SyncCoordinator(
+            deviceId = deviceId,
+            state = state,
+            history = playHistory,
+            library = { allSongs },
+            folder = { syncFolder() }
+        ).also { syncCoordinator = it }
+    }
+
+    /**
+     * The two moments worth reacting to.
+     *
+     * Every finished listen is offered to the outbox, which writes only when it judges it worth
+     * touching the folder — a couple of times an hour rather than once a track, because each write
+     * is a radio wake-up on a phone. And when playback stops, whatever is waiting goes out at
+     * once: that is the end of a listening session, and the next flush might otherwise be a long
+     * way off.
+     */
+    private fun observeSync() {
+        viewModelScope.launch {
+            playHistory.events.collect {
+                runCatching { coordinator()?.push(System.currentTimeMillis()) }
+            }
+        }
+        viewModelScope.launch {
+            isPlaying.collect { playing ->
+                if (!playing) runCatching { coordinator()?.push(System.currentTimeMillis(), force = true) }
+            }
+        }
+        refreshSyncSummary()
+    }
+
+    /** Takes the folder the owner picked, for good: the grant has to outlive this process. */
+    fun setSyncFolder(uri: Uri?) {
+        if (uri == null) return
+        try {
+            getApplication<Application>().contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not keep the permission for the sync folder", e)
+            return
+        }
+        prefs.edit().putString(KEY_SYNC_FOLDER, uri.toString()).apply()
+        syncCoordinator = null
+        refreshSyncSummary()
+        syncNow()
+    }
+
+    fun forgetSyncFolder() {
+        prefs.getString(KEY_SYNC_FOLDER, null)?.toUri()?.let { uri ->
+            runCatching {
+                getApplication<Application>().contentResolver.releasePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+        }
+        prefs.edit().remove(KEY_SYNC_FOLDER).apply()
+        syncCoordinator = null
+        refreshSyncSummary()
+    }
+
+    /** Sends what is waiting and reads what has arrived. Also what the settings screen asks for. */
+    fun syncNow() {
+        if (_syncSummary.value.busy) return
+        _syncSummary.value = _syncSummary.value.copy(busy = true)
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val sent = runCatching { coordinator()?.push(now, force = true)?.written ?: 0 }
+                .getOrElse { Log.e(TAG, "Could not write the history out", it); 0 }
+            val pulled = runCatching { coordinator()?.pull(now) }
+                .getOrElse { Log.e(TAG, "Could not read the history in", it); null }
+            _syncSummary.value = _syncSummary.value.copy(
+                sent = sent,
+                takenIn = pulled?.takenIn ?: 0,
+                waiting = pulled?.waiting ?: 0,
+                busy = false,
+                lastRunAt = now
+            )
+            // Listens taken in change what counts as recently played, which the daily mix uses.
+            if ((pulled?.takenIn ?: 0) > 0) refreshDailyMix()
+        }
+    }
+
+    private fun refreshSyncSummary() {
+        val uri = prefs.getString(KEY_SYNC_FOLDER, null)
+        _syncSummary.value = _syncSummary.value.copy(
+            folder = uri?.let { readableFolderName(it) },
+            deviceId = if (uri == null) "" else syncDeviceId().orEmpty().take(8)
+        )
+    }
+
+    /**
+     * Something a person can recognise out of a document tree uri, whose own form is
+     * `content://…/tree/primary%3ASync%2Fmusic`.
+     */
+    private fun readableFolderName(uri: String): String {
+        val tail = uri.toUri().lastPathSegment ?: return uri
+        return Uri.decode(tail).substringAfterLast(':').ifEmpty { Uri.decode(tail) }
+    }
+
     override fun onCleared() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
         stopProgressUpdate()
@@ -1744,6 +1888,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         const val WAVE_MAX_AGE_MS = 12L * 60 * 60 * 1000
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
         const val KEY_WAVE_NOVELTY = "wave_novelty"
+        const val KEY_SYNC_FOLDER = "sync_folder"
 
         /** Below this a track is not a match for the query under any reading. */
         const val MIN_SEARCH_SIMILARITY = 0.15f

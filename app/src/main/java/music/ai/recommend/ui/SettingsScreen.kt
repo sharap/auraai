@@ -43,6 +43,11 @@ fun SettingsScreen(viewModel: MusicViewModel) {
         onResult = { uri -> viewModel.setBackgroundImage(uri) }
     )
 
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+        onResult = { uri -> viewModel.setSyncFolder(uri) }
+    )
+
     LaunchedEffect(Unit) { viewModel.refreshModelStatus() }
 
     LazyColumn(
@@ -166,6 +171,12 @@ fun SettingsScreen(viewModel: MusicViewModel) {
             Spacer(modifier = Modifier.height(24.dp))
             SectionTitle(stringResource(id = R.string.equalizer))
             EqualizerControl(viewModel)
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionTitle(stringResource(id = R.string.sync))
+            SyncCard(viewModel) { folderPicker.launch(null) }
         }
 
         item {
@@ -410,6 +421,81 @@ private fun SectionTitle(text: String) {
         color = MaterialTheme.colorScheme.onBackground
     )
     Spacer(modifier = Modifier.height(8.dp))
+}
+
+/**
+ * Carrying listening history to the other device, through a folder both of them can see.
+ *
+ * What there is to say is deliberately short. The owner picks a folder — in practice one that
+ * Syncthing already keeps in step — and everything else happens on its own: listens go out a
+ * couple of times an hour, and what the other device wrote comes in. The numbers are there so that
+ * "nothing is happening" can be told apart from "nothing has happened yet", which is otherwise
+ * invisible and the first thing anyone would ask.
+ */
+@Composable
+private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
+    val summary by viewModel.syncSummary.collectAsState()
+
+    SettingsCard {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = summary.folder ?: stringResource(id = R.string.sync_no_folder),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = if (summary.folder == null) {
+                    stringResource(id = R.string.sync_hint)
+                } else {
+                    stringResource(id = R.string.sync_device, summary.deviceId)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMutedOnSurface.current
+            )
+
+            if (summary.lastRunAt > 0L) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(
+                        id = R.string.sync_counts,
+                        summary.sent,
+                        summary.takenIn
+                    ) + if (summary.waiting > 0) {
+                        " · " + stringResource(id = R.string.sync_waiting, summary.waiting)
+                    } else {
+                        ""
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = pickFolder) {
+                    Text(
+                        text = stringResource(
+                            id = if (summary.folder == null) R.string.sync_choose else R.string.sync_change
+                        )
+                    )
+                }
+                if (summary.folder != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(onClick = { viewModel.syncNow() }, enabled = !summary.busy) {
+                        if (summary.busy) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(text = stringResource(id = R.string.sync_now))
+                        }
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = { viewModel.forgetSyncFolder() }) {
+                        Text(text = stringResource(id = R.string.sync_forget))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

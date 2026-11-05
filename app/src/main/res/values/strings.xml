@@ -220,4 +220,14 @@
     <string name="wave_novelty_new">Forgotten</string>
     <string name="wave_novelty_hint">How long the wave stays away from what you have already heard: from a few days to two months.</string>
     <string name="wave_now_playing">My wave</string>
+    <string name="sync">Sync</string>
+    <string name="sync_no_folder">No folder chosen</string>
+    <string name="sync_hint">Pick a folder both devices can see — the one Syncthing keeps in step — and listening history travels between them on its own.</string>
+    <string name="sync_device">This device: %1$s</string>
+    <string name="sync_counts">Sent %1$d, taken in %2$d</string>
+    <string name="sync_waiting">%1$d waiting for their tracks</string>
+    <string name="sync_choose">Choose a folder</string>
+    <string name="sync_change">Change folder</string>
+    <string name="sync_now">Sync now</string>
+    <string name="sync_forget">Forget</string>
 </resources>
