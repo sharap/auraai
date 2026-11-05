@@ -1805,6 +1805,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (!playing) syncPass(force = true, takeIn = true, throttled = true)
             }
         }
+        viewModelScope.launch {
+            // The analysis finishing is the one moment there is certainly something new to offer,
+            // and the only one that does not depend on somebody touching the app. Without it an
+            // hour of analysis sits unshared until the owner happens to come back to the screen.
+            var wasScanning = false
+            isAiScanning.collect { scanning ->
+                if (wasScanning && !scanning) syncPass(force = true, takeIn = true)
+                wasScanning = scanning
+            }
+        }
         refreshSyncSummary()
     }
 

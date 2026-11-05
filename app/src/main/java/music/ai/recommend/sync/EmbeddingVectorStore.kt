@@ -8,6 +8,7 @@ import music.ai.recommend.ai.Excerpt
 import music.ai.recommend.ai.Mp3Excerpt
 import music.ai.recommend.ai.ModelRepository
 import music.ai.recommend.model.Song
+import java.io.File
 
 /**
  * This app's embeddings, as [SyncCoordinator] wants to see them.
@@ -56,6 +57,10 @@ class EmbeddingVectorStore(
 
     override suspend fun excerptStartMs(track: Long): Long? {
         val path = pathFor(track) ?: return null
+        // For a format the shared decoder handles, the decoder's own count of the samples — which
+        // is what it chose the window by. The platform's duration is a different number and naming
+        // the window with it is how a correct vector comes to be refused.
+        if (Mp3Excerpt.handles(path)) return Mp3Excerpt.startMs(File(path))
         val duration = containerDurationMs(path) ?: return null
         return Excerpt.startMs(duration)
     }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.Excerpt
 import music.ai.recommend.ai.ModelRepository
+import music.ai.recommend.ai.Mp3Excerpt
 import music.ai.recommend.history.PlayHistory
 import music.ai.recommend.model.Song
 import org.junit.After
@@ -147,22 +148,28 @@ class VectorCoordinatorTest {
 
     @Test
     fun theExcerptThisDeviceNamesIsTheOneItsAnalysisWouldUse() = runBlocking {
-        // The link that only a real file can check. The name travels with the vector, and it has to
-        // be the container's reading rather than MediaStore's: the two differ by about a
-        // millisecond, which crosses one of the two-second buckets once in two thousand tracks.
+        // The link that only a real file can check, and the one this got wrong first time round.
+        // The analysis picks the window from the shared decoder's own count of the samples, so
+        // that is what has to be named. The platform's duration is a different number: measured
+        // against one desktop it disagreed by a second often enough that a quarter of a library
+        // was refused as describing a different ten seconds when it described the right one.
         val store = EmbeddingVectorStore(embeddings, models) { tracks }
         for (song in tracks) {
             val named = store.excerptStartMs(song.id)
             assertTrue("нет окна для ${song.path}", named != null)
             assertEquals("это должно быть кратно секунде", 0L, named!! % 1000)
-            // Within one bucket of what the key's duration would have suggested, which is the most
-            // that may be assumed about the two readings agreeing.
-            val fromKey = Excerpt.startMs(song.duration)
-            assertTrue(
-                "окно ${song.path}: контейнер $named, MediaStore $fromKey",
-                kotlin.math.abs(named - fromKey) <= 2000
+            assertEquals(
+                "окно ${song.path} не совпало с тем, что выбрал декодер",
+                Mp3Excerpt.startMs(File(song.path)),
+                named
             )
         }
+        // And the platform's own reading is only a near miss, which is why it may not be used:
+        // whether it happens to agree on these three files says nothing about the next hundred.
+        val apart = tracks.count { song ->
+            store.excerptStartMs(song.id) != Excerpt.startMs(song.duration)
+        }
+        println("окно по MediaStore расходится с декодером на $apart из ${tracks.size}")
     }
 
     @Test

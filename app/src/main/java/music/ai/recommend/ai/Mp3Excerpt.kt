@@ -64,6 +64,26 @@ object Mp3Excerpt {
      * @return exactly [Excerpt.SAMPLES] mono samples at [Excerpt.SAMPLE_RATE], or fewer if the
      *   track is genuinely shorter than the excerpt, or an empty array if it will not decode.
      */
+    /**
+     * Where the excerpt begins for this file, in milliseconds, by this decoder's own count of its
+     * samples — or null for a file it cannot read.
+     *
+     * The one answer that may be used to name an excerpt for a vector that travels, and the reason
+     * is in [decode] two lines below: the window is chosen from the frame walk's own duration and
+     * not from whatever the platform says the track's length is. Asking the platform instead looks
+     * right and is not. Measured between this phone and one desktop, a tag reader's whole seconds
+     * and a container's milliseconds disagree by one second often enough that about a quarter of a
+     * library came out one two-second bucket apart — and every one of those vectors was refused as
+     * describing a different ten seconds when it described exactly the right one.
+     *
+     * It costs a walk over the file's frame headers, which is sequential reading and no decoding.
+     */
+    fun startMs(file: File): Long? {
+        val layout = scan(file) ?: return null
+        if (layout.frames == 0L) return null
+        return Excerpt.startMs(layout.durationMs)
+    }
+
     fun decode(file: File): FloatArray {
         val layout = scan(file) ?: return FloatArray(0)
         if (layout.frames == 0L) return FloatArray(0)

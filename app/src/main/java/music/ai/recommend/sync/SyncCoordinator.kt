@@ -35,7 +35,19 @@ class SyncCoordinator<Track>(
     /** Where a word about something worth noticing goes; the platform decides what that means. */
     private val note: (String) -> Unit = {},
     /** This device's embeddings, or null for a build that does not carry vectors at all. */
-    private val vectors: VectorStore<Track>? = null
+    private val vectors: VectorStore<Track>? = null,
+    /**
+     * How many vectors one pass offers.
+     *
+     * A device's first exchange is its whole library — four thousand of them, eleven megabytes —
+     * and what that costs depends entirely on the device, which is why this is asked of the caller.
+     * On a phone each one needs its file opened to name its excerpt and the folder reached through
+     * the storage access framework, so a few hundred is a few seconds and the rest can wait for the
+     * next moment. On a machine with no battery and no radio, where the duration is already in hand,
+     * the whole library is a second of work and spreading it over nine passes would only mean nine
+     * days of a cache sitting there unshared.
+     */
+    private val publishLimit: Int = DEFAULT_PUBLISH_LIMIT
 ) {
 
     private val writer = HistoryWriter(deviceId, Relay(), state.sequence)
@@ -206,7 +218,7 @@ class SyncCoordinator<Track>(
         var couldNotTravel = 0
         var gone = 0
         var rounds = 0
-        while (rounds * VectorWriter.BATCH_RECORDS < PUBLISH_LIMIT) {
+        while (rounds * VectorWriter.BATCH_RECORDS < publishLimit) {
             rounds++
             val held = vectors.toPublish(VectorWriter.BATCH_RECORDS)
             if (held.isEmpty()) break
@@ -341,13 +353,7 @@ class SyncCoordinator<Track>(
         /** How many of this device's listens are described in one pass. */
         const val PUSH_LIMIT = 200
 
-        /**
-         * How many vectors one pass offers.
-         *
-         * A library's backfill is four thousand of them and about eleven megabytes, so it is spread
-         * over passes rather than done in one: five hundred is four or five seconds of folder
-         * writing and gets a whole library across in a day's ordinary use.
-         */
-        const val PUBLISH_LIMIT = 500
+        /** What a device pays for a pass if it does not say; see [publishLimit]. */
+        const val DEFAULT_PUBLISH_LIMIT = 500
     }
 }

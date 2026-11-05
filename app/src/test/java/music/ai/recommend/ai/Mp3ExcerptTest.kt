@@ -1,6 +1,8 @@
 package music.ai.recommend.ai
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -52,6 +54,30 @@ class Mp3ExcerptTest {
         assertTrue("пик $peak", peak in 0.70f..0.79f)
         val energy = samples.sumOf { (it * it).toDouble() }
         assertEquals(55010.18, energy, 0.1)
+    }
+
+    @Test
+    fun theWindowIsNamedByThisDecodersOwnCountOfTheSamples() {
+        // The number that travels with a vector, and it has to be the one [decode] chooses the
+        // window by. Asking the platform for the track's length instead looks equivalent and is
+        // not: a tag reader's whole seconds and a container's milliseconds disagree by a second
+        // often enough that about a quarter of a library came out one two-second bucket apart, and
+        // every one of those correct vectors was refused as describing a different ten seconds.
+        val named = Mp3Excerpt.startMs(fixture)
+        assertNotNull(named)
+
+        // The fixture is 25 s of frames, so the middle ten begin at 7 s: 25 / 2 = 12, less 5.
+        assertEquals(7_000L, named)
+
+        // And a duration read one second differently — which is what the two platforms do to each
+        // other — would have named a different window, one whole bucket away.
+        assertEquals(7_000L, Excerpt.startMs(25_000))
+        assertEquals(8_000L, Excerpt.startMs(26_000))
+    }
+
+    @Test
+    fun aFileThatIsNotThereHasNoWindowRatherThanAWrongOne() {
+        assertNull(Mp3Excerpt.startMs(File("src/test/resources/нет такого.mp3")))
     }
 
     @Test
