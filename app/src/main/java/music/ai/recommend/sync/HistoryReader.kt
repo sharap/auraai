@@ -49,62 +49,23 @@ class HistoryReader(
      * @param keepDays how long the local store keeps history; zero or less keeps everything.
      */
     fun read(known: Set<HistoryMerge.Known>, now: Long, keepDays: Int): Outcome {
-        val batches = ArrayList<SyncBatch>()
-        val advanced = HashMap<String, Int>()
-        var filesRead = 0
-        var filesSkipped = 0
-        var filesUnavailable = 0
-        var linesUnreadable = 0
-
-        val oldestDay = if (keepDays > 0) dayOf(now - keepDays * DAY_MS) else null
-
-        for (deviceId in source.devices().sorted()) {
-            if (deviceId == ownDeviceId) continue
-            if (!SyncIdentity.isValid(deviceId)) continue
-            for (path in source.files(deviceId, DIRECTORY).sorted()) {
-                // Anything else in the folder is somebody else's business — above all a file
-                // Syncthing is still transferring. See [DayFile].
-                if (!DayFile.isOurs(path)) continue
-                val key = "$deviceId/$path"
-                var consumed = progress[key] ?: 0
-                if (oldestDay != null && isBefore(path, oldestDay)) {
-                    filesSkipped++
-                    continue
-                }
-                val lines = source.lines(deviceId, path)
-                if (lines == null) {
-                    filesUnavailable++
-                    continue
-                }
-                if (lines.size < consumed) {
-                    // A file that has shrunk was rewritten, which the format forbids. Reading it
-                    // again from the top is the safe answer: the merge turns away what is already
-                    // held, so the cost is one pass and not a duplicate.
-                    consumed = 0
-                }
-                if (lines.size <= consumed) {
-                    filesSkipped++
-                    continue
-                }
-                filesRead++
-
-                val fresh = lines.subList(consumed, lines.size)
-                var lastFailed = false
-                for ((offset, line) in fresh.withIndex()) {
-                    val batch = SyncBatch.decode(line)
-                    if (batch == null) {
-                        if (line.isNotBlank()) linesUnreadable++
-                        lastFailed = offset == fresh.size - 1 && line.isNotBlank()
-                        continue
-                    }
-                    batches.add(batch)
-                }
-                advanced[key] = lines.size - if (lastFailed) 1 else 0
-            }
-        }
-
-        val merge = HistoryMerge.merge(batches, known, ownDeviceId, now, keepDays)
-        return Outcome(merge, filesRead, filesSkipped, filesUnavailable, linesUnreadable, advanced)
+        // The walking — which files are ours, how far each has been read, what to do with a tail
+        // that is half-written — is the same for every kind of file in the folder and lives in
+        // [BatchReader]. What is particular to history is the day it stops caring about and the
+        // merge it hands the batches to.
+        val outcome = BatchReader(ownDeviceId, source, progress).read(
+            inside = DIRECTORY,
+            oldestDay = if (keepDays > 0) dayOf(now - keepDays * DAY_MS) else null
+        )
+        val merge = HistoryMerge.merge(outcome.batches, known, ownDeviceId, now, keepDays)
+        return Outcome(
+            merge = merge,
+            filesRead = outcome.filesRead,
+            filesSkipped = outcome.filesSkipped,
+            filesUnavailable = outcome.filesUnavailable,
+            linesUnreadable = outcome.linesUnreadable,
+            advanced = outcome.advanced
+        )
     }
 
     private companion object {
@@ -114,23 +75,9 @@ class HistoryReader(
         /** The directory history files live in, inside a device's own. */
         const val DIRECTORY = "history"
 
-        /** `history/2026-11-05.jsonl` and `history/2026-11-05/0003.jsonl` alike. */
-        val DAY_IN_PATH = Regex("""history/(\d{4}-\d{2}-\d{2})""")
-
         fun dayOf(atMs: Long): String {
             val (year, month, day) = HistoryWriter.utcDate(atMs)
             return "%04d-%02d-%02d".format(year, month, day)
-        }
-
-        /**
-         * Whether a file is entirely older than [oldestDay] and so holds nothing the store would
-         * keep. Day names sort as dates do, which is the one thing that makes this cheap: it is a
-         * string comparison on the name and no file is opened. A path that does not carry a day is
-         * read, because there is nothing to conclude from it.
-         */
-        fun isBefore(path: String, oldestDay: String): Boolean {
-            val day = DAY_IN_PATH.find(path)?.groupValues?.get(1) ?: return false
-            return day < oldestDay
         }
     }
 }

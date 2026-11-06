@@ -60,83 +60,34 @@ class VectorReader(
      *   so a little more than this may come back; what matters is that it is bounded.
      */
     fun read(maxRecords: Int = MAX_RECORDS): Outcome {
+        // The walking lives in [BatchReader]; what is particular here is that no day is ever too
+        // old to open — a vector describes a file, not a moment — and that the pass is bounded.
+        val outcome = BatchReader(ownDeviceId, source, progress)
+            .read(inside = VectorWriter.DIRECTORY, maxRecords = maxRecords)
+
         val records = ArrayList<Incoming>()
-        val advanced = HashMap<String, Int>()
-        var filesRead = 0
-        var filesSkipped = 0
-        var filesUnavailable = 0
-        var linesUnreadable = 0
-        var more = false
-
-        for (deviceId in source.devices().sorted()) {
-            if (deviceId == ownDeviceId) continue
-            if (!SyncIdentity.isValid(deviceId)) continue
-            for (path in source.files(deviceId, VectorWriter.DIRECTORY).sorted()) {
-                // Anything else in the folder is somebody else's business — above all a file
-                // Syncthing is still transferring. See [DayFile].
-                if (!DayFile.isOurs(path)) continue
-                if (records.size >= maxRecords) {
-                    more = true
-                    continue
-                }
-                val key = "$deviceId/$path"
-                var consumed = progress[key] ?: 0
-                val lines = source.lines(deviceId, path)
-                if (lines == null) {
-                    filesUnavailable++
-                    continue
-                }
-                if (lines.size < consumed) {
-                    // A file that has shrunk was rewritten, which the format forbids. Reading it
-                    // again from the top is the safe answer: a vector already held is simply not
-                    // stored twice.
-                    consumed = 0
-                }
-                if (lines.size <= consumed) {
-                    filesSkipped++
-                    continue
-                }
-                filesRead++
-
-                var taken = consumed
-                var lastFailed = false
-                for (index in consumed until lines.size) {
-                    val line = lines[index]
-                    val batch = SyncBatch.decode(line)
-                    if (batch == null) {
-                        if (line.isNotBlank()) linesUnreadable++
-                        // Only the final line of a file can be half-written, since the file is only
-                        // ever appended to. One in the middle is damage that waiting will not mend.
-                        lastFailed = index == lines.size - 1 && line.isNotBlank()
-                        taken = index + 1
-                        continue
-                    }
-                    // Attributed by the name inside the batch and not by the directory it was
-                    // found in, which is what the history reader does too. It costs nothing — a
-                    // vector is judged by the model, the version, the decoder and the excerpt, not
-                    // by who handed it over — and it leaves room for a device that can see two
-                    // others to pass their files along to each other.
-                    if (batch.deviceId != ownDeviceId) {
-                        for (json in batch.records) {
-                            val record = VectorRecord.fromJson(json)
-                            if (record == null) {
-                                linesUnreadable++
-                            } else {
-                                records.add(Incoming(batch.deviceId, record))
-                            }
-                        }
-                    }
-                    taken = index + 1
-                    if (records.size >= maxRecords && index < lines.size - 1) {
-                        more = true
-                        break
-                    }
-                }
-                advanced[key] = if (lastFailed) taken - 1 else taken
+        var unreadable = outcome.linesUnreadable
+        for (batch in outcome.batches) {
+            // Attributed by the name inside the batch and not by the directory it was found in,
+            // which is what history does too. It costs nothing — a vector is judged by the model,
+            // the version, the decoder and the excerpt, not by who handed it over — and it leaves
+            // room for a device that can see two others to pass their files along to each other.
+            if (batch.deviceId == ownDeviceId) continue
+            for (json in batch.records) {
+                val record = VectorRecord.fromJson(json)
+                if (record == null) unreadable++ else records.add(Incoming(batch.deviceId, record))
             }
         }
 
-        return Outcome(records, filesRead, filesSkipped, filesUnavailable, linesUnreadable, more, advanced)
+        return Outcome(
+            records = records,
+            filesRead = outcome.filesRead,
+            filesSkipped = outcome.filesSkipped,
+            filesUnavailable = outcome.filesUnavailable,
+            linesUnreadable = unreadable,
+            more = outcome.more,
+            advanced = outcome.advanced
+        )
     }
 
     companion object {

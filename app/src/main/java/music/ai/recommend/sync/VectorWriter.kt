@@ -18,19 +18,24 @@ package music.ai.recommend.sync
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
 class VectorWriter(
-    private val deviceId: String,
-    private val sink: SyncSink,
+    deviceId: String,
+    sink: SyncSink,
     /** The batch number to carry on from, so numbering survives a restart. */
     startingSequence: Long = 0L
 ) {
 
-    private val waiting = ArrayList<VectorRecord>()
+    private val out = BatchWriter(
+        deviceId = deviceId,
+        sink = sink,
+        directory = DIRECTORY,
+        batchRecords = BATCH_RECORDS,
+        startingSequence = startingSequence
+    )
 
     /** The last batch number written. */
-    var sequence: Long = startingSequence
-        private set
+    val sequence: Long get() = out.sequence
 
-    val pending: Int get() = waiting.size
+    val pending: Int get() = out.pending
 
     /**
      * Takes a vector into the outbox, if it is one that may travel at all.
@@ -45,58 +50,31 @@ class VectorWriter(
     fun offer(record: VectorRecord): Boolean {
         if (record.decoder !in VectorTerms.TRAVELS) return false
         if (record.vector.isEmpty() || record.vector.all { it == 0f }) return false
-        waiting.add(record)
+        out.offer(record.toJson())
         return true
     }
 
     /** Whether [flush] would write anything if called now. */
-    fun isDue(): Boolean = waiting.size >= BATCH_RECORDS
+    fun isDue(): Boolean = out.isDue(0L)
 
     /**
      * Writes what is waiting, if there is enough of it.
      *
      * @param force writes a part-full batch, which is what the end of a scan and the app going away
      *   ask for.
-     * @return how many records went out. Zero means nothing was waiting, or it was not yet a batch,
-     *   or the folder would not take them — in the last case they stay and are offered again.
+     * @return how many records went out.
      */
-    fun flush(now: Long, force: Boolean = false): Int {
-        if (waiting.isEmpty()) return 0
-        if (!force && !isDue()) return 0
-
-        val taking = if (force) waiting.size else minOf(waiting.size, BATCH_RECORDS)
-        val batch = SyncBatch(
-            deviceId = deviceId,
-            sequence = sequence + 1,
-            sealing = SyncBatch.SEALING_NONE,
-            records = waiting.subList(0, taking).map { it.toJson() }
-        )
-        if (!sink.append(dayFile(now), listOf(batch.encode()))) return 0
-
-        sequence = batch.sequence
-        waiting.subList(0, taking).clear()
-        return taking
-    }
+    fun flush(now: Long, force: Boolean = false): Int = out.flush(now, force)
 
     companion object {
 
         /** Records in one batch; see the note on line size above. */
         const val BATCH_RECORDS = 50
 
-        /**
-         * Which file a batch written at [atMs] belongs in.
-         *
-         * Named for the day of the writing, as history files are, and for the same reason: a file
-         * that is appended to and then finished forever is one Syncthing stops carrying and a
-         * reader can tell it has read all of. The day means nothing about the vectors inside — a
-         * vector has no date — it is only what bounds the file.
-         */
-        fun dayFile(atMs: Long): String {
-            val (year, month, day) = HistoryWriter.utcDate(atMs)
-            return "vectors/%04d-%02d-%02d.jsonl".format(year, month, day)
-        }
-
         /** The directory one device's vector files live in, relative to its own. */
         const val DIRECTORY = "vectors"
+
+        /** Which file a batch written at [atMs] belongs in; see [BatchWriter.dayFile]. */
+        fun dayFile(atMs: Long): String = BatchWriter.dayFile(DIRECTORY, atMs)
     }
 }
