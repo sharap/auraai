@@ -61,6 +61,9 @@ import music.ai.recommend.history.PlayHistory
 import music.ai.recommend.sync.SafSyncFolder
 import music.ai.recommend.sync.EmbeddingVectorStore
 import music.ai.recommend.sync.PlayHistoryStore
+import music.ai.recommend.sync.PlaylistLog
+import music.ai.recommend.sync.PlaylistOp
+import music.ai.recommend.sync.PlaylistShelf
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
 import music.ai.recommend.sync.SyncIdentity
@@ -327,6 +330,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val vectorsTakenIn: Int = 0,
         /** True while a library's worth of vectors is still working its way across. */
         val vectorsWaiting: Boolean = false,
+        /** Playlist and favourite changes offered to the other devices, and taken from them. */
+        val changesSent: Int = 0,
+        val changesTakenIn: Int = 0,
         val waiting: Int = 0,
         val busy: Boolean = false,
         val lastRunAt: Long = 0L
@@ -340,6 +346,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** One pass over the folder at a time; see [syncPass]. */
     private val syncGate = Mutex()
+
+    /**
+     * Every playlist and favourite change this device knows of, its own and the ones that arrived.
+     *
+     * The log is what travels and what the merged answer is replayed from. The visible state is
+     * still kept where it was — a preferences blob and a set of ids — and is overwritten by the
+     * replay on each pass, so a change made here shows at once and is agreed on later.
+     */
+    private val playlistLog by lazy { PlaylistLog(File(syncDirectory, "playlist-log.jsonl")) }
 
     /** When the folder was last read, so passes nobody asked for do not read it over and over. */
     private var lastPullAt = 0L
@@ -714,10 +729,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(songId: Long) {
         val current = _favoriteSongIds.value.toMutableSet()
-        if (!current.remove(songId)) current.add(songId)
+        val added = !current.remove(songId)
+        if (added) current.add(songId)
         _favoriteSongIds.value = current
         persistAsync("favorite_ids", current)
         rebuildPlaylists()
+        allSongsById[songId]?.let { song ->
+            recordPlaylistChanges(
+                listOf(Change(if (added) PlaylistOp.Kind.ADD else PlaylistOp.Kind.REMOVE, track = song))
+            )
+        }
     }
 
     /** Parses the stored playlists. Only needed at startup — afterwards [savedPlaylists] is current. */
@@ -754,6 +775,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun createPlaylistWithSongs(name: String, songs: List<Song>) {
         updatePlaylists(_playlists.value + Playlist(name, songs))
+        recordPlaylistChanges(
+            // Created explicitly as well as filled, so that a playlist made empty is still a
+            // playlist on the other device.
+            listOf(Change(PlaylistOp.Kind.CREATE, playlist = name)) +
+                songs.map { Change(PlaylistOp.Kind.ADD, playlist = name, track = it) }
+        )
     }
 
     fun addSongsToPlaylist(playlistName: String, songs: List<Song>) {
@@ -764,14 +791,93 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else playlist
         }
         updatePlaylists(updated)
+        // Every one asked for, including any already there: replaying an addition of what is
+        // already in a playlist changes nothing, and working out which were new would be a second
+        // place for that rule to live.
+        recordPlaylistChanges(songs.map { Change(PlaylistOp.Kind.ADD, playlist = playlistName, track = it) })
     }
 
     fun overwritePlaylist(playlistName: String, songs: List<Song>) {
+        val before = _playlists.value.find { it.name == playlistName }?.songs.orEmpty()
         updatePlaylists(_playlists.value.map { if (it.name == playlistName) it.copy(songs = songs) else it })
+        // Replacing what is in a playlist is a removal of what left and an addition of what
+        // arrived. Said that way it merges with the other device's changes instead of overruling
+        // them, which is the whole reason these are changes and not a new list.
+        val keeping = songs.mapTo(HashSet()) { it.id }
+        val gone = before.filter { it.id !in keeping }
+        val arrived = songs.filter { fresh -> before.none { it.id == fresh.id } }
+        recordPlaylistChanges(
+            gone.map { Change(PlaylistOp.Kind.REMOVE, playlist = playlistName, track = it) } +
+                arrived.map { Change(PlaylistOp.Kind.ADD, playlist = playlistName, track = it) }
+        )
     }
 
     fun addSongToPlaylist(playlistName: String, song: Song) {
         addSongsToPlaylist(playlistName, listOf(song))
+    }
+
+    // ------------------------------------------------------------------ playlists that travel
+    //
+    // The visible state stays where it was — a set of ids and a preferences blob — and every change
+    // to it is also written into the log as an operation, so it can travel. A pass then replays the
+    // whole log, its own changes among them, and replaces what is shown with the result. So a change
+    // made here is visible at once and agreed on with the other device shortly after.
+
+    /** One change, before it is given a device, a counter and a time. */
+    private data class Change(
+        val kind: PlaylistOp.Kind,
+        val playlist: String? = null,
+        val track: Song? = null,
+        val newName: String? = null
+    )
+
+    /**
+     * Writes changes into the log, which numbers them as it writes.
+     *
+     * Numbering is the log's to do and not this method's: taking a counter and writing with it are
+     * two steps, and a sync pass can write between them.
+     */
+    private fun recordPlaylistChanges(changes: List<Change>) {
+        if (changes.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val deviceId = syncDeviceId() ?: return@launch
+            val at = System.currentTimeMillis()
+            playlistLog.appendOwn { firstSeq ->
+                changes.mapIndexed { index, change ->
+                    PlaylistOp(
+                        kind = change.kind,
+                        seq = firstSeq + index,
+                        deviceId = deviceId,
+                        at = at,
+                        playlist = change.playlist,
+                        track = change.track?.let { PlaylistShelf.keyOf(it) },
+                        newName = change.newName
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Replaces what this device shows with what the log says, once a pass has merged it.
+     *
+     * The favourites entry is virtual and rebuilt from the ids, so a playlist of that name is not
+     * kept among the stored ones — the same rule [updatePlaylists] follows.
+     */
+    private suspend fun showMergedPlaylists(favourites: List<Long>, playlists: Map<String, List<Long>>) {
+        val favouritesName = getApplication<Application>().getString(R.string.favorites)
+        val byId = allSongsById
+        val merged = playlists
+            .filterKeys { it != favouritesName }
+            .map { (name, ids) -> Playlist(name, ids.mapNotNull { byId[it] }) }
+        val favouriteIds = favourites.toSet()
+        withContext(Dispatchers.Main) {
+            _favoriteSongIds.value = favouriteIds
+            savedPlaylists = merged
+            rebuildPlaylists()
+        }
+        persistAsync("favorite_ids", favouriteIds)
+        persistAsync("playlists", merged)
     }
 
     private fun updatePlaylists(newPlaylists: List<Playlist>) {
@@ -784,6 +890,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deletePlaylist(playlist: Playlist) {
         updatePlaylists(_playlists.value.filter { it.name != playlist.name })
+        // The favourites entry is virtual and comes back the moment anything is hearted, so there
+        // is nothing to tell the other device about.
+        if (playlist.name != getApplication<Application>().getString(R.string.favorites)) {
+            recordPlaylistChanges(listOf(Change(PlaylistOp.Kind.DELETE, playlist = playlist.name)))
+        }
     }
 
     fun setBackgroundImage(uri: Uri?) {
@@ -1781,7 +1892,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             folder = { syncFolder() },
             keepDays = PlayHistory.KEEP_DAYS,
             note = { Log.i(TAG, it) },
-            vectors = EmbeddingVectorStore(embeddings, modelRepository) { allSongs }
+            vectors = EmbeddingVectorStore(embeddings, modelRepository) { allSongs },
+            playlists = PlaylistShelf(
+                songs = { allSongs },
+                favouriteIds = { _favoriteSongIds.value },
+                storedPlaylists = { savedPlaylists.map { it.name to it.songs.map { song -> song.id } } },
+                onShow = { favourites, playlists -> showMergedPlaylists(favourites, playlists) }
+            ),
+            playlistLog = playlistLog
         ).also { syncCoordinator = it }
     }
 
@@ -1901,6 +2019,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            val sentChanges = if (pulled == null) null else
+                runCatching { coordinator.pushPlaylists(now) }
+                    .getOrElse { Log.e(TAG, "Could not write the playlist changes out", it); null }
+            val tookChanges = if (pulled == null) null else
+                runCatching { coordinator.pullPlaylists(now) }
+                    .getOrElse { Log.e(TAG, "Could not read the playlist changes in", it); null }
+            sentChanges?.let {
+                if (it.written + it.seeded > 0) {
+                    Log.i(TAG, "Playlists out: ${it.written} written, ${it.seeded} seeded from what was here")
+                }
+            }
+            tookChanges?.let {
+                if (it.takenIn > 0 || it.unmatched > 0) {
+                    Log.i(
+                        TAG,
+                        "Playlists in: ${it.takenIn} changes, ${it.favourites} favourites, " +
+                            "${it.playlists} playlists, ${it.unmatched} tracks not here"
+                    )
+                }
+            }
+
             _syncSummary.value = _syncSummary.value.let {
                 it.copy(
                     // Totals since this run started, not of the last pass: most passes happen on
@@ -1912,6 +2051,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     vectorsSent = it.vectorsSent + (sentVectors?.written ?: 0),
                     vectorsTakenIn = it.vectorsTakenIn + (tookVectors?.takenIn ?: 0),
                     vectorsWaiting = tookVectors?.more ?: it.vectorsWaiting,
+                    changesSent = it.changesSent + (sentChanges?.written ?: 0),
+                    changesTakenIn = it.changesTakenIn + (tookChanges?.takenIn ?: 0),
                     lastRunAt = now
                 )
             }

@@ -417,6 +417,10 @@ class SyncCoordinator<Track>(
         val view = playlists ?: return PushedPlaylists(0, 0)
         val log = playlistLog ?: return PushedPlaylists(0, 0)
         if (folder() == null) return PushedPlaylists(0, 0)
+        // Before the library is read, what this device "already has" cannot be described: a
+        // playlist is a list of tracks and a track is named by its tags. Seeding then would put an
+        // empty log in place and mark it done, which is the one mistake here that cannot be undone.
+        if (library().isEmpty()) return PushedPlaylists(0, 0)
 
         var seeded = 0
         if (!state.playlistsSeeded) {

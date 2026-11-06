@@ -21,6 +21,11 @@ import java.io.File
  * Written through append and never rewritten, so an interrupted write costs the last line. A line
  * that will not parse is skipped, and the rest of the log stands.
  *
+ * Every method holds the log's own lock, and [appendOwn] exists because of it: taking a counter and
+ * writing with it are two steps, and between them a sync pass can write. Two changes with one
+ * counter from one device are the same change as far as the log is concerned, so the second would
+ * be dropped as already known — a heart tapped twice in a second, and the second tap lost.
+ *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
 class PlaylistLog(private val file: File) {
@@ -28,10 +33,21 @@ class PlaylistLog(private val file: File) {
     private var ops: MutableList<PlaylistOp>? = null
 
     /** Every change, in no particular order; [PlaylistReplay] puts them in one. */
-    fun all(): List<PlaylistOp> = loaded()
+    fun all(): List<PlaylistOp> = synchronized(this) { loaded().toList() }
 
     /** The counter this device's next change should carry. */
-    fun nextSeq(): Long = PlaylistReplay.nextSeq(loaded())
+    fun nextSeq(): Long = synchronized(this) { PlaylistReplay.nextSeq(loaded()) }
+
+    /**
+     * Records changes of this device's own, numbering them as it writes them.
+     *
+     * [make] is handed the counter the first of them should carry and must number any further ones
+     * upwards from it. It is called with the log's lock held, so nothing can take the same counter
+     * in between.
+     */
+    fun appendOwn(make: (firstSeq: Long) -> List<PlaylistOp>): Int? = synchronized(this) {
+        appendLocked(make(PlaylistReplay.nextSeq(loaded())))
+    }
 
     /**
      * Adds changes to the log.
@@ -44,7 +60,9 @@ class PlaylistLog(private val file: File) {
      *   A change already here — the same device and the same counter — is not added twice: a
      *   folder read again offers the same operations, and they are the same ones rather than new.
      */
-    fun append(fresh: List<PlaylistOp>): Int? {
+    fun append(fresh: List<PlaylistOp>): Int? = synchronized(this) { appendLocked(fresh) }
+
+    private fun appendLocked(fresh: List<PlaylistOp>): Int? {
         if (fresh.isEmpty()) return 0
         val held = loaded()
         val known = held.mapTo(HashSet()) { it.deviceId to it.seq }
@@ -63,12 +81,13 @@ class PlaylistLog(private val file: File) {
     }
 
     /** This device's own changes past [afterSeq], oldest first, for the outbox. */
-    fun own(deviceId: String, afterSeq: Long, limit: Int): List<PlaylistOp> =
+    fun own(deviceId: String, afterSeq: Long, limit: Int): List<PlaylistOp> = synchronized(this) {
         loaded().asSequence()
             .filter { it.deviceId == deviceId && it.seq > afterSeq }
             .sortedBy { it.seq }
             .take(limit)
             .toList()
+    }
 
     private fun loaded(): MutableList<PlaylistOp> {
         ops?.let { return it }

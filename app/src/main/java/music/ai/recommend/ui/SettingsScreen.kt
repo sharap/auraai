@@ -473,6 +473,20 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
             // Vectors get a line of their own, and only once something has moved: for most people
             // most of the time this is a one-off backfill they should be able to watch finish, and
             // after that a line that always reads zero would be noise.
+            // Playlist changes get their own line, and only once something has moved: for most
+            // people this is the first exchange and then silence for weeks.
+            if (summary.changesSent > 0 || summary.changesTakenIn > 0) {
+                Text(
+                    text = stringResource(
+                        id = R.string.sync_changes,
+                        summary.changesSent,
+                        summary.changesTakenIn
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+            }
+
             if (summary.vectorsSent > 0 || summary.vectorsTakenIn > 0) {
                 Text(
                     text = stringResource(
