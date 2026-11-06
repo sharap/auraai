@@ -71,13 +71,91 @@ down to nothing.
 
 ## Favourites and playlists
 
-These change, so a grow-only set is not enough. Each is an **operation log**: `add`, `remove`,
-`rename`, `reorder`, each stamped with the writing device and a Lamport counter `seq` that only ever
-increases. Replaying a merged log in `(seq, deviceId)` order gives both devices the same result.
+These change, so a grow-only set is not enough. Each is an **operation log**. Six kinds, written as
+`k`: `create`, `delete`, `rename`, `add`, `remove`, `order`. Each carries the writing device `d` and
+a Lamport counter `s` that is one more than the highest that device has ever seen, its own
+operations and the other's alike. Replaying a merged log in `(seq, deviceId)` order gives both
+devices the same result, whatever order the files arrived in.
 
-The wall-clock time on an operation is for display and retention only. It must not decide anything,
-because two devices' clocks drift, and a phone that was off for a week will insist its clock is
-right.
+The wall-clock time `at` on an operation is for display and retention only. It must not decide
+anything, because two devices' clocks drift, and a phone that was off for a week will insist its
+clock is right.
+
+A playlist is named by its name, which is what both apps already used. That makes `rename` an
+operation rather than a delete and a create, and it makes two devices that independently made a
+playlist of the same name end up with one playlist instead of two — which, for one person with two
+devices, is what they meant. The cost is that two different renames of the same playlist keep the
+later one and drop the other.
+
+The favourites are the operations with no playlist named: `p` is left out rather than set to null.
+
+### Two devices' words for one track
+
+Replaying compares tracks by the identity rule above — hash when both have one, otherwise tags with
+**a second of slack on the duration** — and never by equality of the written-down key. This is not
+an optimisation; equality is the wrong question. The desktop reads a length from a tag and gets
+whole seconds, the phone reads it from MediaStore and gets milliseconds, so one track is `308000`
+in an operation written on one device and `308271` in an operation written on the other. Under
+equality those are two recordings, and the log then quietly does nothing: a removal of a track the
+other device had added, or a reordering of a playlist that came from it, applies to no track at
+all. The playlists still *looked* right throughout, because resolving a key to a local track had
+always allowed the slack — only the log's own arithmetic was strict.
+
+A track already in a playlist keeps the description it arrived with. An operation that mentions it
+in other words does not rewrite it, so what the playlist holds does not shift under the other
+device's feet.
+
+### Order
+
+`order` carries the whole playlist — `ts`, a list of tracks described the same way a single `t` is
+— and not the move that was made. A move cannot be said as "this track to the fourth place",
+because a position is not something two devices can agree about: the fourth place means something
+else on a device that has since added two tracks, and nothing at all on one that removed three.
+
+Replay applies it to what the playlist holds at that moment and to nothing else:
+
+- tracks it names **and the playlist has** take the order it gives;
+- tracks the playlist has that it does **not** name keep their relative order, after those;
+- tracks it names that the playlist does not have are not put back by being mentioned — an order
+  says how to read a playlist, not what is in it;
+- an order for a playlist this log does not have is an order for nothing, and does not create one.
+
+So a track added on one device while the other was arranging the list is not lost; it is at the
+end, and at the same end on both. Two devices arranging at once settle by `(seq, deviceId)` like
+everything else: one of the two arrangements wins whole, which is not a kind answer to the owner
+but is the same answer in both places.
+
+The favourites have no order to set. Neither app stores one — the phone keeps a set of ids and
+shows them in library order, the desktop a set of paths — so `order` always names a playlist, and a
+line that does not is dropped.
+
+### Operations the other device has not heard of
+
+A line whose `k` this version does not know is dropped, and so is one missing what its kind cannot
+do without. That is a real decision rather than an oversight: an older build replaying a log a
+newer one wrote may arrive at a state the newer one would not. Refusing the whole log instead would
+leave the owner with no playlists at all, which is worse and harder to explain. It is also why
+`order` carries a list and not an index — a build that drops it still shows the right tracks, just
+not in the right order.
+
+### On the device
+
+Each app keeps its own `playlist-log.jsonl` next to its sync state: every change made here is
+written there first, numbered under a lock so that two changes a moment apart cannot take the same
+counter. What the app *shows* is then the replay of that log and never the mutation itself. Two
+things follow, both of them bugs that happened before the rule existed: a sync pass can no longer
+take away a change made here, and a change the log refused does not appear to have worked and then
+vanish at the next pass.
+
+What a device already had before any of this existed is **seeded** into the log once, as the
+operations that would have built it — a `create` and an `add` per track, in the order they were in
+— and only after the library has been read, because a track that cannot be described cannot be
+seeded. Seeding before the library is read would write an empty log and mark it done.
+
+A change is pushed five seconds after the last of them, so hearting a dozen tracks is one write.
+The folder is read on every pass, and a pass happens when playback stops, when the library has been
+scanned, when the app comes to the front — and every fifteen seconds while it stays there, because
+a playlist open on one screen and changed on the other must not wait for somebody to do something.
 
 ## The daily mix
 
@@ -434,16 +512,18 @@ Three things must not drift, and each has a guard:
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
 - Everything under `sync/` exists in both repositories and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Nineteen files:
-  the records and the track key, the batch envelope, the merge, the device id, the two writers and
-  the two readers, the matcher, the terms a vector is believed on, the state kept between runs, the
-  coordinator, and the interfaces that keep the folder and the two stores out of all of it.
-- Three pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Twenty-eight
+  files: the records and the track key, the batch envelope, the merge, the device id, the writers
+  and the readers for history, vectors and playlists, the playlist log and its replay, the matcher,
+  the terms a vector is believed on, the state kept between runs, the coordinator, and the
+  interfaces that keep the folder and the stores out of all of it.
+- Four pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
   the folder (`SafSyncFolder` against `FileSyncFolder`), the history store (`PlayHistoryStore`
-  against `PlayLogStore`) and the vector store (`EmbeddingVectorStore` against `DaoVectorStore`).
-  Each is how one platform answers a question only it can: how to reach a folder, where listens are
-  kept, where vectors are kept and what decoder and excerpt a file of its own would have. Everything
-  above them sees only the interfaces.
+  against `PlayLogStore`), the vector store (`EmbeddingVectorStore` against `DaoVectorStore`) and
+  the playlists (`PlaylistShelf` against `M3uShelf`). Each is how one platform answers a question
+  only it can: how to reach a folder, where listens are kept, where vectors are kept and what
+  decoder and excerpt a file of its own would have, and whether a playlist is a blob of MediaStore
+  ids or a file of paths. Everything above them sees only the interfaces.
 - `SyncCoordinator` is where the order of operations *is* the correctness, and it is the one file
   that could not have been a copy: history is a Room table keyed by MediaStore id on one side and an
   appended log keyed by path on the other. So it is generic over what a platform calls a track, and
@@ -466,7 +546,8 @@ Three things must not drift, and each has a guard:
 | Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
 | The listening history knowing which device heard it | done on both sides, with the older store converted in place |
 | Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |
-| Carrying playlists, favourites, the daily mix | not started |
+| Carrying favourites and playlists | done on both sides, including the order tracks are in |
+| Carrying the daily mix | not started |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 

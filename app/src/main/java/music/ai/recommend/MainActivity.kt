@@ -245,6 +245,7 @@ class MainActivity : ComponentActivity() {
                                                     viewModel = viewModel,
                                                     title = name,
                                                     songs = songs,
+                                                    fromPlaylist = name,
                                                     onBack = { playlistNavController.popBackStack() }
                                                 )
                                             }

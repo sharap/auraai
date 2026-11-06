@@ -1,5 +1,6 @@
 package music.ai.recommend.sync
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
 /**
@@ -38,7 +39,9 @@ data class PlaylistOp(
     /** The track, for [Kind.ADD] and [Kind.REMOVE]. */
     val track: TrackKey? = null,
     /** The new name, for [Kind.RENAME]. */
-    val newName: String? = null
+    val newName: String? = null,
+    /** The whole playlist in the order it is to be shown, for [Kind.ORDER]. */
+    val tracks: List<TrackKey> = emptyList()
 ) {
 
     enum class Kind {
@@ -55,7 +58,28 @@ data class PlaylistOp(
         ADD,
 
         /** The track does not belong to it any more. */
-        REMOVE
+        REMOVE,
+
+        /**
+         * The playlist is to be read in this order.
+         *
+         * It carries the whole list rather than "this track to the fourth place", because an
+         * order is a property of the list and a position is not a thing two devices can agree
+         * about: a move to the fourth place means something else if the other device has since
+         * added two tracks, and nothing at all if it removed three. The whole list says what was
+         * meant without depending on what the other one did.
+         *
+         * Replay applies it to what the playlist holds at that moment, and nothing else: tracks
+         * it names and the playlist has take the order given, tracks the playlist has and the
+         * order does not mention keep their relative order after them. So an addition that
+         * crossed paths with a reordering is not lost, it is simply at the end — and both devices
+         * put it in the same place.
+         *
+         * The favourites have no order of their own to set. Neither app stores one: on the phone
+         * they are a set of ids shown in library order, on the desktop a set of paths. So this is
+         * about a named playlist and [playlist] is required.
+         */
+        ORDER
     }
 
     /** Where two operations of the same [seq] are put in order, so both devices agree. */
@@ -68,17 +92,34 @@ data class PlaylistOp(
         addProperty("at", at)
         playlist?.let { addProperty("p", it) }
         newName?.let { addProperty("n", it) }
-        track?.let {
-            add("t", JsonObject().apply {
-                it.hash?.let { hash -> addProperty("h", hash) }
-                addProperty("d", it.durationMs)
-                if (it.artist.isNotEmpty()) addProperty("a", it.artist)
-                if (it.title.isNotEmpty()) addProperty("n", it.title)
-            })
+        track?.let { add("t", it.described()) }
+        if (tracks.isNotEmpty()) {
+            add("ts", JsonArray().apply { tracks.forEach { add(it.described()) } })
         }
     }
 
     companion object {
+
+        /** A track as it is written down, the same shape wherever one appears in a line. */
+        private fun TrackKey.described(): JsonObject = JsonObject().apply {
+            hash?.let { addProperty("h", it) }
+            addProperty("d", durationMs)
+            if (artist.isNotEmpty()) addProperty("a", artist)
+            if (title.isNotEmpty()) addProperty("n", title)
+        }
+
+        /** @return the track, or null when there is not enough of it to name one. */
+        private fun trackOf(key: JsonObject): TrackKey? {
+            val title = key.get("n")?.asString.orEmpty()
+            val hash = key.get("h")?.asString
+            if (title.isEmpty() && hash == null) return null
+            return TrackKey(
+                hash = hash,
+                durationMs = key.get("d")?.asLong ?: 0L,
+                artist = key.get("a")?.asString.orEmpty(),
+                title = title
+            )
+        }
 
         private val Kind.wire: String
             get() = when (this) {
@@ -87,6 +128,7 @@ data class PlaylistOp(
                 Kind.RENAME -> "rename"
                 Kind.ADD -> "add"
                 Kind.REMOVE -> "remove"
+                Kind.ORDER -> "order"
             }
 
         private fun kindOf(wire: String): Kind? = when (wire) {
@@ -95,6 +137,7 @@ data class PlaylistOp(
             "rename" -> Kind.RENAME
             "add" -> Kind.ADD
             "remove" -> Kind.REMOVE
+            "order" -> Kind.ORDER
             else -> null
         }
 
@@ -118,23 +161,20 @@ data class PlaylistOp(
                 if (seq <= 0) return null
                 val playlist = json.get("p")?.asString
                 val newName = json.get("n")?.asString
-                val track = json.getAsJsonObject("t")?.let { key ->
-                    val title = key.get("n")?.asString.orEmpty()
-                    val hash = key.get("h")?.asString
-                    if (title.isEmpty() && hash == null) return null
-                    TrackKey(
-                        hash = hash,
-                        durationMs = key.get("d")?.asLong ?: 0L,
-                        artist = key.get("a")?.asString.orEmpty(),
-                        title = title
-                    )
-                }
+                val track = json.getAsJsonObject("t")?.let { key -> trackOf(key) ?: return null }
+                // One unreadable track makes the whole order unusable rather than one place
+                // wrong: a list with a hole in it is an order nobody asked for, and both devices
+                // dropping the same line keeps them agreeing with each other.
+                val tracks = json.getAsJsonArray("ts")
+                    ?.map { trackOf(it.asJsonObject) ?: return null }
+                    .orEmpty()
                 // What each kind cannot do without. A line missing its subject is not a change, and
                 // guessing at it would mean replaying something nobody asked for.
                 when (kind) {
                     Kind.ADD, Kind.REMOVE -> if (track == null) return null
                     Kind.CREATE, Kind.DELETE -> if (playlist.isNullOrEmpty()) return null
                     Kind.RENAME -> if (playlist.isNullOrEmpty() || newName.isNullOrEmpty()) return null
+                    Kind.ORDER -> if (playlist.isNullOrEmpty() || tracks.isEmpty()) return null
                 }
                 PlaylistOp(
                     kind = kind,
@@ -143,7 +183,8 @@ data class PlaylistOp(
                     at = json.get("at")?.asLong ?: 0L,
                     playlist = playlist,
                     track = track,
-                    newName = newName
+                    newName = newName,
+                    tracks = tracks
                 )
             } catch (e: RuntimeException) {
                 // Gson throws on a number that is a string, a string that is an object, and so on.

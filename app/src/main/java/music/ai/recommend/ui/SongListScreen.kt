@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -25,6 +27,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.R
@@ -35,6 +38,14 @@ fun SongListScreen(
     viewModel: MusicViewModel,
     title: String,
     songs: List<Song>,
+    /**
+     * The playlist these songs are being shown as, when they are one.
+     *
+     * The same screen shows an album, a folder and a playlist, and nothing in a list of songs says
+     * which — so without this a track's menu cannot offer to take it out of where it is being read
+     * from. Null for the other two, and then the menu has no such item.
+     */
+    fromPlaylist: String? = null,
     onBack: () -> Unit
 ) {
     val currentSong by viewModel.currentSong.collectAsState()
@@ -44,6 +55,37 @@ fun SongListScreen(
 
     val listState = rememberLazyListState()
     var selectedSongForMenu by remember { mutableStateOf<Song?>(null) }
+
+    // Changing the order is only a thing where there is an order to change. The favourites are a
+    // set of ids shown in library order and have none of their own, so the list of them is read
+    // and not arranged.
+    val favouritesName = stringResource(id = R.string.favorites)
+    val canReorder = fromPlaylist != null && fromPlaylist != favouritesName
+    var reordering by remember(fromPlaylist) { mutableStateOf(false) }
+    // The order being dragged, which is this screen's for the length of the gesture and the
+    // playlist's again as soon as it is let go.
+    var ordered by remember { mutableStateOf(songs) }
+    // Saved when the finger is lifted, when the mode is left, and when the screen goes away. The
+    // lifting is not enough on its own: a gesture can also end by having its row scrolled out of
+    // the list from under it, and a gesture that ends that way calls nothing back. Asking more
+    // than once costs nothing, because an order that is already the order is not recorded.
+    val saveOrder = { if (fromPlaylist != null) viewModel.reorderPlaylist(fromPlaylist, ordered) }
+    val reorder = rememberDragToReorder(
+        listState = listState,
+        // By the track and not by its place in the list, which is the thing being changed.
+        indexOf = { key -> ordered.indexOfFirst { it.id == key } },
+        onMove = { from, to ->
+            ordered = ordered.toMutableList().apply { add(to, removeAt(from)) }
+        },
+        onDropped = { saveOrder() }
+    )
+    LaunchedEffect(songs, reordering) {
+        // The playlist as it now stands, unless a finger is in the middle of saying otherwise.
+        if (reorder.dragging == null) ordered = songs
+    }
+    DisposableEffect(Unit) {
+        onDispose { if (reordering) saveOrder() }
+    }
     var showPlaylistPicker by remember { mutableStateOf(false) }
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
@@ -55,7 +97,8 @@ fun SongListScreen(
     val currentSongId = currentSong?.id
     LaunchedEffect(currentSongId) {
         // While searching the list shows results, and the index would point at the wrong row.
-        if (currentSongId == null || search.isActive) return@LaunchedEffect
+        // While arranging it, scrolling away from what the owner is holding is worse still.
+        if (currentSongId == null || search.isActive || reordering) return@LaunchedEffect
         val index = songs.indexOfFirst { it.id == currentSongId }
         if (index >= 0) listState.animateScrollToItem(index)
     }
@@ -78,14 +121,37 @@ fun SongListScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = {
-                if (searchOpen) search.clear()
-                searchOpen = !searchOpen
-            }) {
-                Icon(
-                    imageVector = if (searchOpen) Icons.Default.SearchOff else Icons.Default.Search,
-                    contentDescription = stringResource(id = R.string.search_in_album)
-                )
+            if (canReorder) {
+                IconButton(onClick = {
+                    // Any gesture still in the air is ended first, so that what it did is saved
+                    // and the row it was holding is let go of.
+                    reorder.stop()
+                    reordering = !reordering
+                    if (reordering) {
+                        searchOpen = false
+                        search.clear()
+                    } else {
+                        saveOrder()
+                    }
+                }) {
+                    Icon(
+                        imageVector = if (reordering) Icons.Default.Check else Icons.Default.SwapVert,
+                        contentDescription = stringResource(
+                            id = if (reordering) R.string.done else R.string.reorder_tracks
+                        )
+                    )
+                }
+            }
+            if (!reordering) {
+                IconButton(onClick = {
+                    if (searchOpen) search.clear()
+                    searchOpen = !searchOpen
+                }) {
+                    Icon(
+                        imageVector = if (searchOpen) Icons.Default.SearchOff else Icons.Default.Search,
+                        contentDescription = stringResource(id = R.string.search_in_album)
+                    )
+                }
             }
         }
 
@@ -110,7 +176,41 @@ fun SongListScreen(
                 .fillMaxWidth(),
             contentPadding = PaddingValues(16.dp)
         ) {
-            if (search.isActive) {
+            if (reordering) {
+                itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
+                    val held = reorder.dragging == index
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            // The held row is drawn where the finger has it, above the others and
+                            // without the placement animation the rest use to slide out of its way
+                            // — those two would be describing the same row's position at once.
+                            .zIndex(if (held) 1f else 0f)
+                            .graphicsLayer { translationY = reorder.offsetOf(index) }
+                            .then(if (held) Modifier else Modifier.animateItem())
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            SongItem(
+                                song = song,
+                                isActive = song.id == currentSongId,
+                                isScanned = song.id in scannedIds,
+                                isFavorite = song.id in favoriteIds,
+                                onToggleFavorite = { viewModel.toggleFavorite(song.id) },
+                                onClick = { viewModel.playSong(song, ordered) },
+                                onLongClick = { selectedSongForMenu = song }
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.DragHandle,
+                            contentDescription = stringResource(id = R.string.reorder_tracks),
+                            tint = LocalMutedOnBackground.current,
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .reorderHandle(reorder, song.id)
+                        )
+                    }
+                }
+            } else if (search.isActive) {
                 songSearchResults(
                     state = search,
                     plainTitle = searchInTitle,
@@ -150,6 +250,12 @@ fun SongListScreen(
                 },
                 onAddToPlaylist = { showPlaylistPicker = true },
                 onCreatePlaylist = { showNewPlaylistDialog = true },
+                onRemoveFromPlaylist = fromPlaylist?.let { name ->
+                    {
+                        viewModel.removeSongFromPlaylist(name, selected)
+                        selectedSongForMenu = null
+                    }
+                },
                 onDelete = {
                     viewModel.deleteSong(selected)
                     selectedSongForMenu = null
@@ -309,6 +415,8 @@ fun SongContextMenu(
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onCreatePlaylist: () -> Unit,
+    /** Offered only where there is a playlist to take the track out of. */
+    onRemoveFromPlaylist: (() -> Unit)? = null,
     onDelete: () -> Unit
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -343,6 +451,13 @@ fun SongContextMenu(
                 leadingContent = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
                 modifier = Modifier.clickable(onClick = onAddToPlaylist)
             )
+            if (onRemoveFromPlaylist != null) {
+                ListItem(
+                    headlineContent = { Text(stringResource(id = R.string.remove_from_playlist)) },
+                    leadingContent = { Icon(Icons.Default.PlaylistRemove, contentDescription = null) },
+                    modifier = Modifier.clickable(onClick = onRemoveFromPlaylist)
+                )
+            }
             ListItem(
                 headlineContent = { Text(stringResource(id = R.string.delete_from_device)) },
                 leadingContent = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },

@@ -80,6 +80,9 @@
     <string name="add_to_queue">Add to Queue</string>
     <string name="add_to_playlist">Add to Playlist</string>
     <string name="create_new_playlist">Create New Playlist</string>
+    <string name="reorder_tracks">Change Order</string>
+    <string name="done">Done</string>
+    <string name="remove_from_playlist">Remove from Playlist</string>
     <string name="delete_from_device">Delete from Device</string>
     <string name="all_tracks">All Tracks</string>
     <string name="favorites">Favorites</string>

@@ -823,6 +823,52 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         addSongsToPlaylist(playlistName, listOf(song))
     }
 
+    /**
+     * Sets the order of a playlist, as the owner has just dragged it.
+     *
+     * The whole list travels, not the move, because a position means nothing on a device whose
+     * copy of the playlist has changed since. Replay then puts what it is given first and
+     * anything it does not mention after, so a track that arrived while the list was being
+     * dragged about is at the end rather than gone.
+     *
+     * Which is also why what is shown here is not simply [songs]: the re-derivation that follows
+     * the write brings back anything that arrived meanwhile. Showing [songs] alone would drop it
+     * until the next pass.
+     */
+    fun reorderPlaylist(playlistName: String, songs: List<Song>) {
+        // The favourites are rebuilt from a set of ids and shown in library order, so there is no
+        // order of theirs to set; the screen does not offer it there either.
+        if (playlistName == getApplication<Application>().getString(R.string.favorites)) return
+        val before = _playlists.value.find { it.name == playlistName } ?: return
+        if (before.songs.map { it.id } == songs.map { it.id }) return
+        updatePlaylists(_playlists.value.map {
+            if (it.name == playlistName) it.copy(songs = songs) else it
+        })
+        recordPlaylistChanges(
+            listOf(Change(PlaylistOp.Kind.ORDER, playlist = playlistName, tracks = songs))
+        )
+    }
+
+    fun removeSongFromPlaylist(playlistName: String, song: Song) {
+        // Favourites are not a stored playlist but a set of ids rebuilt into one, so taking a
+        // track out of them is unhearting it. Done through [updatePlaylists] it would look like
+        // it worked and be back at the next rebuild, because the ids would not have changed.
+        if (playlistName == getApplication<Application>().getString(R.string.favorites)) {
+            if (song.id in _favoriteSongIds.value) toggleFavorite(song.id)
+            return
+        }
+        val updated = _playlists.value.map { playlist ->
+            if (playlist.name == playlistName) {
+                playlist.copy(songs = playlist.songs.filterNot { it.id == song.id })
+            } else playlist
+        }
+        updatePlaylists(updated)
+        // Recorded whether or not it was there, for the same reason an addition is: replaying the
+        // removal of what a playlist does not hold changes nothing, and deciding that here would
+        // be a second place for the rule to live.
+        recordPlaylistChanges(listOf(Change(PlaylistOp.Kind.REMOVE, playlist = playlistName, track = song)))
+    }
+
     // ------------------------------------------------------------------ playlists that travel
     //
     // The visible state stays where it was — a set of ids and a preferences blob — and every change
@@ -835,7 +881,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val kind: PlaylistOp.Kind,
         val playlist: String? = null,
         val track: Song? = null,
-        val newName: String? = null
+        val newName: String? = null,
+        /** The whole playlist, for [PlaylistOp.Kind.ORDER]. */
+        val tracks: List<Song> = emptyList()
     )
 
     /**
@@ -858,7 +906,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         at = at,
                         playlist = change.playlist,
                         track = change.track?.let { PlaylistShelf.keyOf(it) },
-                        newName = change.newName
+                        newName = change.newName,
+                        tracks = change.tracks.map { PlaylistShelf.keyOf(it) }
                     )
                 }
             }
