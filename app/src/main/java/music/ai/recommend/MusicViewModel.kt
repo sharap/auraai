@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -349,6 +350,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The wait after a playlist change before it is sent; see [settlePlaylists]. */
     private var playlistSettling: Job? = null
+
+    /** Whether the app is in front of the owner right now; see [observeSync]. */
+    private val foreground = MutableStateFlow(false)
 
     /**
      * Every playlist and favourite change this device knows of, its own and the ones that arrived.
@@ -858,6 +862,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+            // What is shown is the replay of the log, so it is re-derived here rather than left as
+            // whatever the mutation did to it. Two things come out of that: a pass can no longer
+            // take away a change made here, and a change the log refused does not appear to have
+            // worked and then vanish at the next pass.
+            runCatching { coordinator()?.showPlaylists() }
             settlePlaylists()
         }
     }
@@ -1960,6 +1969,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 wasScanning = scanning
             }
         }
+        viewModelScope.launch {
+            // While the app is in front of the owner, the folder is read every so often.
+            //
+            // Every other moment that reads it is something the owner did — stopped playback, came
+            // back to the app — and there is one case none of them covers: looking at the screen.
+            // A playlist open on this device while it is changed on the other would sit there
+            // unchanged, because watching it causes nothing. Found exactly that way.
+            //
+            // Only in the foreground, so a phone in a pocket does nothing. The interval is the
+            // governor rather than the throttle, which is why these passes are not throttled.
+            foreground.collectLatest { inFront ->
+                while (inFront) {
+                    delay(FOREGROUND_POLL_MS)
+                    syncPass(force = false, takeIn = true)
+                }
+            }
+        }
         refreshSyncSummary()
     }
 
@@ -2134,7 +2160,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * new about what was played.
      */
     fun syncOnOpen() {
+        foreground.value = true
         viewModelScope.launch { syncPass(force = false, takeIn = true, throttled = true) }
+    }
+
+    /** The app is no longer in front of the owner, so the slow reading of the folder stops. */
+    fun syncOnLeave() {
+        foreground.value = false
     }
 
     /** A pass the owner asked for, which is the same pass with a spinner on it. */
@@ -2220,6 +2252,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
          * one write.
          */
         const val PLAYLIST_SETTLE_MS = 5_000L
+
+        /**
+         * How often the folder is read while the app is in front of the owner.
+         *
+         * Fifteen seconds is the compromise: a change made on the other device shows up while the
+         * owner is still looking at the screen, and a phone with the app open does four folder
+         * reads a minute — which through the storage access framework is a directory listing and,
+         * when something has changed, one small file. Nothing at all when the app is away.
+         */
+        const val FOREGROUND_POLL_MS = 15_000L
 
         /** Below this a track is not a match for the query under any reading. */
         const val MIN_SEARCH_SIMILARITY = 0.15f

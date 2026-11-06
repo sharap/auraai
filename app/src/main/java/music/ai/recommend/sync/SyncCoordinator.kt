@@ -454,7 +454,7 @@ class SyncCoordinator<Track>(
      * being invisible.
      */
     suspend fun pullPlaylists(now: Long): PulledPlaylists {
-        val view = playlists ?: return PulledPlaylists(0, 0, 0, 0, false)
+        playlists ?: return PulledPlaylists(0, 0, 0, 0, false)
         val log = playlistLog ?: return PulledPlaylists(0, 0, 0, 0, false)
         val folder = folder() ?: return PulledPlaylists(0, 0, 0, 0, false)
         val keys = library()
@@ -469,11 +469,33 @@ class SyncCoordinator<Track>(
         }
         state.progress.putAll(outcome.advanced)
 
+        val shown = showPlaylists()
+        state.save()
+        return PulledPlaylists(added, shown.favourites, shown.playlists, shown.unmatched, outcome.more)
+    }
+
+    data class Shown(val favourites: Int, val playlists: Int, val unmatched: Int)
+
+    /**
+     * Replays the log and shows what it says, without touching the folder.
+     *
+     * Called after a change made here as well as after a pass, and that is the point: what is
+     * shown is always the replay of the log, so a pass cannot take away a change this device made
+     * — and a change that could not be written to the log does not appear to have worked and then
+     * quietly vanish when the next pass replaces the state. Being right about the log is the one
+     * thing the whole design rests on, so the view is derived from it and from nothing else.
+     */
+    suspend fun showPlaylists(): Shown {
+        val view = playlists ?: return Shown(0, 0, 0)
+        val log = playlistLog ?: return Shown(0, 0, 0)
+        val keys = library()
+        if (keys.isEmpty()) return Shown(0, 0, 0)
+
         val replayed = PlaylistReplay.replay(log.all())
         val matcher = TrackMatcher(keys.map { (track, key) -> TrackMatcher.Entry(track, key) })
         state.aliases.forEach { (hash, text) ->
             // Spelled by the history store, which is the one that knows how this platform writes
-            // a track down. There is one alias map and all three passes share it.
+            // a track down. There is one alias map and all the passes share it.
             store.fromText(text)?.let { matcher.remember(hash, it) }
         }
 
@@ -489,8 +511,7 @@ class SyncCoordinator<Track>(
 
         state.aliases.clear()
         state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })
-        state.save()
-        return PulledPlaylists(added, favourites.size, lists.size, mentioned - found, outcome.more)
+        return Shown(favourites.size, lists.size, mentioned - found)
     }
 
     /** What this device already had, as the changes that would have built it. */

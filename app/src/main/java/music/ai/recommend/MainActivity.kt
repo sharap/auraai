@@ -114,7 +114,13 @@ class MainActivity : ComponentActivity() {
                 // missed, so the first open is covered too.
                 DisposableEffect(Unit) {
                     val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                        if (event == androidx.lifecycle.Lifecycle.Event.ON_START) viewModel.syncOnOpen()
+                        when (event) {
+                            androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.syncOnOpen()
+                            // And the slow reading of the folder stops when the app goes away: it
+                            // is there for somebody looking at the screen.
+                            androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.syncOnLeave()
+                            else -> Unit
+                        }
                     }
                     lifecycle.addObserver(observer)
                     onDispose { lifecycle.removeObserver(observer) }
