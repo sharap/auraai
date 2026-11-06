@@ -59,12 +59,7 @@ class VectorRecord(
             "v$analysisVersion, ${vector.size} floats)"
 
     fun toJson(): JsonObject = JsonObject().apply {
-        add("k", JsonObject().apply {
-            track.hash?.let { addProperty("h", it) }
-            addProperty("d", track.durationMs)
-            if (track.artist.isNotEmpty()) addProperty("a", track.artist)
-            if (track.title.isNotEmpty()) addProperty("n", track.title)
-        })
+        add("k", track.written())
         addProperty("s", excerptStartMs)
         addProperty("dec", decoder)
         addProperty("m", model)
@@ -82,21 +77,14 @@ class VectorRecord(
         fun fromJson(json: JsonObject): VectorRecord? {
             return try {
                 val key = json.getAsJsonObject("k") ?: return null
-                val title = key.get("n")?.asString.orEmpty()
-                val hash = key.get("h")?.asString
-                if (title.isEmpty() && hash == null) return null
+                val track = TrackKey.read(key) ?: return null
                 val decoder = json.get("dec")?.asString ?: return null
                 val model = json.get("m")?.asString ?: return null
                 if (decoder.isEmpty() || model.isEmpty()) return null
                 val floats = decodeFloats(json.get("f")?.asString ?: return null) ?: return null
                 if (floats.isEmpty()) return null
                 VectorRecord(
-                    track = TrackKey(
-                        hash = hash,
-                        durationMs = key.get("d")?.asLong ?: 0L,
-                        artist = key.get("a")?.asString.orEmpty(),
-                        title = title
-                    ),
+                    track = track,
                     excerptStartMs = json.get("s")?.asLong ?: return null,
                     decoder = decoder,
                     model = model,

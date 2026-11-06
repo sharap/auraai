@@ -32,12 +32,7 @@ data class PlayRecord(
         addProperty("at", playedAt)
         addProperty("ms", playedMs)
         addProperty("len", durationMs)
-        add("k", JsonObject().apply {
-            track.hash?.let { addProperty("h", it) }
-            addProperty("d", track.durationMs)
-            if (track.artist.isNotEmpty()) addProperty("a", track.artist)
-            if (track.title.isNotEmpty()) addProperty("n", track.title)
-        })
+        add("k", track.written())
     }
 
     companion object {
@@ -51,19 +46,12 @@ data class PlayRecord(
             return try {
                 val key = json.getAsJsonObject("k") ?: return null
                 val playedAt = json.get("at")?.asLong ?: return null
-                val title = key.get("n")?.asString.orEmpty()
-                val hash = key.get("h")?.asString
-                if (title.isEmpty() && hash == null) return null
+                val track = TrackKey.read(key) ?: return null
                 PlayRecord(
                     playedAt = playedAt,
                     playedMs = json.get("ms")?.asLong ?: 0L,
                     durationMs = json.get("len")?.asLong ?: 0L,
-                    track = TrackKey(
-                        hash = hash,
-                        durationMs = key.get("d")?.asLong ?: 0L,
-                        artist = key.get("a")?.asString.orEmpty(),
-                        title = title
-                    )
+                    track = track
                 )
             } catch (e: RuntimeException) {
                 // Gson throws on a number that is a string, a string that is an object, and so on.

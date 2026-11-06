@@ -1,5 +1,6 @@
 package music.ai.recommend.sync
 
+import com.google.gson.JsonObject
 import java.text.Normalizer
 
 /**
@@ -52,7 +53,38 @@ data class TrackKey(
      */
     val bucket: String get() = "$artist\u0000$title"
 
+    /**
+     * The track as a line of a sync file writes it down.
+     *
+     * Here rather than in each kind of record, because four of them carry a track — a listen, a
+     * vector, a playlist change, the playlist of the day — and a track written one way in one of
+     * them and another way in another would be two tracks to the device reading it. One shape, one
+     * place, one pair of functions.
+     */
+    fun written(): JsonObject = JsonObject().apply {
+        hash?.let { addProperty("h", it) }
+        addProperty("d", durationMs)
+        if (artist.isNotEmpty()) addProperty("a", artist)
+        if (title.isNotEmpty()) addProperty("n", title)
+    }
+
     companion object {
+
+        /**
+         * @return the track, or null when there is not enough of it to name one. A record whose
+         *   track cannot be read is not a record: see each caller's own fromJson.
+         */
+        fun read(json: JsonObject): TrackKey? {
+            val title = json.get("n")?.asString.orEmpty()
+            val hash = json.get("h")?.asString
+            if (title.isEmpty() && hash == null) return null
+            return TrackKey(
+                hash = hash,
+                durationMs = json.get("d")?.asLong ?: 0L,
+                artist = json.get("a")?.asString.orEmpty(),
+                title = title
+            )
+        }
 
         /** How far two readings of the same track's length may differ. */
         const val DURATION_SLACK_MS = 1_000L
@@ -106,6 +138,18 @@ data class TrackKey(
          */
         private val NOTHING_SAID = setOf("<unknown>", "unknown", "unknown artist")
 
+        /**
+         * Characters that take up no space and say nothing: the byte order mark, the zero-width
+         * spaces and joiners, the word joiner, the soft hyphen. Dropped rather than turned into
+         * spaces, so that a name carrying one is the same name as one that does not.
+         */
+        private val INVISIBLE = setOf(
+            '\uFEFF',                       // byte order mark, what a tag reader leaves at the front
+            '\u200B', '\u200C', '\u200D',    // zero-width space, non-joiner, joiner
+            '\u2060',                       // word joiner
+            '\u00AD'                        // soft hyphen
+        )
+
         private val SEPARATOR = Regex("""\s+[-\u2013\u2014]\s+""")
 
         /**
@@ -125,13 +169,19 @@ data class TrackKey(
         }
 
         /**
-         * Lower case, one spelling of each letter, one kind of space and dash, nothing else.
+         * Lower case, one spelling of each letter, one kind of space and dash, nothing invisible.
          *
          * Normalisation has to be the same on both devices down to the character, because it
          * decides whether a listen lands on the right track or on no track at all. It stays
          * deliberately shallow: case, accents' encoding, whitespace and the three dashes are
          * noise, while everything in brackets is not — "(Remix)" and "(Live)" are different
          * recordings and must not be folded together.
+         *
+         * The invisible characters are dropped for a reason found in the folder rather than
+         * imagined: the desktop's tag reader hands back a byte order mark at the front of a tag
+         * where MediaStore has already swallowed it, so one device wrote a title the other could
+         * never match although both had the same file. A character nobody can see must not be
+         * able to decide that two devices are talking about different music.
          */
         fun normalise(text: String): String {
             if (text.isEmpty()) return ""
@@ -139,6 +189,7 @@ data class TrackKey(
             val builder = StringBuilder(composed.length)
             var pendingSpace = false
             for (character in composed) {
+                if (character in INVISIBLE) continue
                 val mapped = when (character) {
                     '–', '—', '−' -> '-'   // en dash, em dash, minus
                     ' ', ' ', ' ' -> ' '   // the non-breaking spaces

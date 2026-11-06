@@ -152,4 +152,27 @@ class TrackDescriptionTest {
         assertEquals(phone.bucket, desktop.bucket)
         org.junit.Assert.assertTrue(phone.matches(desktop))
     }
+
+    @Test
+    fun aCharacterNobodyCanSeeDoesNotMakeItAnotherTrack() {
+        // Found in the folder, not imagined. The desktop's tag reader hands back the byte order
+        // mark at the front of a tag; MediaStore has already swallowed it. So one device wrote
+        // "\uFEFFмементо мори" and the other "мементо мори" for the same file, and the two could
+        // never be the same track: no listen of it travelled, no vector of it was accepted, and
+        // in a playlist it would have been two entries.
+        val desktop = TrackKey.describe("\uFEFFксюшенька.", "\uFEFFмементо мори", "01.mp3", 153_000)
+        val phone = TrackKey.describe("ксюшенька.", "мементо мори", "01.mp3", 153_260)
+        assertEquals(phone.artist, desktop.artist)
+        assertEquals(phone.title, desktop.title)
+        assertEquals(phone.bucket, desktop.bucket)
+        org.junit.Assert.assertTrue(phone.matches(desktop))
+
+        // The others that take up no space and say nothing, including inside a name.
+        assertEquals("abc", TrackKey.normalise("a\u200Bb\u200Dc"))
+        assertEquals("abc", TrackKey.normalise("ab\u00ADc"))
+        assertEquals("a b", TrackKey.normalise("a \u2060 b"))
+        // And a name that is nothing but invisible characters is nothing at all, rather than a
+        // name made of them that only one device would ever write.
+        assertEquals("", TrackKey.normalise("\uFEFF\u200B"))
+    }
 }

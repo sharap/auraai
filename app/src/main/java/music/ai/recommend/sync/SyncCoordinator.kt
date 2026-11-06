@@ -39,6 +39,8 @@ class SyncCoordinator<Track>(
     /** This device's playlists and favourites, with the log they are the view of. */
     private val playlists: PlaylistStore<Track>? = null,
     private val playlistLog: PlaylistLog? = null,
+    /** This device's playlist of the day, or null for a build that does not carry it. */
+    private val mix: MixStore<Track>? = null,
     /**
      * How many vectors one pass offers.
      *
@@ -58,6 +60,8 @@ class SyncCoordinator<Track>(
     private val vectorWriter = VectorWriter(deviceId, Relay(), state.vectorSequence)
 
     private val playlistWriter = PlaylistWriter(deviceId, Relay(), state.playlistSequence)
+
+    private val mixWriter = MixWriter(deviceId, Relay(), state.mixSequence)
 
     /** Rows handed to the writer but not yet on disk; lost on restart, which re-reads them. */
     private var offeredUpTo = state.exportedUpTo
@@ -472,6 +476,109 @@ class SyncCoordinator<Track>(
         val shown = showPlaylists()
         state.save()
         return PulledPlaylists(added, shown.favourites, shown.playlists, shown.unmatched, outcome.more)
+    }
+
+    data class PushedMix(val written: Int, val day: String?, val attempt: Int)
+
+    data class PulledMix(
+        val adopted: Boolean,
+        val day: String?,
+        /** Tracks of the adopted mix found in this library. */
+        val tracks: Int,
+        /** Tracks it named that this library does not hold. */
+        val unmatched: Int
+    )
+
+    /**
+     * Offers this device's playlist of the day, once per mix it built itself.
+     *
+     * Once, because a mix is not a change to be merged but an opinion that stands until it is
+     * replaced: writing it again on every pass would be the same line over and over in the folder
+     * for no one's benefit. [SyncState.mixPublished] remembers which one went out, by day and
+     * attempt, so the next one the owner asks for goes out immediately.
+     */
+    suspend fun pushMix(now: Long): PushedMix {
+        val view = mix ?: return PushedMix(0, null, 0)
+        if (folder() == null) return PushedMix(0, null, 0)
+        val keys = library()
+        if (keys.isEmpty()) return PushedMix(0, null, 0)
+        val own = view.current() ?: return PushedMix(0, null, 0)
+        // A mix taken from the other device is not this device's to publish. Claiming it would
+        // put two records of one list in the folder and let the two devices take turns winning
+        // the day on the strength of their names.
+        if (own.from != null) return PushedMix(0, own.day, own.attempt)
+
+        val stamp = "${own.day}#${own.attempt}"
+        if (state.mixPublished == stamp) return PushedMix(0, own.day, own.attempt)
+
+        // A track whose file has gone cannot be named to anybody; the rest of the mix still can,
+        // and a mix one track short is better than no mix travelling at all.
+        val described = own.tracks.mapNotNull { keys[it] }
+        if (described.isEmpty()) return PushedMix(0, own.day, own.attempt)
+
+        mixWriter.offer(MixRecord(own.day, own.attempt, deviceId, described))
+        val written = mixWriter.flush(now, force = true)
+        if (written > 0 && mixWriter.pending == 0) {
+            state.mixSequence = mixWriter.sequence
+            state.mixPublished = stamp
+            state.save()
+        }
+        return PushedMix(written, own.day, own.attempt)
+    }
+
+    /**
+     * Takes the other device's mix for today when it stands above this device's.
+     *
+     * Only today's: a record for another day is of no use to anybody once that day is over, and a
+     * record for a day this device has not reached yet — two time zones, or a few minutes either
+     * side of midnight — is not today's mix here. Those are read and dropped rather than applied.
+     */
+    suspend fun pullMix(now: Long): PulledMix {
+        val view = mix ?: return PulledMix(false, null, 0, 0)
+        val folder = folder() ?: return PulledMix(false, null, 0, 0)
+        val keys = library()
+        // Before the library is read, a mix cannot be matched against anything — and marking the
+        // files read would throw away today's mix for good, since nothing keeps these records.
+        if (keys.isEmpty()) return PulledMix(false, null, 0, 0)
+
+        val today = view.today()
+        val outcome = MixReader(deviceId, folder, state.progress).read()
+        state.progress.putAll(outcome.advanced)
+
+        val offered = MixRecord.best(outcome.records, today)
+        if (offered == null) {
+            state.save()
+            return PulledMix(false, today, 0, 0)
+        }
+
+        val ours = view.current()?.takeIf { it.day == today }
+        if (ours != null) {
+            val mine = ours.attempt to (ours.from ?: deviceId)
+            // Equal counts as ours: that is the case where this device has already adopted this
+            // very mix, and adopting it again would be work for nothing.
+            if (compareValuesBy(mine, offered.order, { it.first }, { it.second }) >= 0) {
+                state.save()
+                return PulledMix(false, today, 0, 0)
+            }
+        }
+
+        val matcher = TrackMatcher(keys.map { (track, key) -> TrackMatcher.Entry(track, key) })
+        state.aliases.forEach { (hash, text) ->
+            store.fromText(text)?.let { matcher.remember(hash, it) }
+        }
+        val tracks = offered.tracks.mapNotNull { matcher.resolve(it) }
+        if (tracks.isEmpty()) {
+            // Nothing of it is here. Keeping what this device has is better than showing an empty
+            // day, and the record will be met again if the files arrive, because a mix this device
+            // did not adopt leaves its own mix in place and the next pass compares again.
+            state.save()
+            return PulledMix(false, today, 0, offered.tracks.size)
+        }
+        view.adopt(offered.day, offered.attempt, offered.deviceId, tracks)
+        state.aliases.clear()
+        state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })
+        state.save()
+        return PulledMix(true, today, tracks.size, offered.tracks.size - tracks.size)
     }
 
     data class Shown(val favourites: Int, val playlists: Int, val unmatched: Int)

@@ -14,7 +14,7 @@ implementations have to follow the same words or neither can trust what the othe
 | --- | --- | --- |
 | Listening history | yes | the wave and the daily mix are nothing without it |
 | Favourites and playlists | yes | hand-made, and losing them is losing work |
-| The daily mix | yes | so both devices offer the same list on the same day, rather than two |
+| The playlist of the day | yes | so both devices offer the same list on the same day, rather than two |
 | Embeddings | yes | hours of analysis per device, and the same answer on both |
 | Music files | **no** | Syncthing already does that, and does it better |
 | Downloaded model weights | **no** | 390 MB that each device fetches once from Hugging Face |
@@ -157,11 +157,41 @@ The folder is read on every pass, and a pass happens when playback stops, when t
 scanned, when the app comes to the front — and every fifteen seconds while it stays there, because
 a playlist open on one screen and changed on the other must not wait for somebody to do something.
 
-## The daily mix
+## The playlist of the day
 
-`{day, attempt, tracks}`. A device that builds the mix for a day it already has a mix for raises
-`attempt`; the highest `attempt` for a day wins, and ties break by device UUID. So both devices
-show the same list rather than two lists both called "today".
+`{m: day, a: attempt, d: device, ts: [tracks]}`, one record per build, in `mix/`.
+
+This is the only thing in the folder that is not a fact to be merged but an opinion to be agreed
+on. A listen happened; a playlist is the owner's; but today's mix is a list each device is
+perfectly able to invent for itself — which is exactly the problem, because then one person has
+two different lists both called today. So one of them wins and both show it.
+
+Which one: the higher **attempt**, then the higher **device id**. A device raises the attempt when
+it builds another mix for a day it already has one for, which is what the owner asking for a
+different mix does — so a later deliberate act beats an earlier one, and the device id settles the
+case where both built their first mix of the day before meeting. The wall clock decides nothing,
+here as everywhere.
+
+`day` is the **local** calendar date, not UTC: it is the day the owner is living in, and the one
+the mix turns over on at their midnight. A record for a day that is not this device's today is
+read and dropped rather than applied, so two devices in different time zones stop sharing a mix
+near midnight instead of overwriting each other's.
+
+Three rules that each exist to stop a particular kind of damage:
+
+- **An empty mix never travels.** A device whose library is too small to choose from builds
+  nothing, and a record of nothing would otherwise be a way to wipe a good mix on the other side.
+- **A device never publishes a mix it adopted.** Claiming it would put two records of one list in
+  the folder, and the two devices would then take turns winning the day on the strength of their
+  names.
+- **A mix is read in only after the library is.** Nothing keeps these records — unlike a playlist
+  change, a mix has no history worth replaying — so a pass that cannot match tracks yet leaves the
+  folder looking unread. Otherwise the first mix of the day would be lost on whichever device
+  happened to start up second.
+
+A mix that names tracks this library has none of is not adopted: a device shows what it has rather
+than an empty day. One that names some of them is adopted without them, because the alternative is
+two lists called today again.
 
 ## Embeddings
 
@@ -406,17 +436,25 @@ anything:
 
 ```
 <sync folder>/aura/v1/<device id>/history/2026-11-05.jsonl
-                                 /ops.jsonl
-                                 /dailymix.jsonl
-                                 /vectors/0001.bin
-                                 /manifest.json
+                                 /vectors/2026-11-05.jsonl
+                                 /playlists/2026-11-05.jsonl
+                                 /mix/2026-11-05.jsonl
 ```
 
-JSON Lines for everything but the vectors: a file that was copied while being written loses its last
-line, and a reader that skips a line it cannot parse loses one record instead of the file. Each line
-is one sealed batch, as described above, which keeps that property. The vectors are fixed-size
-records in a binary file for the same reason — a truncated tail is a whole number of records plus a
-remainder to ignore — and are sealed in blocks rather than per record.
+Four kinds of thing, four directories, one file per day in each — named in UTC, so that two devices
+agree on which file a batch belongs in whatever their clocks say. The day in a *record* may be the
+owner's local date (the playlist of the day is), but the day in a *file name* never is.
+
+A provider that will not append to an existing document turns each of those files into a directory
+of its own instead, one whole file per batch:
+`playlists/2026-11-05/0001.jsonl`. The reader takes either shape, and the only cost of the second
+is more files. Which one a device uses is settled once, by writing a probe file and reading it
+back, before any real data is written.
+
+JSON Lines throughout: a file that was copied while being written loses its last line, and a reader
+that skips a line it cannot parse loses one record instead of the file. Each line is one sealed
+batch, as described above, which keeps that property — vectors included, where a line is a block of
+records and the floats are base64 inside it.
 
 A device reads every directory but its own and writes only its own. There is no locking, no leader
 and no server. Android reaches the folder through the storage access framework, so the user picks
@@ -512,18 +550,24 @@ Three things must not drift, and each has a guard:
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
 - Everything under `sync/` exists in both repositories and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Twenty-eight
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Thirty-two
   files: the records and the track key, the batch envelope, the merge, the device id, the writers
-  and the readers for history, vectors and playlists, the playlist log and its replay, the matcher,
-  the terms a vector is believed on, the state kept between runs, the coordinator, and the
+  and the readers for history, vectors, playlists and the mix, the playlist log and its replay, the
+  matcher, the terms a vector is believed on, the state kept between runs, the coordinator, and the
   interfaces that keep the folder and the stores out of all of it.
-- Four pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
+- A track is written down in one place and one shape — `TrackKey.written` and `TrackKey.read` —
+  because four kinds of record carry one: a listen, a vector, a playlist change, the mix. Four
+  copies of those four lines is four chances for a device to describe a track in a way the other
+  one reads as a different track.
+- Five pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
   the folder (`SafSyncFolder` against `FileSyncFolder`), the history store (`PlayHistoryStore`
-  against `PlayLogStore`), the vector store (`EmbeddingVectorStore` against `DaoVectorStore`) and
-  the playlists (`PlaylistShelf` against `M3uShelf`). Each is how one platform answers a question
-  only it can: how to reach a folder, where listens are kept, where vectors are kept and what
-  decoder and excerpt a file of its own would have, and whether a playlist is a blob of MediaStore
-  ids or a file of paths. Everything above them sees only the interfaces.
+  against `PlayLogStore`), the vector store (`EmbeddingVectorStore` against `DaoVectorStore`), the
+  playlists (`PlaylistShelf` against `M3uShelf`) and the mix (`MixShelf` against `PathMixShelf`).
+  Each is how one platform answers a question only it can: how to reach a folder, where listens
+  are kept, where vectors are kept and what decoder and excerpt a file of its own would have, and
+  whether a playlist is a blob of MediaStore ids or a file of paths. None of them shares a name
+  with its opposite number, which is what makes "same name, must be a copy" a rule a diff can
+  check. Everything above them sees only the interfaces.
 - `SyncCoordinator` is where the order of operations *is* the correctness, and it is the one file
   that could not have been a copy: history is a Room table keyed by MediaStore id on one side and an
   appended log keyed by path on the other. So it is generic over what a platform calls a track, and
@@ -547,11 +591,11 @@ Three things must not drift, and each has a guard:
 | The listening history knowing which device heard it | done on both sides, with the older store converted in place |
 | Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
-| Carrying the daily mix | not started |
+| Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
 | Keys, pairing, discovery, the socket | with the network transport, not before |
 | Everything else here | designed, not written |
 
 The excerpt had to come first. Until the two sides agreed on which samples to listen to, a synced
 vector described a slightly different ten seconds of the track than the device receiving it would
 have, and a quarter of the collection would have been quietly answering the wrong question. History,
-playlists and the daily mix do not depend on any of this and can be built next.
+playlists and the playlist of the day did not depend on any of it, and were built after.

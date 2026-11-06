@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import music.ai.recommend.history.PlayHistory
+import music.ai.recommend.sync.MixStore
 import music.ai.recommend.model.Song
 import java.io.File
 import java.text.SimpleDateFormat
@@ -34,8 +35,54 @@ class DailyMixBuilder(
     private val gson = Gson()
     private val file get() = File(context.filesDir, "daily_mix.json")
 
-    private class Stored(val day: String, val attempt: Int, val ids: List<Long>, val recent: List<Day>)
+    private class Stored(
+        val day: String,
+        val attempt: Int,
+        val ids: List<Long>,
+        val recent: List<Day>,
+        /** Which device built it, or null when this one did; see [MixStore]. */
+        val from: String? = null
+    )
     private class Day(val day: String, val ids: List<Long>)
+
+    /** Today's playlist as the sync folder needs to hear about it. */
+    data class Offered(val day: String, val attempt: Int, val from: String?, val ids: List<Long>)
+
+    /** The day the playlist is for, by the listener's own calendar. */
+    fun today(now: Long = System.currentTimeMillis()): String = dayOf(now)
+
+    /**
+     * What is stored for today, or null when nothing is.
+     *
+     * Read off the disk rather than taken from what is on the screen, because the attempt and who
+     * built it are part of the answer and only the stored form has them.
+     */
+    suspend fun offered(now: Long = System.currentTimeMillis()): Offered? =
+        withContext(Dispatchers.IO) {
+            val stored = load() ?: return@withContext null
+            if (stored.day != dayOf(now)) return@withContext null
+            if (stored.ids.isEmpty()) return@withContext null
+            Offered(stored.day, stored.attempt, stored.from, stored.ids)
+        }
+
+    /**
+     * Takes a playlist built on another device as today's.
+     *
+     * What was here before goes into the recent days, exactly as a rebuild would do with it: if
+     * the owner asks for another mix later today, the one that was adopted should not come
+     * straight back.
+     */
+    suspend fun adopt(day: String, attempt: Int, from: String, ids: List<Long>) {
+        withContext(Dispatchers.IO) {
+            val stored = load()
+            val recent = buildList {
+                if (stored != null && stored.ids.isNotEmpty()) add(Day(stored.day, stored.ids))
+                addAll(stored?.recent.orEmpty().filter { it.day != stored?.day })
+            }.take(REMEMBERED_DAYS)
+            save(Stored(day, attempt, ids, recent, from))
+            Log.i(TAG, "daily mix for $day adopted from $from: ${ids.size} tracks, attempt $attempt")
+        }
+    }
 
     /**
      * @param rebuild builds a different playlist for today, on request. It replaces today's and
@@ -97,6 +144,7 @@ class DailyMixBuilder(
             seed = DailyMix.seedFor(today, tracks.size) + attempt,
             now = now
         )
+        // Built here, so [Stored.from] is left null: this device is the one that may publish it.
         save(Stored(today, attempt, ids, recent))
         // Logged at info so that an empty playlist can be told from a playlist that was never
         // built, without attaching a debugger to a release build.

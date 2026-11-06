@@ -92,34 +92,13 @@ data class PlaylistOp(
         addProperty("at", at)
         playlist?.let { addProperty("p", it) }
         newName?.let { addProperty("n", it) }
-        track?.let { add("t", it.described()) }
+        track?.let { add("t", it.written()) }
         if (tracks.isNotEmpty()) {
-            add("ts", JsonArray().apply { tracks.forEach { add(it.described()) } })
+            add("ts", JsonArray().apply { tracks.forEach { add(it.written()) } })
         }
     }
 
     companion object {
-
-        /** A track as it is written down, the same shape wherever one appears in a line. */
-        private fun TrackKey.described(): JsonObject = JsonObject().apply {
-            hash?.let { addProperty("h", it) }
-            addProperty("d", durationMs)
-            if (artist.isNotEmpty()) addProperty("a", artist)
-            if (title.isNotEmpty()) addProperty("n", title)
-        }
-
-        /** @return the track, or null when there is not enough of it to name one. */
-        private fun trackOf(key: JsonObject): TrackKey? {
-            val title = key.get("n")?.asString.orEmpty()
-            val hash = key.get("h")?.asString
-            if (title.isEmpty() && hash == null) return null
-            return TrackKey(
-                hash = hash,
-                durationMs = key.get("d")?.asLong ?: 0L,
-                artist = key.get("a")?.asString.orEmpty(),
-                title = title
-            )
-        }
 
         private val Kind.wire: String
             get() = when (this) {
@@ -161,12 +140,12 @@ data class PlaylistOp(
                 if (seq <= 0) return null
                 val playlist = json.get("p")?.asString
                 val newName = json.get("n")?.asString
-                val track = json.getAsJsonObject("t")?.let { key -> trackOf(key) ?: return null }
+                val track = json.getAsJsonObject("t")?.let { key -> TrackKey.read(key) ?: return null }
                 // One unreadable track makes the whole order unusable rather than one place
                 // wrong: a list with a hole in it is an order nobody asked for, and both devices
                 // dropping the same line keeps them agreeing with each other.
                 val tracks = json.getAsJsonArray("ts")
-                    ?.map { trackOf(it.asJsonObject) ?: return null }
+                    ?.map { TrackKey.read(it.asJsonObject) ?: return null }
                     .orEmpty()
                 // What each kind cannot do without. A line missing its subject is not a change, and
                 // guessing at it would mean replaying something nobody asked for.

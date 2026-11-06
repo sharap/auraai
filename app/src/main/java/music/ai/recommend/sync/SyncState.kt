@@ -10,10 +10,11 @@ import java.io.File
  *
  * Four things, and each exists for a reason worth naming.
  *
- * [sequence], [vectorSequence] and [playlistSequence] so that batch numbers keep rising across
- * restarts, which is what makes a gap in the other device's file mean a lost batch rather than a
- * reboot. Three counters because they are three streams of files: one counter for all of them would
- * leave gaps in each, and a reader of one would read the numbers the others had spent as losses.
+ * [sequence], [vectorSequence], [playlistSequence] and [mixSequence] so that batch numbers keep
+ * rising across restarts, which is what makes a gap in the other device's file mean a lost batch
+ * rather than a reboot. Four counters because they are four streams of files: one counter for all
+ * of them would leave gaps in each, and a reader of one would read the numbers the others had
+ * spent as losses.
  *
  * [exportedUpTo] so that this device's own listens go out once: history rows are numbered as they
  * are inserted, so one number says where the outbox got to, and a batch prepared but never written
@@ -51,6 +52,17 @@ class SyncState private constructor(
     var vectorSequence: Long,
     /** The batch counter for playlist changes; a third stream of files, a third counter. */
     var playlistSequence: Long,
+    /** The batch counter for the playlist of the day; a fourth stream, a fourth counter. */
+    var mixSequence: Long,
+    /**
+     * The mix already published, as `day#attempt`, or null when none has been.
+     *
+     * A day and an attempt rather than a counter, because a mix is not a stream of changes but one
+     * opinion per day that is replaced rather than added to. Keeping it stops the same mix being
+     * written out on every pass, and lets the next attempt through the moment the owner asks for
+     * another.
+     */
+    var mixPublished: String?,
     /**
      * The highest counter of this device's own playlist changes already written to the folder.
      *
@@ -97,6 +109,7 @@ class SyncState private constructor(
         json.addProperty("sequence", sequence)
         json.addProperty("vectorSequence", vectorSequence)
         json.addProperty("playlistSequence", playlistSequence)
+        json.addProperty("mixSequence", mixSequence)
         json.addProperty("playlistsPublishedUpTo", playlistsPublishedUpTo)
         json.addProperty("playlistsSeeded", playlistsSeeded)
         json.addProperty("exportedUpTo", exportedUpTo)
@@ -111,6 +124,7 @@ class SyncState private constructor(
         json.add("aliases", JsonObject().apply {
             aliases.forEach { (hash, track) -> addProperty(hash, track) }
         })
+        mixPublished?.let { json.addProperty("mixPublished", it) }
         appendWorks?.let { json.addProperty("appendWorks", it) }
         vectorTerms?.let { json.addProperty("vectorTerms", it) }
 
@@ -137,13 +151,15 @@ class SyncState private constructor(
          * trying to rescue half of it.
          */
         fun load(file: File): SyncState {
-            // Named, because a constructor of twelve fields where several are numbers is one
+            // Named, because a constructor of fourteen fields where several are numbers is one
             // where a positional call compiles and means something else.
             val empty = SyncState(
                 file = file,
                 sequence = 0L,
                 vectorSequence = 0L,
                 playlistSequence = 0L,
+                mixSequence = 0L,
+                mixPublished = null,
                 playlistsPublishedUpTo = 0L,
                 playlistsSeeded = false,
                 exportedUpTo = 0L,
@@ -165,6 +181,8 @@ class SyncState private constructor(
                     sequence = json.get("sequence")?.asLong ?: 0L,
                     vectorSequence = json.get("vectorSequence")?.asLong ?: 0L,
                     playlistSequence = json.get("playlistSequence")?.asLong ?: 0L,
+                    mixSequence = json.get("mixSequence")?.asLong ?: 0L,
+                    mixPublished = json.get("mixPublished")?.asString,
                     playlistsPublishedUpTo = json.get("playlistsPublishedUpTo")?.asLong ?: 0L,
                     playlistsSeeded = json.get("playlistsSeeded")?.asBoolean ?: false,
                     exportedUpTo = json.get("exportedUpTo")?.asLong ?: 0L,

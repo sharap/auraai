@@ -487,6 +487,18 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                 )
             }
 
+            if (summary.mixSent > 0 || summary.mixTakenIn > 0) {
+                Text(
+                    text = stringResource(
+                        id = R.string.sync_mix,
+                        summary.mixSent,
+                        summary.mixTakenIn
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+            }
+
             if (summary.vectorsSent > 0 || summary.vectorsTakenIn > 0) {
                 Text(
                     text = stringResource(
