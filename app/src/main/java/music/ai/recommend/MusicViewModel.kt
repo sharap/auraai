@@ -347,6 +347,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** One pass over the folder at a time; see [syncPass]. */
     private val syncGate = Mutex()
 
+    /** The wait after a playlist change before it is sent; see [settlePlaylists]. */
+    private var playlistSettling: Job? = null
+
     /**
      * Every playlist and favourite change this device knows of, its own and the ones that arrived.
      *
@@ -855,6 +858,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+            settlePlaylists()
+        }
+    }
+
+    /**
+     * Sends playlist changes a few seconds after the last of them.
+     *
+     * A heart tapped is a deliberate act and its absence on the other device is noticed — which is
+     * how this came to light: a track hearted here and one there, and neither moved, because a
+     * change by itself caused no pass and the next one was whenever the app happened to be opened
+     * again. A few seconds rather than at once so that hearting a dozen tracks is one write and not
+     * a dozen; each change restarts the wait.
+     */
+    private fun settlePlaylists() {
+        playlistSettling?.cancel()
+        playlistSettling = viewModelScope.launch {
+            delay(PLAYLIST_SETTLE_MS)
+            syncPass(force = true, takeIn = false)
         }
     }
 
@@ -2019,7 +2040,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val sentChanges = if (pulled == null) null else
+            // On every pass, with no condition at all. A change the owner made has to be able
+            // to go out on its own, and when there is nothing to send this costs a lookup: the
+            // outbox is asked for its own changes past a watermark and answers with none. Tying it
+            // to the kinds of pass that also read the folder was wrong twice over — it left a
+            // hearted track sitting until the app was next opened, and then left it sitting
+            // through the opening too, because coming back to the app forces nothing.
+            val sentChanges =
                 runCatching { coordinator.pushPlaylists(now) }
                     .getOrElse { Log.e(TAG, "Could not write the playlist changes out", it); null }
             val tookChanges = if (pulled == null) null else
@@ -2184,6 +2211,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
          * it: what they will look at is already in the database from the read a moment ago.
          */
         const val PULL_THROTTLE_MS = 60_000L
+
+        /**
+         * How long a playlist change waits for others to join it before being sent.
+         *
+         * Short, because the owner is standing there: hearting a track and switching to the other
+         * device is a thing people do in one movement. Long enough that a dozen hearts in a row are
+         * one write.
+         */
+        const val PLAYLIST_SETTLE_MS = 5_000L
 
         /** Below this a track is not a match for the query under any reading. */
         const val MIN_SEARCH_SIMILARITY = 0.15f
