@@ -36,6 +36,9 @@ class SyncCoordinator<Track>(
     private val note: (String) -> Unit = {},
     /** This device's embeddings, or null for a build that does not carry vectors at all. */
     private val vectors: VectorStore<Track>? = null,
+    /** This device's playlists and favourites, with the log they are the view of. */
+    private val playlists: PlaylistStore<Track>? = null,
+    private val playlistLog: PlaylistLog? = null,
     /**
      * How many vectors one pass offers.
      *
@@ -53,6 +56,8 @@ class SyncCoordinator<Track>(
     private val writer = HistoryWriter(deviceId, Relay(), state.sequence)
 
     private val vectorWriter = VectorWriter(deviceId, Relay(), state.vectorSequence)
+
+    private val playlistWriter = PlaylistWriter(deviceId, Relay(), state.playlistSequence)
 
     /** Rows handed to the writer but not yet on disk; lost on restart, which re-reads them. */
     private var offeredUpTo = state.exportedUpTo
@@ -384,6 +389,124 @@ class SyncCoordinator<Track>(
         return PulledVectors(takenIn, refused, unmatched, alreadyHeld, outcome.more)
     }
 
+    data class PushedPlaylists(
+        val written: Int,
+        /** Changes made up out of what this device already had; see [PlaylistStore.current]. */
+        val seeded: Int
+    )
+
+    data class PulledPlaylists(
+        /** Changes added to this device's log. */
+        val takenIn: Int,
+        val favourites: Int,
+        val playlists: Int,
+        /** Tracks the log mentions that this library does not hold — not yet, usually. */
+        val unmatched: Int,
+        val more: Boolean
+    )
+
+    /**
+     * Offers this device's playlist changes to the others.
+     *
+     * The first pass also puts what this device already had into the log, as the changes that
+     * would have built it. Both devices do that, so two playlists of one name become one holding
+     * the tracks of both — which for one person's two devices is the answer they meant, and the
+     * alternative is a device whose playlists never travel at all.
+     */
+    suspend fun pushPlaylists(now: Long): PushedPlaylists {
+        val view = playlists ?: return PushedPlaylists(0, 0)
+        val log = playlistLog ?: return PushedPlaylists(0, 0)
+        if (folder() == null) return PushedPlaylists(0, 0)
+
+        var seeded = 0
+        if (!state.playlistsSeeded) {
+            val current = view.current()
+            if (current != null) {
+                seeded = log.append(seedFrom(current, now, log.nextSeq())) ?: 0
+            }
+            // Marked even when there was nothing to seed, and even when storing it failed: asking
+            // again next pass would describe the same playlists a second time, under new counters,
+            // and every track in them would be added twice over.
+            state.playlistsSeeded = true
+            state.save()
+        }
+
+        val mine = log.own(deviceId, state.playlistsPublishedUpTo, PLAYLIST_PUSH_LIMIT)
+        for (op in mine) playlistWriter.offer(op)
+        val written = playlistWriter.flush(now, force = true)
+        if (written > 0 && playlistWriter.pending == 0) {
+            state.playlistSequence = playlistWriter.sequence
+            state.playlistsPublishedUpTo = mine.maxOf { it.seq }
+            state.save()
+        }
+        return PushedPlaylists(written, seeded)
+    }
+
+    /**
+     * Takes in what the others changed, folds it into the log, and shows what the log now says.
+     *
+     * The showing happens on every pass and not only when something arrived: a change already in
+     * the log may mention a track that has only just been copied over, and this is where it stops
+     * being invisible.
+     */
+    suspend fun pullPlaylists(now: Long): PulledPlaylists {
+        val view = playlists ?: return PulledPlaylists(0, 0, 0, 0, false)
+        val log = playlistLog ?: return PulledPlaylists(0, 0, 0, 0, false)
+        val folder = folder() ?: return PulledPlaylists(0, 0, 0, 0, false)
+        val keys = library()
+        if (keys.isEmpty()) return PulledPlaylists(0, 0, 0, 0, false)
+
+        val outcome = PlaylistReader(deviceId, folder, state.progress).read()
+        val added = log.append(outcome.ops)
+        if (added == null) {
+            // Not stored, so the folder is left looking unread and the next pass meets it again.
+            note("Could not store ${outcome.ops.size} playlist changes")
+            return PulledPlaylists(0, 0, 0, 0, outcome.more)
+        }
+        state.progress.putAll(outcome.advanced)
+
+        val replayed = PlaylistReplay.replay(log.all())
+        val matcher = TrackMatcher(keys.map { (track, key) -> TrackMatcher.Entry(track, key) })
+        state.aliases.forEach { (hash, text) ->
+            // Spelled by the history store, which is the one that knows how this platform writes
+            // a track down. There is one alias map and all three passes share it.
+            store.fromText(text)?.let { matcher.remember(hash, it) }
+        }
+
+        var mentioned = 0
+        var found = 0
+        fun resolve(tracks: List<TrackKey>): List<Track> {
+            mentioned += tracks.size
+            return tracks.mapNotNull { matcher.resolve(it)?.also { found++ } }
+        }
+        val favourites = resolve(replayed.favourites)
+        val lists = replayed.playlists.mapValues { resolve(it.value) }
+        view.show(favourites, lists)
+
+        state.aliases.clear()
+        state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })
+        state.save()
+        return PulledPlaylists(added, favourites.size, lists.size, mentioned - found, outcome.more)
+    }
+
+    /** What this device already had, as the changes that would have built it. */
+    private fun seedFrom(current: PlaylistReplay.State, now: Long, from: Long): List<PlaylistOp> {
+        var seq = from
+        val ops = ArrayList<PlaylistOp>()
+        for (track in current.favourites) {
+            ops.add(PlaylistOp(PlaylistOp.Kind.ADD, seq++, deviceId, now, null, track))
+        }
+        for ((name, tracks) in current.playlists) {
+            // Created explicitly, so that an empty playlist is seeded as an empty playlist rather
+            // than as nothing at all.
+            ops.add(PlaylistOp(PlaylistOp.Kind.CREATE, seq++, deviceId, now, name))
+            for (track in tracks) {
+                ops.add(PlaylistOp(PlaylistOp.Kind.ADD, seq++, deviceId, now, name, track))
+            }
+        }
+        return ops
+    }
+
     /** The library, or nothing at all: a pass that cannot see it must not conclude anything. */
     private suspend fun library(): Map<Track, TrackKey> = runCatching { store.library() }.getOrElse {
         note("Could not read the library: $it")
@@ -396,6 +519,15 @@ class SyncCoordinator<Track>(
 
         /** How many of this device's listens are described in one pass. */
         const val PUSH_LIMIT = 200
+
+        /**
+         * How many playlist changes are offered in one pass.
+         *
+         * Generous: a change is a couple of hundred bytes, and the first pass of a device with a
+         * few hundred tracks across its playlists wants all of them out at once rather than a
+         * tenth of its playlists appearing on the other side.
+         */
+        const val PLAYLIST_PUSH_LIMIT = 20_000
 
         /** What a device pays for a pass if it does not say; see [publishLimit]. */
         const val DEFAULT_PUBLISH_LIMIT = 500

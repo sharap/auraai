@@ -10,8 +10,10 @@ import java.io.File
  *
  * Four things, and each exists for a reason worth naming.
  *
- * [sequence] and [vectorSequence] so that batch numbers keep rising across restarts, which is what
- * makes a gap in the other device's file mean a lost batch rather than a reboot.
+ * [sequence], [vectorSequence] and [playlistSequence] so that batch numbers keep rising across
+ * restarts, which is what makes a gap in the other device's file mean a lost batch rather than a
+ * reboot. Three counters because they are three streams of files: one counter for all of them would
+ * leave gaps in each, and a reader of one would read the numbers the others had spent as losses.
  *
  * [exportedUpTo] so that this device's own listens go out once: history rows are numbered as they
  * are inserted, so one number says where the outbox got to, and a batch prepared but never written
@@ -47,6 +49,17 @@ class SyncState private constructor(
      * the other had spent and conclude that batches had been lost.
      */
     var vectorSequence: Long,
+    /** The batch counter for playlist changes; a third stream of files, a third counter. */
+    var playlistSequence: Long,
+    /**
+     * The highest counter of this device's own playlist changes already written to the folder.
+     *
+     * One number does for the whole outbox because a device's own changes are numbered upwards:
+     * a change prepared but never written is simply offered again on the next pass.
+     */
+    var playlistsPublishedUpTo: Long,
+    /** Whether the playlists this device already had have been put into the log; see [PlaylistStore.current]. */
+    var playlistsSeeded: Boolean,
     /** The highest history row id already written to the folder. */
     var exportedUpTo: Long,
     val progress: MutableMap<String, Int>,
@@ -83,6 +96,9 @@ class SyncState private constructor(
         json.addProperty("v", 1)
         json.addProperty("sequence", sequence)
         json.addProperty("vectorSequence", vectorSequence)
+        json.addProperty("playlistSequence", playlistSequence)
+        json.addProperty("playlistsPublishedUpTo", playlistsPublishedUpTo)
+        json.addProperty("playlistsSeeded", playlistsSeeded)
         json.addProperty("exportedUpTo", exportedUpTo)
         json.add("progress", JsonObject().apply {
             progress.forEach { (path, lines) -> addProperty(path, lines) }
@@ -121,7 +137,22 @@ class SyncState private constructor(
          * trying to rescue half of it.
          */
         fun load(file: File): SyncState {
-            val empty = SyncState(file, 0L, 0L, 0L, HashMap(), ArrayList(), HashMap(), null, null)
+            // Named, because a constructor of twelve fields where several are numbers is one
+            // where a positional call compiles and means something else.
+            val empty = SyncState(
+                file = file,
+                sequence = 0L,
+                vectorSequence = 0L,
+                playlistSequence = 0L,
+                playlistsPublishedUpTo = 0L,
+                playlistsSeeded = false,
+                exportedUpTo = 0L,
+                progress = HashMap(),
+                unresolved = ArrayList(),
+                aliases = HashMap(),
+                appendWorks = null,
+                vectorTerms = null
+            )
             val json = try {
                 if (!file.isFile) return empty
                 JsonParser.parseString(file.readText()) as? JsonObject ?: return empty
@@ -133,6 +164,9 @@ class SyncState private constructor(
                     file = file,
                     sequence = json.get("sequence")?.asLong ?: 0L,
                     vectorSequence = json.get("vectorSequence")?.asLong ?: 0L,
+                    playlistSequence = json.get("playlistSequence")?.asLong ?: 0L,
+                    playlistsPublishedUpTo = json.get("playlistsPublishedUpTo")?.asLong ?: 0L,
+                    playlistsSeeded = json.get("playlistsSeeded")?.asBoolean ?: false,
                     exportedUpTo = json.get("exportedUpTo")?.asLong ?: 0L,
                     progress = HashMap<String, Int>().apply {
                         json.getAsJsonObject("progress")?.entrySet()?.forEach { (path, lines) ->
