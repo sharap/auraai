@@ -111,7 +111,7 @@ class HistoryMergeTest {
             durationMs = 234_567,
             track = TrackKey("ab".repeat(32), 234_567, "мельница", "дороги")
         )
-        val line = SyncBatch("phone", 42, SyncBatch.SEALING_NONE, listOf(original.toJson())).encode()
+        val line = SyncBatch("phone", 42, SyncBatch.SEALING_NONE, listOf(original.toJson())).encode()!!
         val batch = SyncBatch.decode(line)!!
         assertEquals("phone", batch.deviceId)
         assertEquals(42L, batch.sequence)
@@ -120,7 +120,7 @@ class HistoryMergeTest {
 
     @Test
     fun anEmptyBatchIsStillAValidLine() {
-        val line = SyncBatch("phone", 1, SyncBatch.SEALING_NONE, emptyList()).encode()
+        val line = SyncBatch("phone", 1, SyncBatch.SEALING_NONE, emptyList()).encode()!!
         assertEquals(emptyList<Any>(), SyncBatch.decode(line)!!.records)
     }
 

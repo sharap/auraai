@@ -49,7 +49,7 @@ class HistoryReaderTest {
         val records = titles.mapIndexed { i, title ->
             listen(now - 3_600_000L + sequence * 60_000L + i * 1_000L, title)
         }
-        return SyncBatch(deviceId, sequence, SyncBatch.SEALING_NONE, records.map { it.toJson() }).encode()
+        return SyncBatch(deviceId, sequence, SyncBatch.SEALING_NONE, records.map { it.toJson() }).encode()!!
     }
 
     /**

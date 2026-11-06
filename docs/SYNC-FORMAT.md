@@ -391,9 +391,9 @@ and an authentication tag is paid per batch instead of per play:
 | --- | --- |
 | `d` | the writing device's id, also the directory the file sits in |
 | `n` | that device's batch counter, so a missing batch is visible as a gap |
-| `e` | what sealed it: `none` until a key exists, then `a256gcm` |
+| `e` | what sealed it: `none` for a folder with no phrase set, otherwise `a256gcm` |
 | `iv` | the nonce: the device id's first four bytes, then `n` as eight — so it cannot repeat |
-| `ct` | the sealed batch, or the records themselves when `e` is `none` |
+| `ct` | the sealed batch as base64, or the records themselves when `e` is `none` |
 
 `d`, `n` and `e` are the associated data, so a batch cannot be moved to another device's file or
 renumbered without the seal failing. A truncated line loses that batch and nothing else, which is
@@ -404,30 +404,61 @@ deleted tail from a tail that has not synced yet, and no scheme fixes that witho
 channel to ask the other device what it believes it wrote. Gaps in the middle are caught by `n`;
 the tail is accepted as a known limit.
 
-### Keys and pairing
+### The key, as it is today
 
-The device id is a random 128-bit value generated once — it needs no cryptographic structure, since
-the shared key does the authenticating. The shared key lives in the Android keystore, hardware-backed
-and non-exportable for use, with a copy sealed under it for the one operation that needs the key
-itself: showing it to a new device. On the desktop it is a file no wider than its owner.
+**A phrase the owner types on both devices.** The key is derived from it per *writing* device:
+PBKDF2-HMAC-SHA256, 200 000 rounds, salted with that device's id — which is a random 128-bit value,
+so it is a proper salt and nothing can be precomputed against this app in general. A reader derives
+the key for the device whose file it is opening and keeps it for the run; the derivation is
+deliberately expensive and happens once.
 
-Pairing is the one window an attacker on a hostile network could climb through, because before it
-there is nothing to authenticate against. So it is explicit and short-range: one device shows a code
-bound to the key, the other has it typed in or read by camera. Anything that pairs silently over the
-network pairs with whoever answers first.
+Deriving per device buys more than the salt: a key is used by exactly one writer, so its nonces
+cannot collide with another device's, and the nonce is that device's own counter, which never
+repeats. Nonce reuse is the one thing AES-GCM does not forgive, and here it is impossible by
+construction rather than by care.
+
+PBKDF2 is written out by hand in `sync/Sealing.kt` rather than taken from `SecretKeyFactory`, which
+only knows `PBKDF2WithHmacSHA256` from API 26 against this app's 23 — and a key derived one way on
+one device and another way on the other is two keys. The test checks it against the JVM's own
+implementation, which the desktop has.
+
+The phrase is kept in each app's own private storage: the Android preferences, a settings file on
+the desktop. The Android keystore would be better — hardware-backed, non-exportable — but what has
+to be kept is the phrase and not a key made from it, since meeting a new device means deriving a
+new key from it again. That trade belongs with pairing.
+
+Changing the phrase, or setting one for the first time, makes a device **read the folder again from
+the beginning**: a batch that could not be opened is counted as unreadable and marked read, so
+without that, the day the owner fixes a typo on one device, everything the other had sealed would
+stay unread for ever. The same mechanism as a change in what a vector is believed on, and the state
+carries a short name for the phrase in use — `sealingKey` — to notice it.
+
+### Pairing, which is still to come
+
+A phrase typed by a person is weaker than a key exchanged between devices and held in hardware, and
+it is here because it works today over a folder both devices already share. When the local-network
+transport arrives, pairing arrives with it, and it is the one window an attacker could climb
+through: before it there is nothing to authenticate against. So it will be explicit and
+short-range — one device shows a code bound to the key, the other has it typed in or read by
+camera. Anything that pairs silently over the network pairs with whoever answers first.
 
 Discovery deserves the same care for a different reason. A device announcing itself over mDNS tells
 the whole café that its owner runs this app, and usually what their phone is called. So: no
 announcing by default, announcing only while the sync screen is open, and under a name that means
 nothing.
 
-### What of this is needed now
+### What is done and what is not
 
-Almost none of it, which is the point of writing it down early. Syncthing already protects the wire,
-and the first version can write `e: "none"` and still be correct. What cannot wait is the envelope
-itself: three fields reserved now against a format change later, at the moment when the data has
-become worth keeping. Keys, pairing, discovery and the socket all belong with the network transport,
-and not before it.
+Done: the envelope, the sealing, the key from a phrase, and the reading-again that a changed phrase
+needs. A folder with no phrase set writes `e: "none"` and stays readable for ever, so nothing that
+is already in a folder is lost by turning this on — and a device that is handed the phrase goes
+back for what it had stepped over.
+
+Not done, and deliberately with the network transport rather than before it: pairing, the key in
+hardware, discovery, and the socket itself. What sealing buys is that none of those is load-bearing
+any more. The records are opaque before they leave, so a transport is a dumb pipe — Syncthing and
+its relays, a socket on a café's network, a USB stick — and the question of who may carry them stops
+needing an answer.
 
 ## Transport
 
@@ -550,11 +581,11 @@ Three things must not drift, and each has a guard:
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
 - Everything under `sync/` exists in both repositories and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Thirty-two
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Thirty-four
   files: the records and the track key, the batch envelope, the merge, the device id, the writers
   and the readers for history, vectors, playlists and the mix, the playlist log and its replay, the
-  matcher, the terms a vector is believed on, the state kept between runs, the coordinator, and the
-  interfaces that keep the folder and the stores out of all of it.
+  matcher, the terms a vector is believed on, the sealing and the base64 it rides in, the state kept between
+  runs, the coordinator, and the interfaces that keep the folder and the stores out of all of it.
 - A track is written down in one place and one shape — `TrackKey.written` and `TrackKey.read` —
   because four kinds of record carry one: a listen, a vector, a playlist change, the mix. Four
   copies of those four lines is four chances for a device to describe a track in a way the other
@@ -584,7 +615,8 @@ Three things must not drift, and each has a guard:
 | A shared mp3 decoder | done on both sides, and confirmed on a phone: same samples, same features, same vector |
 | A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
 | The record format, the track key and the merge | written and tested, shared code on both sides |
-| The envelope's three fields | there, with sealing off |
+| The envelope, and sealing the payload | done on both sides: AES-256-GCM under a phrase the owner types, plain text until they do |
+| Pairing, the key in hardware, discovery | with the network transport, not before |
 | The device id, the writer and the reader | written and tested, the folder behind an interface |
 | Matching a key to a local track | written and tested |
 | Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
@@ -592,7 +624,7 @@ Three things must not drift, and each has a guard:
 | Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
 | Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
-| Keys, pairing, discovery, the socket | with the network transport, not before |
+| The socket itself | not started |
 | Everything else here | designed, not written |
 
 The excerpt had to come first. Until the two sides agreed on which samples to listen to, a synced

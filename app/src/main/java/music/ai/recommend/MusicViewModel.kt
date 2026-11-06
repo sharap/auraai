@@ -64,7 +64,9 @@ import music.ai.recommend.sync.EmbeddingVectorStore
 import music.ai.recommend.sync.PlayHistoryStore
 import music.ai.recommend.sync.PlaylistLog
 import music.ai.recommend.sync.PlaylistOp
+import music.ai.recommend.sync.GcmSealing
 import music.ai.recommend.sync.MixShelf
+import music.ai.recommend.sync.Sealing
 import music.ai.recommend.sync.PlaylistShelf
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
@@ -338,6 +340,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** Playlists of the day offered to the other devices, and taken from them. */
         val mixSent: Int = 0,
         val mixTakenIn: Int = 0,
+        /** Whether what this device writes into the folder is sealed; see [GcmSealing]. */
+        val sealed: Boolean = false,
         val waiting: Int = 0,
         val busy: Boolean = false,
         val lastRunAt: Long = 0L
@@ -1955,6 +1959,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // arrived the first time — the app would not open at all.
 
     /** The folder itself, rebuilt whenever the choice changes and null until one is made. */
+    /** The phrase in use and what was made from it, so a key is derived once and not per pass. */
+    private var sealingInUse: Pair<String, Sealing>? = null
+
+    /**
+     * What seals what this device writes and opens what it reads, or null while no phrase is set.
+     *
+     * Asked on every pass rather than held, because the owner can set, correct or clear the phrase
+     * while the app is running — and because what is cached is the expensive part: deriving the
+     * key takes two hundred thousand rounds of PBKDF2, and that must not happen twice.
+     */
+    private fun syncSealing(): Sealing? {
+        val phrase = prefs.getString(KEY_SYNC_PHRASE, null)?.takeIf { it.isNotEmpty() } ?: return null
+        sealingInUse?.let { (held, sealing) -> if (held == phrase) return sealing }
+        return GcmSealing(phrase).also { sealingInUse = phrase to it }
+    }
+
+    /**
+     * Sets the phrase, or clears it when given nothing.
+     *
+     * Trimmed at both ends, because the same phrase typed on two devices is the whole mechanism
+     * and a trailing space is invisible. The pass that follows writes under the new phrase and
+     * reads the folder again from the beginning: everything the other device sealed was stepped
+     * over while this one could not open it.
+     */
+    fun setSyncPhrase(text: String) {
+        val phrase = text.trim()
+        prefs.edit().putString(KEY_SYNC_PHRASE, phrase).apply()
+        sealingInUse = null
+        _syncSummary.value = _syncSummary.value.copy(sealed = phrase.isNotEmpty())
+        viewModelScope.launch { syncPass(force = true, takeIn = true) }
+    }
+
     private fun syncFolder(): SyncFolder? {
         val uri = prefs.getString(KEY_SYNC_FOLDER, null)?.toUri() ?: return null
         val deviceId = syncDeviceId() ?: return null
@@ -1983,6 +2019,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 onShow = { favourites, playlists -> showMergedPlaylists(favourites, playlists) }
             ),
             playlistLog = playlistLog,
+            sealing = { syncSealing() },
             mix = MixShelf(
                 builder = dailyMixBuilder,
                 songs = { allSongs },
@@ -2264,7 +2301,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val uri = prefs.getString(KEY_SYNC_FOLDER, null)
         _syncSummary.value = _syncSummary.value.copy(
             folder = uri?.let { readableFolderName(it) },
-            deviceId = if (uri == null) "" else syncDeviceId().orEmpty().take(8)
+            deviceId = if (uri == null) "" else syncDeviceId().orEmpty().take(8),
+            sealed = !prefs.getString(KEY_SYNC_PHRASE, null).isNullOrEmpty()
         )
     }
 
@@ -2313,6 +2351,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_SMART_ALBUMS_EPS_SCALE = "smart_albums_eps_scale"
         const val KEY_WAVE_NOVELTY = "wave_novelty"
         const val KEY_SYNC_FOLDER = "sync_folder"
+
+        /**
+         * The phrase the folder is sealed under.
+         *
+         * In the app's own preferences, which no other app can read. The Android keystore would
+         * be better — hardware-backed and non-exportable — but the phrase itself has to be kept,
+         * not only a key made from it: a key is derived per device id, so meeting a new device
+         * means deriving a new key from the phrase again. That trade belongs with pairing, when a
+         * key is exchanged between devices instead of typed by a person.
+         */
+        const val KEY_SYNC_PHRASE = "sync_phrase"
 
         /**
          * How soon after one read the folder may be read again by a pass nobody asked for.

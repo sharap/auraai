@@ -511,6 +511,50 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                 )
             }
 
+            // The phrase, and what the folder looks like without one. Only shown once a folder
+            // has been chosen: before that there is nothing to seal.
+            if (summary.folder != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(
+                        id = if (summary.sealed) R.string.sync_sealed else R.string.sync_not_sealed
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                var phrase by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = phrase,
+                    onValueChange = { phrase = it },
+                    label = { Text(stringResource(id = R.string.sync_phrase)) },
+                    supportingText = { Text(stringResource(id = R.string.sync_phrase_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = {
+                            viewModel.setSyncPhrase(phrase)
+                            phrase = ""
+                        },
+                        enabled = phrase.isNotBlank()
+                    ) {
+                        Text(text = stringResource(id = R.string.sync_phrase_set))
+                    }
+                    if (summary.sealed) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(onClick = {
+                            viewModel.setSyncPhrase("")
+                            phrase = ""
+                        }) {
+                            Text(text = stringResource(id = R.string.sync_phrase_clear))
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = pickFolder) {

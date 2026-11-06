@@ -211,9 +211,9 @@ class VectorTransportTest {
     fun aHalfWrittenTailIsLeftForNextTime() {
         val folder = Folder()
         val good = SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(record("целая").toJson()))
-        folder.put(phone, "vectors/2026-11-05.jsonl", listOf(good.encode()))
+        folder.put(phone, "vectors/2026-11-05.jsonl", listOf(good.encode()!!))
         val truncated = SyncBatch(phone, 2, SyncBatch.SEALING_NONE, listOf(record("обрезанная").toJson()))
-            .encode().dropLast(40)
+            .encode()!!.dropLast(40)
         folder.put(phone, "vectors/2026-11-05.jsonl", listOf(truncated))
 
         val progress = HashMap<String, Int>()
@@ -224,7 +224,7 @@ class VectorTransportTest {
 
         // The rest of that line arrives, and the batch is read whole.
         folder.contents["$phone/vectors/2026-11-05.jsonl"]!!.let { lines ->
-            lines[1] = SyncBatch(phone, 2, SyncBatch.SEALING_NONE, listOf(record("обрезанная").toJson())).encode()
+            lines[1] = SyncBatch(phone, 2, SyncBatch.SEALING_NONE, listOf(record("обрезанная").toJson())).encode()!!
         }
         val second = pass(folder, progress)
         assertEquals(listOf("обрезанная"), second.records.map { it.record.track.title })
@@ -297,7 +297,7 @@ class VectorTransportTest {
         VectorWriter(phone, folder).let { it.offer(record("вектор")); it.flush(now, force = true) }
         val listen = PlayRecord(now, 180_000, 210_000, TrackKey(null, 210_000, "мельница", "вектор"))
         folder.put(phone, HistoryWriter.dayFile(now), listOf(
-            SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(listen.toJson())).encode()
+            SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(listen.toJson())).encode()!!
         ))
 
         val progress = HashMap<String, Int>()

@@ -24,7 +24,9 @@ package music.ai.recommend.sync
 class BatchReader(
     private val ownDeviceId: String,
     private val source: SyncSource,
-    private val progress: Map<String, Int>
+    private val progress: Map<String, Int>,
+    /** What can open a sealed batch, or nothing for a device the owner has set no phrase on. */
+    private val sealing: () -> Sealing? = { null }
 ) {
 
     data class Outcome(
@@ -60,6 +62,9 @@ class BatchReader(
         var linesUnreadable = 0
         var records = 0
         var more = false
+        // Asked once for the pass: deriving a key is deliberately expensive, and the phrase
+        // cannot change in the middle of reading a folder in any way that matters.
+        val seal = sealing()
 
         for (deviceId in source.devices().sorted()) {
             if (deviceId == ownDeviceId) continue
@@ -99,7 +104,7 @@ class BatchReader(
                 var lastFailed = false
                 for (index in consumed until lines.size) {
                     val line = lines[index]
-                    val batch = SyncBatch.decode(line)
+                    val batch = SyncBatch.decode(line, seal)
                     if (batch == null) {
                         if (line.isNotBlank()) linesUnreadable++
                         lastFailed = index == lines.size - 1 && line.isNotBlank()

@@ -80,6 +80,15 @@ class SyncState private constructor(
     /** Whether this folder's provider can append to a document; null until it has been tried. */
     var appendWorks: Boolean?,
     /**
+     * A name for the phrase the folder was last read under, as [GcmSealing.fingerprintOf] gives it.
+     *
+     * Kept for the same reason as [vectorTerms]: a batch that could not be opened is marked read
+     * and never offered again, so without noticing that the phrase has changed, the day the owner
+     * fixes a typo on one device everything written before it would stay unreadable for ever. Null
+     * means the folder was last read with no phrase at all, which is also a change worth noticing.
+     */
+    var sealingKey: String?,
+    /**
      * The terms vectors were last read on, as [VectorTerms.fingerprint] spells them.
      *
      * Kept so that a change of them can undo the reading. A vector refused because it was made by
@@ -125,6 +134,7 @@ class SyncState private constructor(
             aliases.forEach { (hash, track) -> addProperty(hash, track) }
         })
         mixPublished?.let { json.addProperty("mixPublished", it) }
+        sealingKey?.let { json.addProperty("sealingKey", it) }
         appendWorks?.let { json.addProperty("appendWorks", it) }
         vectorTerms?.let { json.addProperty("vectorTerms", it) }
 
@@ -151,7 +161,7 @@ class SyncState private constructor(
          * trying to rescue half of it.
          */
         fun load(file: File): SyncState {
-            // Named, because a constructor of fourteen fields where several are numbers is one
+            // Named, because a constructor of fifteen fields where several are numbers is one
             // where a positional call compiles and means something else.
             val empty = SyncState(
                 file = file,
@@ -167,6 +177,7 @@ class SyncState private constructor(
                 unresolved = ArrayList(),
                 aliases = HashMap(),
                 appendWorks = null,
+                sealingKey = null,
                 vectorTerms = null
             )
             val json = try {
@@ -206,6 +217,7 @@ class SyncState private constructor(
                         }
                     },
                     appendWorks = json.get("appendWorks")?.asBoolean,
+                    sealingKey = json.get("sealingKey")?.asString,
                     vectorTerms = json.get("vectorTerms")?.asString
                 )
             } catch (e: RuntimeException) {

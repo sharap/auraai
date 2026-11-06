@@ -26,7 +26,9 @@ package music.ai.recommend.sync
 class VectorReader(
     private val ownDeviceId: String,
     private val source: SyncSource,
-    private val progress: MutableMap<String, Int>
+    private val progress: MutableMap<String, Int>,
+    /** What can open a sealed batch; see [Sealing]. */
+    private val sealing: () -> Sealing? = { null }
 ) {
 
     /** One device's vector, as read. */
@@ -62,7 +64,7 @@ class VectorReader(
     fun read(maxRecords: Int = MAX_RECORDS): Outcome {
         // The walking lives in [BatchReader]; what is particular here is that no day is ever too
         // old to open — a vector describes a file, not a moment — and that the pass is bounded.
-        val outcome = BatchReader(ownDeviceId, source, progress)
+        val outcome = BatchReader(ownDeviceId, source, progress, sealing)
             .read(inside = VectorWriter.DIRECTORY, maxRecords = maxRecords)
 
         val records = ArrayList<Incoming>()

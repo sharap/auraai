@@ -21,7 +21,9 @@ class VectorWriter(
     deviceId: String,
     sink: SyncSink,
     /** The batch number to carry on from, so numbering survives a restart. */
-    startingSequence: Long = 0L
+    startingSequence: Long = 0L,
+    /** What seals a batch; see [Sealing]. */
+    sealing: () -> Sealing? = { null }
 ) {
 
     private val out = BatchWriter(
@@ -29,7 +31,8 @@ class VectorWriter(
         sink = sink,
         directory = DIRECTORY,
         batchRecords = BATCH_RECORDS,
-        startingSequence = startingSequence
+        startingSequence = startingSequence,
+        sealing = sealing
     )
 
     /** The last batch number written. */

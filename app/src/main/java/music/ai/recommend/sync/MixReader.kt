@@ -12,7 +12,9 @@ package music.ai.recommend.sync
 class MixReader(
     private val ownDeviceId: String,
     private val source: SyncSource,
-    private val progress: Map<String, Int>
+    private val progress: Map<String, Int>,
+    /** What can open a sealed batch; see [Sealing]. */
+    private val sealing: () -> Sealing? = { null }
 ) {
 
     data class Outcome(
@@ -26,7 +28,7 @@ class MixReader(
     )
 
     fun read(maxRecords: Int = MAX_RECORDS): Outcome {
-        val outcome = BatchReader(ownDeviceId, source, progress)
+        val outcome = BatchReader(ownDeviceId, source, progress, sealing)
             .read(inside = MixWriter.DIRECTORY, maxRecords = maxRecords)
 
         val records = ArrayList<MixRecord>()

@@ -42,6 +42,15 @@ class SyncCoordinator<Track>(
     /** This device's playlist of the day, or null for a build that does not carry it. */
     private val mix: MixStore<Track>? = null,
     /**
+     * What seals what this device writes and opens what it reads, or nothing while the owner has
+     * set no phrase.
+     *
+     * A lambda because the phrase can be set, corrected or cleared while the app is running, and
+     * the next batch should be written under whatever is true then. Changing it makes this read
+     * the folder again from the beginning; see [SyncState.sealingKey].
+     */
+    private val sealing: () -> Sealing? = { null },
+    /**
      * How many vectors one pass offers.
      *
      * A device's first exchange is its whole library — four thousand of them, eleven megabytes —
@@ -55,13 +64,13 @@ class SyncCoordinator<Track>(
     private val publishLimit: Int = DEFAULT_PUBLISH_LIMIT
 ) {
 
-    private val writer = HistoryWriter(deviceId, Relay(), state.sequence)
+    private val writer = HistoryWriter(deviceId, Relay(), state.sequence, sealing)
 
-    private val vectorWriter = VectorWriter(deviceId, Relay(), state.vectorSequence)
+    private val vectorWriter = VectorWriter(deviceId, Relay(), state.vectorSequence, sealing)
 
-    private val playlistWriter = PlaylistWriter(deviceId, Relay(), state.playlistSequence)
+    private val playlistWriter = PlaylistWriter(deviceId, Relay(), state.playlistSequence, sealing)
 
-    private val mixWriter = MixWriter(deviceId, Relay(), state.mixSequence)
+    private val mixWriter = MixWriter(deviceId, Relay(), state.mixSequence, sealing)
 
     /** Rows handed to the writer but not yet on disk; lost on restart, which re-reads them. */
     private var offeredUpTo = state.exportedUpTo
@@ -120,9 +129,35 @@ class SyncCoordinator<Track>(
         return Pushed(written, writer.pending, skipped)
     }
 
+    /**
+     * Notices that the phrase has changed, and forgets where reading got to.
+     *
+     * A batch that could not be opened is counted as unreadable and marked read — the same as a
+     * line from a newer version — so a device that had no phrase, or the wrong one, has already
+     * stepped over everything the other device sealed. Clearing the progress is what makes those
+     * batches be offered again, and it is safe to be generous about: history turns away what it
+     * already holds, a vector for a track already analysed here is skipped, and the playlist log
+     * knows its own counters. The cost of being wrong is one long pass; the cost of not doing it
+     * is a folder that stays unreadable until someone deletes the state file.
+     */
+    private fun noticeSealingChange() {
+        val fingerprint = sealing()?.fingerprint
+        if (state.sealingKey == fingerprint) return
+        if (state.progress.isNotEmpty()) {
+            note(
+                if (fingerprint == null) "The sealing phrase was cleared; reading the folder again"
+                else "The sealing phrase changed; reading the folder again from the beginning"
+            )
+            state.progress.clear()
+        }
+        state.sealingKey = fingerprint
+        state.save()
+    }
+
     /** Folds in what the other devices have written. */
     suspend fun pull(now: Long): Pulled {
         val folder = folder() ?: return Pulled(0, state.unresolved.size, emptyMap(), null)
+        noticeSealingChange()
 
         // Asked first, and the pass abandoned if there is none. Reading without a library is not
         // harmless: nothing could be placed, so every record would go to the waiting list — which
@@ -137,7 +172,7 @@ class SyncCoordinator<Track>(
         state.progress.keys.removeAll { !DayFile.isOurs(it.substringAfter('/')) }
 
         val known = store.heldFromOthers(now)
-        val outcome = HistoryReader(deviceId, folder, state.progress).read(known, now, keepDays)
+        val outcome = HistoryReader(deviceId, folder, state.progress, sealing).read(known, now, keepDays)
 
         // Everything that ever failed to match is offered again: the usual reason is a file that
         // had not arrived yet, and by now it may have.
@@ -305,6 +340,7 @@ class SyncCoordinator<Track>(
     suspend fun pullVectors(now: Long): PulledVectors {
         val vectors = vectors ?: return PulledVectors(0, emptyMap(), 0, 0, false)
         val folder = folder() ?: return PulledVectors(0, emptyMap(), 0, 0, false)
+        noticeSealingChange()
         val terms = vectors.terms() ?: return PulledVectors(0, emptyMap(), 0, 0, false)
         val keys = library()
         if (keys.isEmpty()) return PulledVectors(0, emptyMap(), 0, 0, false)
@@ -332,7 +368,7 @@ class SyncCoordinator<Track>(
             state.progress.keys.removeAll { it.contains("/${VectorWriter.DIRECTORY}/") }
         }
 
-        val outcome = VectorReader(deviceId, folder, state.progress).read()
+        val outcome = VectorReader(deviceId, folder, state.progress, sealing).read()
         if (outcome.records.isEmpty()) {
             state.progress.putAll(outcome.advanced)
             state.save()
@@ -461,10 +497,11 @@ class SyncCoordinator<Track>(
         playlists ?: return PulledPlaylists(0, 0, 0, 0, false)
         val log = playlistLog ?: return PulledPlaylists(0, 0, 0, 0, false)
         val folder = folder() ?: return PulledPlaylists(0, 0, 0, 0, false)
+        noticeSealingChange()
         val keys = library()
         if (keys.isEmpty()) return PulledPlaylists(0, 0, 0, 0, false)
 
-        val outcome = PlaylistReader(deviceId, folder, state.progress).read()
+        val outcome = PlaylistReader(deviceId, folder, state.progress, sealing).read()
         val added = log.append(outcome.ops)
         if (added == null) {
             // Not stored, so the folder is left looking unread and the next pass meets it again.
@@ -536,13 +573,14 @@ class SyncCoordinator<Track>(
     suspend fun pullMix(now: Long): PulledMix {
         val view = mix ?: return PulledMix(false, null, 0, 0)
         val folder = folder() ?: return PulledMix(false, null, 0, 0)
+        noticeSealingChange()
         val keys = library()
         // Before the library is read, a mix cannot be matched against anything — and marking the
         // files read would throw away today's mix for good, since nothing keeps these records.
         if (keys.isEmpty()) return PulledMix(false, null, 0, 0)
 
         val today = view.today()
-        val outcome = MixReader(deviceId, folder, state.progress).read()
+        val outcome = MixReader(deviceId, folder, state.progress, sealing).read()
         state.progress.putAll(outcome.advanced)
 
         val offered = MixRecord.best(outcome.records, today)

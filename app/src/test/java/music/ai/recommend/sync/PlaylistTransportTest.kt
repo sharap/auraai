@@ -89,12 +89,12 @@ class PlaylistTransportTest {
         folder.put(phone, PlaylistWriter.dayFile(longAgo), listOf(
             SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(
                 op(PlaylistOp.Kind.CREATE, 1, playlist = "старый").toJson()
-            )).encode()
+            )).encode()!!
         ))
         folder.put(phone, PlaylistWriter.dayFile(now), listOf(
             SyncBatch(phone, 2, SyncBatch.SEALING_NONE, listOf(
                 op(PlaylistOp.Kind.ADD, 2, playlist = "старый", title = "один").toJson()
-            )).encode()
+            )).encode()!!
         ))
 
         val outcome = pass(folder, HashMap())
@@ -127,7 +127,7 @@ class PlaylistTransportTest {
         val future = com.google.gson.JsonParser
             .parseString("""{"k":"reorder","s":2,"d":"$phone","at":$now,"p":"p"}""").asJsonObject
         folder.put(phone, PlaylistWriter.dayFile(now), listOf(
-            SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(known, future)).encode()
+            SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(known, future)).encode()!!
         ))
 
         val outcome = pass(folder, HashMap())
@@ -165,7 +165,7 @@ class PlaylistTransportTest {
         folder.put(phone, HistoryWriter.dayFile(now), listOf(
             SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(
                 PlayRecord(now, 180_000, 200_000, TrackKey(null, 200_000, "мельница", "один")).toJson()
-            )).encode()
+            )).encode()!!
         ))
         folder.put(phone, VectorWriter.dayFile(now), listOf(
             SyncBatch(phone, 1, SyncBatch.SEALING_NONE, listOf(
@@ -173,7 +173,7 @@ class PlaylistTransportTest {
                     TrackKey(null, 200_000, "мельница", "один"), 7_000L,
                     music.ai.recommend.ai.Mp3Excerpt.DECODER, "m", 3, FloatArray(512) { 0.1f }
                 ).toJson()
-            )).encode()
+            )).encode()!!
         ))
 
         val progress = HashMap<String, Int>()

@@ -29,6 +29,11 @@ class BatchWriter(
     private val batchRecords: Int,
     /** How long a part-full batch waits, or zero for no timer. */
     private val intervalMs: Long = 0L,
+    /**
+     * What seals a batch, asked for each one: the owner can set or change the phrase while the
+     * app is running, and the next batch should be written under whatever is true then.
+     */
+    private val sealing: () -> Sealing? = { null },
     /** The batch number to carry on from, so numbering survives a restart. */
     startingSequence: Long = 0L
 ) {
@@ -73,13 +78,17 @@ class BatchWriter(
         if (!force && !isDue(now)) return 0
 
         val taking = if (force) waiting.size else minOf(waiting.size, batchRecords)
+        val seal = sealing()
         val batch = SyncBatch(
             deviceId = deviceId,
             sequence = sequence + 1,
-            sealing = SyncBatch.SEALING_NONE,
+            sealing = seal?.name ?: SyncBatch.SEALING_NONE,
             records = waiting.subList(0, taking).toList()
         )
-        if (!sink.append(dayFile(directory, now), listOf(batch.encode()))) return 0
+        // A batch that could not be sealed is not written in the clear: the records stay and are
+        // offered again, exactly as when the folder itself will not take them.
+        val line = batch.encode(seal) ?: return 0
+        if (!sink.append(dayFile(directory, now), listOf(line))) return 0
 
         sequence = batch.sequence
         lastFlushAt = now

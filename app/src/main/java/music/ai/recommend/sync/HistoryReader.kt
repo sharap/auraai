@@ -27,7 +27,9 @@ package music.ai.recommend.sync
 class HistoryReader(
     private val ownDeviceId: String,
     private val source: SyncSource,
-    private val progress: MutableMap<String, Int>
+    private val progress: MutableMap<String, Int>,
+    /** What can open a sealed batch; see [Sealing]. */
+    private val sealing: () -> Sealing? = { null }
 ) {
 
     data class Outcome(
@@ -53,7 +55,7 @@ class HistoryReader(
         // that is half-written — is the same for every kind of file in the folder and lives in
         // [BatchReader]. What is particular to history is the day it stops caring about and the
         // merge it hands the batches to.
-        val outcome = BatchReader(ownDeviceId, source, progress).read(
+        val outcome = BatchReader(ownDeviceId, source, progress, sealing).read(
             inside = DIRECTORY,
             oldestDay = if (keepDays > 0) dayOf(now - keepDays * DAY_MS) else null
         )

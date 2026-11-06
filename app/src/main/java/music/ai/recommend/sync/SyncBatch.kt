@@ -11,12 +11,14 @@ import com.google.gson.JsonParser
  * paid per flush instead of per listen, and one line rather than one file so that a file copied
  * while it was being written loses that batch and nothing else.
  *
- * [sealing] is `none` for the moment and the records ride in the clear. The field exists from the
- * first version anyway: the three it takes to carry a sealed batch are cheap now and a format
- * change later, at the point where the data has become worth keeping. When a key exists, the
- * records become ciphertext and [deviceId], [sequence] and [sealing] become its associated data,
- * so that a batch cannot be moved into another device's file or renumbered without the seal
- * failing.
+ * [sealing] says what to do with `ct`: `none` and the records are there to read, `a256gcm` and
+ * they are ciphertext with a nonce beside them. A folder written before the owner set a phrase
+ * holds plain batches and stays readable for ever, which is the whole reason the field was there
+ * from the first version.
+ *
+ * [deviceId], [sequence] and [sealing] are the sealed batch's associated data, so a batch cannot
+ * be moved into another device's file, renumbered, or relabelled as unsealed without the seal
+ * failing. See [Sealing].
  *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
@@ -30,12 +32,26 @@ data class SyncBatch(
     val records: List<JsonObject>
 ) {
 
-    fun encode(): String {
+    /**
+     * @param seal what to seal the records with, or null to write them in the clear.
+     * @return the line, or null when sealing was asked for and could not be done. Nothing is
+     *   written then rather than written in the clear — the owner asked for this — and the batch
+     *   number is not spent, so the records are offered again next pass.
+     */
+    fun encode(seal: Sealing? = null): String? {
         val json = JsonObject()
         json.addProperty("d", deviceId)
         json.addProperty("n", sequence)
-        json.addProperty("e", sealing)
-        json.add("ct", JsonArray().apply { records.forEach { add(it) } })
+        val plain = JsonArray().apply { records.forEach { add(it) } }
+        if (seal == null) {
+            json.addProperty("e", SEALING_NONE)
+            json.add("ct", plain)
+        } else {
+            val sealed = seal.seal(deviceId, sequence, plain.toString()) ?: return null
+            json.addProperty("e", seal.name)
+            json.addProperty("iv", sealed.nonce)
+            json.addProperty("ct", sealed.text)
+        }
         return json.toString()
     }
 
@@ -45,11 +61,13 @@ data class SyncBatch(
         const val SEALING_NONE = "none"
 
         /**
-         * @return the batch, or null when the line cannot be used — it is malformed, or truncated
-         *   because the file was copied mid-write, or sealed in a way this version does not know.
-         *   All three mean the same thing to a reader: skip it, and look again next time.
+         * @param seal what can open a sealed batch, or null for a reader that has no phrase.
+         * @return the batch, or null when the line cannot be used — malformed, truncated because
+         *   the file was copied mid-write, sealed in a way this version does not know, or sealed
+         *   under a phrase this device does not have. All of them mean the same thing to a reader:
+         *   skip it, and look again next time.
          */
-        fun decode(line: String): SyncBatch? {
+        fun decode(line: String, seal: Sealing? = null): SyncBatch? {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) return null
             return try {
@@ -57,13 +75,27 @@ data class SyncBatch(
                 val deviceId = json.get("d")?.asString ?: return null
                 if (deviceId.isEmpty()) return null
                 val sealing = json.get("e")?.asString ?: return null
-                if (sealing != SEALING_NONE) return null
-                val array = json.getAsJsonArray("ct") ?: return null
+                val sequence = json.get("n")?.asLong ?: return null
+                val records = when {
+                    sealing == SEALING_NONE ->
+                        (json.getAsJsonArray("ct") ?: return null).mapNotNull { it as? JsonObject }
+                    seal == null || seal.name != sealing -> return null
+                    else -> {
+                        val opened = seal.open(
+                            deviceId = deviceId,
+                            sequence = sequence,
+                            nonce = json.get("iv")?.asString ?: return null,
+                            sealed = json.get("ct")?.asString ?: return null
+                        ) ?: return null
+                        (JsonParser.parseString(opened) as? JsonArray ?: return null)
+                            .mapNotNull { it as? JsonObject }
+                    }
+                }
                 SyncBatch(
                     deviceId = deviceId,
-                    sequence = json.get("n")?.asLong ?: return null,
+                    sequence = sequence,
                     sealing = sealing,
-                    records = array.mapNotNull { it as? JsonObject }
+                    records = records
                 )
             } catch (e: RuntimeException) {
                 // Gson throws on malformed JSON and on a field that is not the type asked for;

@@ -230,6 +230,12 @@
     <string name="sync_counts">Sent %1$d, taken in %2$d</string>
     <string name="sync_waiting">%1$d waiting for their tracks</string>
     <string name="sync_changes">Playlists: sent %1$d, taken in %2$d</string>
+    <string name="sync_sealed">The folder is sealed: what this device writes can only be read with the phrase.</string>
+    <string name="sync_not_sealed">The folder is plain text. Anything on this phone that can read storage can read it.</string>
+    <string name="sync_phrase">Shared phrase</string>
+    <string name="sync_phrase_hint">The same words on both devices. Long rather than clever.</string>
+    <string name="sync_phrase_set">Set the phrase</string>
+    <string name="sync_phrase_clear">Clear</string>
     <string name="sync_mix">Playlist of the day: sent %1$d, taken in %2$d</string>
     <string name="sync_vectors">Vectors: sent %1$d, taken in %2$d</string>
     <string name="sync_vectors_more">more to come</string>

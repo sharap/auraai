@@ -230,6 +230,12 @@
     <string name="sync_counts">Отправлено %1$d, принято %2$d</string>
     <string name="sync_waiting">%1$d ждут своих треков</string>
     <string name="sync_changes">Плейлисты: отправлено %1$d, принято %2$d</string>
+    <string name="sync_sealed">Папка зашифрована: то, что пишет это устройство, читается только с фразой.</string>
+    <string name="sync_not_sealed">Папка лежит открытым текстом. Её прочитает всё на телефоне, что имеет доступ к хранилищу.</string>
+    <string name="sync_phrase">Общая фраза</string>
+    <string name="sync_phrase_hint">Одни и те же слова на обоих устройствах. Лучше длиннее, чем хитрее.</string>
+    <string name="sync_phrase_set">Задать фразу</string>
+    <string name="sync_phrase_clear">Убрать</string>
     <string name="sync_mix">Плейлист дня: отправлен %1$d, принят %2$d</string>
     <string name="sync_vectors">Векторы: отправлено %1$d, принято %2$d</string>
     <string name="sync_vectors_more">ещё не всё</string>
