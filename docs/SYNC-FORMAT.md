@@ -560,6 +560,18 @@ every half hour regardless. The sweep is there because a file observer over a st
 framework tree is not reliable on every Android version, and a periodic look costs less than
 finding out which versions.
 
+Three kinds of line a reader cannot use, and they are not treated alike:
+
+- **A half-written last line.** Left unconsumed, met again next time: the rest of it is on its way.
+- **A line that will not parse in the middle of a file.** Stepped over. In a file that is only ever
+  appended to, the only line that can be half-written is the last one, so this is damage and
+  waiting will not improve it.
+- **A sealed line that will not open.** Left unconsumed wherever in the file it is, and the walk
+  stops there to keep the rest of the file in order. The phrase on this device is not the one the
+  other sealed with, and that does improve by waiting, because somebody fixes it. The count is put
+  in front of the owner — *N batches would not open* — because it is the one way sealing fails, and
+  nothing else would ever mention it.
+
 ## Keeping the two implementations honest
 
 Three things must not drift, and each has a guard:

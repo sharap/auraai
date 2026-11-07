@@ -42,6 +42,8 @@ class HistoryReader(
         val filesUnavailable: Int,
         /** Lines that would not decode, the half-written tails among them. */
         val linesUnreadable: Int,
+        /** Of those, the ones that are sealed and did not open; see [BatchReader.Outcome]. */
+        val linesSealed: Int,
         /** How many lines of each file this pass consumed, for the caller to record afterwards. */
         val advanced: Map<String, Int>
     )
@@ -66,6 +68,7 @@ class HistoryReader(
             filesSkipped = outcome.filesSkipped,
             filesUnavailable = outcome.filesUnavailable,
             linesUnreadable = outcome.linesUnreadable,
+            linesSealed = outcome.linesSealed,
             advanced = outcome.advanced
         )
     }

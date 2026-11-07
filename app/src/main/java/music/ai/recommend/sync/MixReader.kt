@@ -23,6 +23,8 @@ class MixReader(
         val filesUnavailable: Int,
         /** Lines that would not decode, the half-written tails among them. */
         val linesUnreadable: Int,
+        /** Of those, the ones that are sealed and did not open; see [BatchReader.Outcome]. */
+        val linesSealed: Int,
         /** How many lines of each file this pass consumed, for the caller to record afterwards. */
         val advanced: Map<String, Int>
     )
@@ -49,6 +51,7 @@ class MixReader(
             filesRead = outcome.filesRead,
             filesUnavailable = outcome.filesUnavailable,
             linesUnreadable = unreadable,
+            linesSealed = outcome.linesSealed,
             advanced = outcome.advanced
         )
     }

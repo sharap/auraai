@@ -61,6 +61,22 @@ data class SyncBatch(
         const val SEALING_NONE = "none"
 
         /**
+         * What sealed a line, without opening it: `none`, a name this version may or may not know,
+         * or null for a line that is not one of ours at all.
+         *
+         * For telling the two reasons a line was no use apart. A line that will not parse is
+         * damage or a half-written tail; a line that parses and is sealed in a way this device
+         * cannot open is almost always the owner having typed a different phrase on the other
+         * device — and that one must be said out loud, because it is the only way this whole
+         * feature fails, and it fails silently.
+         */
+        fun sealingOf(line: String): String? = try {
+            (JsonParser.parseString(line.trim()) as? JsonObject)?.get("e")?.asString
+        } catch (e: RuntimeException) {
+            null
+        }
+
+        /**
          * @param seal what can open a sealed batch, or null for a reader that has no phrase.
          * @return the batch, or null when the line cannot be used — malformed, truncated because
          *   the file was copied mid-write, sealed in a way this version does not know, or sealed

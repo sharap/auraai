@@ -342,6 +342,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val mixTakenIn: Int = 0,
         /** Whether what this device writes into the folder is sealed; see [GcmSealing]. */
         val sealed: Boolean = false,
+        /**
+         * Sealed batches met in the folder that would not open.
+         *
+         * Shown because it is the only way this fails: the phrase typed here differs from the one
+         * typed there, and nothing else would ever say so — a batch that does not open is counted
+         * as unreadable and stepped over.
+         */
+        val unopened: Int = 0,
         val waiting: Int = 0,
         val busy: Boolean = false,
         val lastRunAt: Long = 0L
@@ -2224,6 +2232,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     changesTakenIn = it.changesTakenIn + (tookChanges?.takenIn ?: 0),
                     mixSent = it.mixSent + (sentMix?.written ?: 0),
                     mixTakenIn = it.mixTakenIn + (if (tookMix?.adopted == true) 1 else 0),
+                    unopened = coordinator.unopenedBatches,
                     lastRunAt = now
                 )
             }

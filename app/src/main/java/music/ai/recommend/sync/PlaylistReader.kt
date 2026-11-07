@@ -31,6 +31,8 @@ class PlaylistReader(
         val filesUnavailable: Int,
         /** Lines that would not decode, the half-written tails and the unknown kinds among them. */
         val linesUnreadable: Int,
+        /** Of those, the ones that are sealed and did not open; see [BatchReader.Outcome]. */
+        val linesSealed: Int,
         /** True when the pass stopped at its limit and more is waiting. */
         val more: Boolean,
         /** How many lines of each file this pass consumed, for the caller to record afterwards. */
@@ -60,6 +62,7 @@ class PlaylistReader(
             filesSkipped = outcome.filesSkipped,
             filesUnavailable = outcome.filesUnavailable,
             linesUnreadable = unreadable,
+            linesSealed = outcome.linesSealed,
             more = outcome.more,
             advanced = outcome.advanced
         )

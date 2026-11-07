@@ -44,6 +44,8 @@ class VectorReader(
         val filesUnavailable: Int,
         /** Lines that would not decode, the half-written tails among them. */
         val linesUnreadable: Int,
+        /** Of those, the ones that are sealed and did not open; see [BatchReader.Outcome]. */
+        val linesSealed: Int,
         /** True when the limit was reached and there is more waiting in the folder. */
         val more: Boolean,
         /**
@@ -87,6 +89,7 @@ class VectorReader(
             filesSkipped = outcome.filesSkipped,
             filesUnavailable = outcome.filesUnavailable,
             linesUnreadable = unreadable,
+            linesSealed = outcome.linesSealed,
             more = outcome.more,
             advanced = outcome.advanced
         )

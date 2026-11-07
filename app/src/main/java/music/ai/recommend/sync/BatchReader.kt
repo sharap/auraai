@@ -15,6 +15,11 @@ package music.ai.recommend.sync
  * in a file that is only ever appended to the only line that can be half-written is the last one,
  * and anything else there is damage that will not improve by waiting.
  *
+ * A sealed line that will not *open* is the other case, and it is not damage either: the phrase on
+ * this device is not the one the other device sealed with, and that improves by waiting, because
+ * somebody fixes it. So those are left unconsumed wherever in the file they are, and the walk stops
+ * there to keep the rest of the file in order.
+ *
  * [progress] is read and never written: what a pass consumed comes back in [Outcome.advanced], for
  * the caller to fold in **after** whatever was read has been stored. A store that fails has to
  * leave the folder looking unread, or the batch is marked read and never arrives.
@@ -40,6 +45,12 @@ class BatchReader(
         val filesUnavailable: Int,
         /** Lines that would not decode, the half-written tails among them. */
         val linesUnreadable: Int,
+        /**
+         * Of those, the ones that are sealed and did not open: a different phrase on the other
+         * device, or none on this one. Counted apart because it is the one failure here that is
+         * nobody's accident and that nothing else would ever mention.
+         */
+        val linesSealed: Int,
         /** True when the pass stopped at its limit and more is waiting in the folder. */
         val more: Boolean,
         /** How many lines of each file this pass consumed; see [progress]. */
@@ -60,6 +71,7 @@ class BatchReader(
         var filesSkipped = 0
         var filesUnavailable = 0
         var linesUnreadable = 0
+        var linesSealed = 0
         var records = 0
         var more = false
         // Asked once for the pass: deriving a key is deliberately expensive, and the phrase
@@ -106,7 +118,28 @@ class BatchReader(
                     val line = lines[index]
                     val batch = SyncBatch.decode(line, seal)
                     if (batch == null) {
-                        if (line.isNotBlank()) linesUnreadable++
+                        if (line.isNotBlank()) {
+                            linesUnreadable++
+                            val sealing = SyncBatch.sealingOf(line)
+                            if (sealing != null && sealing != SyncBatch.SEALING_NONE) {
+                                // Sealed and did not open. Left unconsumed and met again every
+                                // pass, which is the difference between "not yet" and "never".
+                                //
+                                // A changed phrase is already covered elsewhere — the state holds
+                                // a name for the phrase in use, and a change of it makes the
+                                // whole folder be read again. What is covered only here is the
+                                // single failure with no second chance: a batch that did not open
+                                // for a reason that passes, such as a device too short of memory
+                                // to hold a cipher, under a phrase that then stays the same for
+                                // ever. Stepping over it would lose that batch and say nothing.
+                                //
+                                // The price is re-reading a file holding a batch sealed under a
+                                // phrase nobody has any more: one file per pass, with the count
+                                // in front of the owner.
+                                linesSealed++
+                                break
+                            }
+                        }
                         lastFailed = index == lines.size - 1 && line.isNotBlank()
                         taken = index + 1
                         continue
@@ -123,7 +156,16 @@ class BatchReader(
             }
         }
 
-        return Outcome(batches, filesRead, filesSkipped, filesUnavailable, linesUnreadable, more, advanced)
+        return Outcome(
+            batches = batches,
+            filesRead = filesRead,
+            filesSkipped = filesSkipped,
+            filesUnavailable = filesUnavailable,
+            linesUnreadable = linesUnreadable,
+            linesSealed = linesSealed,
+            more = more,
+            advanced = advanced
+        )
     }
 
     private companion object {

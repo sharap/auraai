@@ -75,6 +75,26 @@ class SyncCoordinator<Track>(
     /** Rows handed to the writer but not yet on disk; lost on restart, which re-reads them. */
     private var offeredUpTo = state.exportedUpTo
 
+    /**
+     * Sealed batches met since this object was made that would not open.
+     *
+     * A count for the owner and not a decision: the usual reason is a different phrase typed on
+     * the other device, and that is the one way this whole arrangement fails — silently, because a
+     * batch that does not open is simply counted as unreadable and stepped over. Somebody has to
+     * be told.
+     */
+    var unopenedBatches: Int = 0
+        private set
+
+    private fun noticeUnopened(count: Int, what: String) {
+        if (count <= 0) return
+        unopenedBatches += count
+        note(
+            "Could not open $count sealed $what: the other device's phrase differs from this " +
+                "one's, or this one has none"
+        )
+    }
+
     /** Where [HistoryWriter] writes, so that a failed write leaves the state untouched. */
     private inner class Relay : SyncSink {
         override fun append(relativePath: String, lines: List<String>): Boolean =
@@ -173,6 +193,7 @@ class SyncCoordinator<Track>(
 
         val known = store.heldFromOthers(now)
         val outcome = HistoryReader(deviceId, folder, state.progress, sealing).read(known, now, keepDays)
+        noticeUnopened(outcome.linesSealed, "batches of listens")
 
         // Everything that ever failed to match is offered again: the usual reason is a file that
         // had not arrived yet, and by now it may have.
@@ -426,6 +447,7 @@ class SyncCoordinator<Track>(
         state.aliases.clear()
         state.aliases.putAll(matcher.learnedAliases().mapValues { store.asText(it.value) })
         state.save()
+        noticeUnopened(outcome.linesSealed, "batches of vectors")
         return PulledVectors(takenIn, refused, unmatched, alreadyHeld, outcome.more)
     }
 
@@ -512,6 +534,7 @@ class SyncCoordinator<Track>(
 
         val shown = showPlaylists()
         state.save()
+        noticeUnopened(outcome.linesSealed, "batches of playlist changes")
         return PulledPlaylists(added, shown.favourites, shown.playlists, shown.unmatched, outcome.more)
     }
 
@@ -582,6 +605,7 @@ class SyncCoordinator<Track>(
         val today = view.today()
         val outcome = MixReader(deviceId, folder, state.progress, sealing).read()
         state.progress.putAll(outcome.advanced)
+        noticeUnopened(outcome.linesSealed, "batches holding a playlist of the day")
 
         val offered = MixRecord.best(outcome.records, today)
         if (offered == null) {

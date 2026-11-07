@@ -522,6 +522,13 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = LocalMutedOnSurface.current
                 )
+                if (summary.unopened > 0) {
+                    Text(
+                        text = stringResource(id = R.string.sync_unopened, summary.unopened),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 var phrase by remember { mutableStateOf("") }
                 OutlinedTextField(
