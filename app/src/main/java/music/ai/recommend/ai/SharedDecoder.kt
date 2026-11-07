@@ -11,23 +11,29 @@ import java.io.File
  * disagrees with its own scanner is the worst kind of wrong here: it would offer a vector under
  * the name of a decoder that did not make it.
  *
- * What is not here is the platform. A format nobody shares — m4a today — still gets analysed, by
- * MediaCodec on the phone and ffmpeg on the desktop, and its embedding is as good as any for this
- * device's own use. It simply cannot travel, and [music.ai.recommend.sync.VectorTerms.TRAVELS] is
- * where that is said.
+ * What is not here is the platform. A format nobody shares still gets analysed — MediaCodec on the
+ * phone, ffmpeg on the desktop — and its embedding is as good as any for this device's own use. It
+ * simply cannot travel, and [music.ai.recommend.sync.VectorTerms.TRAVELS] is where that is said.
+ * With mp3, flac, wav and m4a shared, what is left is ogg, opus and the odd wma.
  *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
 object SharedDecoder {
 
     /** Every decoder named here, for the terms a vector travels on. */
-    val NAMES: Set<String> = setOf(Mp3Excerpt.DECODER, FlacExcerpt.DECODER, WavExcerpt.DECODER)
+    val NAMES: Set<String> = setOf(
+        Mp3Excerpt.DECODER,
+        FlacExcerpt.DECODER,
+        WavExcerpt.DECODER,
+        M4aExcerpt.DECODER
+    )
 
     /** @return the decoder both apps would use for this file, or null when only the platform can. */
     fun of(path: String): String? = when {
         Mp3Excerpt.handles(path) -> Mp3Excerpt.DECODER
         FlacExcerpt.handles(path) -> FlacExcerpt.DECODER
         WavExcerpt.handles(path) -> WavExcerpt.DECODER
+        M4aExcerpt.handles(path) -> M4aExcerpt.DECODER
         else -> null
     }
 
@@ -44,6 +50,7 @@ object SharedDecoder {
         Mp3Excerpt.handles(file.path) -> Mp3Excerpt.startMs(file)
         FlacExcerpt.handles(file.path) -> FlacExcerpt.startMs(file)
         WavExcerpt.handles(file.path) -> WavExcerpt.startMs(file)
+        M4aExcerpt.handles(file.path) -> M4aExcerpt.startMs(file)
         else -> null
     }
 
@@ -56,6 +63,7 @@ object SharedDecoder {
         Mp3Excerpt.handles(file.path) -> Mp3Excerpt.decode(file)
         FlacExcerpt.handles(file.path) -> FlacExcerpt.decode(file)
         WavExcerpt.handles(file.path) -> WavExcerpt.decode(file)
+        M4aExcerpt.handles(file.path) -> M4aExcerpt.decode(file)
         else -> FloatArray(0)
     }
 }

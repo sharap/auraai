@@ -244,6 +244,7 @@ dependencies {
     // MediaCodec's mp3 output begins 576 samples later than ffmpeg's while its VBR seek lands
     // hundreds of samples off. A decoder that is the same code on both sides has neither problem.
     implementation(libs.jlayer)
+    implementation(libs.jcodec)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     annotationProcessor(libs.androidx.room.compiler)

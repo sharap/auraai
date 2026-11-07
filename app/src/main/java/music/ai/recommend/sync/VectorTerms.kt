@@ -20,12 +20,12 @@ import music.ai.recommend.ai.SharedDecoder
  * **The analysis version.** Bumped whenever anything that changes the value of an embedding
  * changes — the feature extractor, the excerpt rule, the projection.
  *
- * **The decoder.** This is the one that decides what may travel at all. mp3, flac and wav go
+ * **The decoder.** This is the one that decides what may travel at all. mp3, flac, wav and m4a go
  * through `ai/` decoders that are the same code in both apps — see `SharedDecoder` — so both get
  * the same samples by construction. Everything else goes through the platform: MediaCodec on the
  * phone, ffmpeg on the desktop, two different decoders whose agreement is a matter of luck. For a
- * lossy format that luck does not hold, and even for a lossless one the window and the resampler
- * differ, which is enough.
+ * lossy format that luck does not hold at all, and even for a lossless one the window and the
+ * resampler differ, which is enough.
  *
  * **The excerpt.** Which ten seconds were listened to. It travels as a number rather than being
  * recomputed and trusted, because the two platforms read a track's duration from different places;

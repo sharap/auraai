@@ -1,6 +1,7 @@
 package music.ai.recommend.sync
 
 import music.ai.recommend.ai.FlacExcerpt
+import music.ai.recommend.ai.M4aExcerpt
 import music.ai.recommend.ai.Mp3Excerpt
 import music.ai.recommend.ai.SharedDecoder
 import music.ai.recommend.ai.WavExcerpt
@@ -80,10 +81,11 @@ class VectorTermsTest {
         assertTrue(Mp3Excerpt.DECODER in VectorTerms.TRAVELS)
         assertTrue(FlacExcerpt.DECODER in VectorTerms.TRAVELS)
         assertTrue(WavExcerpt.DECODER in VectorTerms.TRAVELS)
-        // And nothing beyond those three. The set grows when a format gains a decoder both apps
+        assertTrue(M4aExcerpt.DECODER in VectorTerms.TRAVELS)
+        // And nothing beyond those four. The set grows when a format gains a decoder both apps
         // carry, and growing it is a decision about the format rather than a detail — which is why
         // it is asserted here and not derived from whatever each app happens to have.
-        assertEquals(3, VectorTerms.TRAVELS.size)
+        assertEquals(4, VectorTerms.TRAVELS.size)
         assertEquals(SharedDecoder.NAMES, VectorTerms.TRAVELS)
     }
 

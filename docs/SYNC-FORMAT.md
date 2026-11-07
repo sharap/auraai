@@ -208,9 +208,10 @@ A vector is accepted only when **all** of these match the receiving device's own
 
 ### Which decoders are shared, and why that is the hard part
 
-mp3, flac and wav are decoded by code both apps carry — `ai/Mp3Excerpt.kt`, `ai/FlacExcerpt.kt`,
-`ai/WavExcerpt.kt`, dispatched by `ai/SharedDecoder.kt`. Everything else goes to the platform,
-MediaCodec on the phone and ffmpeg on the desktop, and stays at home.
+mp3, flac, wav and m4a are decoded by code both apps carry — `ai/Mp3Excerpt.kt`,
+`ai/FlacExcerpt.kt`, `ai/WavExcerpt.kt`, `ai/M4aExcerpt.kt`, dispatched by `ai/SharedDecoder.kt`.
+Everything else goes to the platform, MediaCodec on the phone and ffmpeg on the desktop, and stays
+at home.
 
 For mp3 the reason is the codec itself: measured against ffmpeg, Android's decoder begins its
 output 576 samples later, and its seek over a variable bitrate lands hundreds of samples further
@@ -229,6 +230,31 @@ ffmpeg is an oracle, not a second opinion. The shared decoder was run against it
 library it was written for — 425 files — and agreed sample for sample on every one. Then the same
 eight files were decoded on the phone and on the desktop, and the sha256 of the samples matched on
 all eight, which is the property the vectors actually rest on.
+
+For m4a none of that reasoning was available, and that is the point worth keeping. AAC is lossy,
+and its specification defines how *close* a decoder has to be rather than what it has to output, so
+two correct decoders of one file produce two different signals on purpose. There is nothing to
+align and no amount of care that helps: the only answer is for both apps to run the same decoder.
+They run the pure-Java one that jcodec carries, `net.sourceforge.jaad.aac`, named
+`jaad-jcodec-0.2.5` after the artifact rather than the library, because what has to agree is the
+bytes both devices run. The container — which frame the window starts in, and how long the track
+is — is this app's own work, as it is for flac.
+
+The m4a trap was the encoder's **priming**: the samples an encoder puts in front of the music to
+fill its own filters. There is a box for declaring it, the edit list, and the files this was
+written for do not carry one — iTunes writes the number in a tag instead, `iTunSMPB`, which also
+says exactly how many samples of music there are. Reading neither put the excerpt 2112 samples —
+48 milliseconds — into the music on one side and at the music on the other. It was found by
+correlating the excerpt against ffmpeg's decode of the same file and asking at what lag they lined
+up: the answer came back as exactly the priming, which is how a misalignment names its own cause.
+
+Because AAC cannot be checked for equality, it is checked for agreement: the cosine against
+ffmpeg's decode of the same window, over all 133 m4a files in the library it was written for. The
+mean was 0.9999 and the worst 0.9982, where a window in the wrong place lands at nothing in
+particular — the first run, before the priming was read, averaged about 0.05. And the same files
+decoded on the phone and on the desktop gave identical digests, in all four formats: flac 6 of 6,
+m4a 6 of 6, mp3 5 of 5, wav 6 of 6. That is the property the vectors rest on, and it is the one
+that cannot be established by reasoning about floating point.
 
 A format that gains a shared decoder does **not** make the vectors already held for it travel. A
 stored vector does not record what decoded it, so those are left as they are — marked as already
@@ -654,7 +680,8 @@ Three things must not drift, and each has a guard:
 | The excerpt contract | done on both sides, measured |
 | A shared mp3 decoder | done on both sides, and confirmed on a phone: same samples, same features, same vector |
 | A shared decoder for flac and wav | done on both sides, and checked against ffmpeg on 425 real files: identical sample for sample |
-| A shared decoder for m4a and the rest | not started; those vectors stay at home |
+| A shared decoder for m4a | done on both sides, with the pure-Java decoder jcodec carries; checked against ffmpeg on 133 real files |
+| A shared decoder for ogg, opus and the rest | not started; those vectors stay at home |
 | The record format, the track key and the merge | written and tested, shared code on both sides |
 | The envelope, and sealing the payload | done on both sides: AES-256-GCM under a phrase the owner types, plain text until they do |
 | Pairing, the key in hardware, discovery | with the network transport, not before |

@@ -98,12 +98,13 @@ class FlacExcerptTest {
         assertEquals(Mp3Excerpt.DECODER, SharedDecoder.of("/music/a.mp3"))
         assertEquals(FlacExcerpt.DECODER, SharedDecoder.of("/music/a.flac"))
         assertEquals(WavExcerpt.DECODER, SharedDecoder.of("/music/a.wav"))
+        assertEquals(M4aExcerpt.DECODER, SharedDecoder.of("/music/a.m4a"))
         // Not a guess for the ones nobody shares: null means "the platform decodes this, and its
         // vectors stay at home".
-        assertNull(SharedDecoder.of("/music/a.m4a"))
         assertNull(SharedDecoder.of("/music/a.ogg"))
+        assertNull(SharedDecoder.of("/music/a.wma"))
         assertEquals(
-            setOf(Mp3Excerpt.DECODER, FlacExcerpt.DECODER, WavExcerpt.DECODER),
+            setOf(Mp3Excerpt.DECODER, FlacExcerpt.DECODER, WavExcerpt.DECODER, M4aExcerpt.DECODER),
             SharedDecoder.NAMES
         )
         // And what it decodes is what the format's own decoder decodes, not something adjacent.
