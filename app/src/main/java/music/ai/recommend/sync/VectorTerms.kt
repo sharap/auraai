@@ -1,6 +1,6 @@
 package music.ai.recommend.sync
 
-import music.ai.recommend.ai.Mp3Excerpt
+import music.ai.recommend.ai.SharedDecoder
 
 /**
  * The terms on which a device will believe somebody else's embedding.
@@ -20,12 +20,12 @@ import music.ai.recommend.ai.Mp3Excerpt
  * **The analysis version.** Bumped whenever anything that changes the value of an embedding
  * changes — the feature extractor, the excerpt rule, the projection.
  *
- * **The decoder.** This is the one that decides what may travel at all. An mp3 goes through
- * `ai/Mp3Excerpt.kt`, which is the same code in both apps, so both get the same samples by
- * construction. Everything else goes through the platform — MediaCodec on the phone, ffmpeg on the
- * desktop — and those are two different decoders whose agreement is a matter of luck. Measured on
- * one pair of devices they happen to agree well, but nothing says the next phone's vendor has not
- * improved its decoder.
+ * **The decoder.** This is the one that decides what may travel at all. mp3, flac and wav go
+ * through `ai/` decoders that are the same code in both apps — see `SharedDecoder` — so both get
+ * the same samples by construction. Everything else goes through the platform: MediaCodec on the
+ * phone, ffmpeg on the desktop, two different decoders whose agreement is a matter of luck. For a
+ * lossy format that luck does not hold, and even for a lossless one the window and the resampler
+ * differ, which is enough.
  *
  * **The excerpt.** Which ten seconds were listened to. It travels as a number rather than being
  * recomputed and trusted, because the two platforms read a track's duration from different places;
@@ -83,7 +83,7 @@ data class VectorTerms(
          * when a format gets a shared decoder, and growing it is a format change, so it is written
          * here and not derived from whatever each app happens to have.
          */
-        val TRAVELS: Set<String> = setOf(Mp3Excerpt.DECODER)
+        val TRAVELS: Set<String> = SharedDecoder.NAMES
     }
 }
 

@@ -206,6 +206,34 @@ A vector is accepted only when **all** of these match the receiving device's own
 - the **excerpt** — the start, in milliseconds, of the ten seconds that were listened to;
 - the **decoder** that turned the file into samples.
 
+### Which decoders are shared, and why that is the hard part
+
+mp3, flac and wav are decoded by code both apps carry — `ai/Mp3Excerpt.kt`, `ai/FlacExcerpt.kt`,
+`ai/WavExcerpt.kt`, dispatched by `ai/SharedDecoder.kt`. Everything else goes to the platform,
+MediaCodec on the phone and ffmpeg on the desktop, and stays at home.
+
+For mp3 the reason is the codec itself: measured against ffmpeg, Android's decoder begins its
+output 576 samples later, and its seek over a variable bitrate lands hundreds of samples further
+off again.
+
+For flac the samples were never the problem — it is lossless, so two correct decoders agree
+exactly — and it would have been easy to conclude that the platform's would do. Everything *around*
+the samples disagreed: the desktop handed ffmpeg a start in whole seconds and asked it for 48 kHz,
+so ffmpeg's polyphase resampler ran where the phone runs the shared linear one, and the window
+began wherever the seek landed. Owning the decode settles both, and the stream header's exact
+sample count settles the third disagreement — how long the track is — which is what the excerpt is
+chosen from.
+
+Being lossless also makes flac the one format whose decoder can be *proved* rather than trusted:
+ffmpeg is an oracle, not a second opinion. The shared decoder was run against it over the whole
+library it was written for — 425 files — and agreed sample for sample on every one. Then the same
+eight files were decoded on the phone and on the desktop, and the sha256 of the samples matched on
+all eight, which is the property the vectors actually rest on.
+
+A format that gains a shared decoder does **not** make the vectors already held for it travel. A
+stored vector does not record what decoded it, so those are left as they are — marked as already
+offered, which they were — and they travel only once the owner has them analysed again.
+
 That last one is why, for the moment, **only mp3 travels**. An mp3 goes through `ai/Mp3Excerpt.kt`,
 which is the same code in both apps, so both get the same samples by construction. Everything else
 goes through the platform — MediaCodec on the phone, ffmpeg on the desktop — and those are two
@@ -625,7 +653,8 @@ Three things must not drift, and each has a guard:
 | --- | --- |
 | The excerpt contract | done on both sides, measured |
 | A shared mp3 decoder | done on both sides, and confirmed on a phone: same samples, same features, same vector |
-| A shared decoder for m4a, flac and the rest | not started; those vectors stay at home |
+| A shared decoder for flac and wav | done on both sides, and checked against ffmpeg on 425 real files: identical sample for sample |
+| A shared decoder for m4a and the rest | not started; those vectors stay at home |
 | The record format, the track key and the merge | written and tested, shared code on both sides |
 | The envelope, and sealing the payload | done on both sides: AES-256-GCM under a phrase the owner types, plain text until they do |
 | Pairing, the key in hardware, discovery | with the network transport, not before |

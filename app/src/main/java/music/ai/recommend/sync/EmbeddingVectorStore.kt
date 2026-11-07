@@ -5,7 +5,7 @@ import android.media.MediaFormat
 import android.util.Log
 import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.Excerpt
-import music.ai.recommend.ai.Mp3Excerpt
+import music.ai.recommend.ai.SharedDecoder
 import music.ai.recommend.ai.ModelRepository
 import music.ai.recommend.model.Song
 import java.io.File
@@ -52,7 +52,7 @@ class EmbeddingVectorStore(
 
     override suspend fun decoderFor(track: Long): String {
         val path = pathFor(track) ?: return UNKNOWN
-        return if (Mp3Excerpt.handles(path)) Mp3Excerpt.DECODER else PLATFORM
+        return SharedDecoder.of(path) ?: PLATFORM
     }
 
     override suspend fun excerptStartMs(track: Long): Long? {
@@ -60,7 +60,7 @@ class EmbeddingVectorStore(
         // For a format the shared decoder handles, the decoder's own count of the samples — which
         // is what it chose the window by. The platform's duration is a different number and naming
         // the window with it is how a correct vector comes to be refused.
-        if (Mp3Excerpt.handles(path)) return Mp3Excerpt.startMs(File(path))
+        SharedDecoder.startMs(File(path))?.let { return it }
         val duration = containerDurationMs(path) ?: return null
         return Excerpt.startMs(duration)
     }

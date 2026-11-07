@@ -338,9 +338,15 @@ class SyncCoordinator<Track>(
             if (wrote == 0 && vectorWriter.pending > 0) break      // the folder would not take it
             written += wrote
             state.vectorSequence = vectorWriter.sequence
-            // The ones that could not travel are marked along with the ones that did: a format
-            // with no shared decoder will not gain one without the analysis version changing, and
+            // The ones that could not travel are marked along with the ones that did, because
             // reconsidering them every pass is a walk over the whole table for nothing.
+            //
+            // It also keeps a promise that matters more than the walk. A stored vector does not
+            // record what decoded it — the decoder is worked out from the file's name — so the day
+            // a format gains a shared decoder, every vector already held for it would start being
+            // offered under the new decoder's name while having been made by the platform's. Being
+            // marked already, they never are. The cost is that those files have to be analysed
+            // again before they can travel, which is the owner's to ask for.
             vectors.markHandled(handled)
             state.save()
             // No progress possible: everything on offer is unnamed, which means this library is

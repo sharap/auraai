@@ -283,11 +283,11 @@ class AiScanner(
         stats: DecodeStats? = null,
         startUsOverride: Long? = null
     ): FloatArray {
-        if (startUsOverride == null && Mp3Excerpt.handles(song.path)) {
-            val samples = runCatching { Mp3Excerpt.decode(File(song.path)) }
+        if (startUsOverride == null && SharedDecoder.handles(song.path)) {
+            val samples = runCatching { SharedDecoder.decode(File(song.path)) }
                 .getOrElse { FloatArray(0) }
             if (samples.isNotEmpty()) return samples
-            Log.w(TAG, "Shared mp3 decoder gave nothing for ${song.title}, using the platform one")
+            Log.w(TAG, "Shared decoder gave nothing for ${song.title}, using the platform one")
         }
         return decodeAudioChunk(song, Excerpt.LENGTH_MS, stats, startUsOverride)
     }
