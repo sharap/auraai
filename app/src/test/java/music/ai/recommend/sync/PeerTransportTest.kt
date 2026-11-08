@@ -41,8 +41,71 @@ class PeerTransportTest {
         File(File(root, deviceId), path).takeIf { it.isFile }?.readText() ?: ""
 
     /** A server on a port the system picks, so the test can run anywhere and twice at once. */
-    private fun serverFor(root: File, deviceId: String, key: ByteArray?): PeerServer =
-        PeerServer(deviceId, DirectoryPeerFiles(root, deviceId), { key }, port = 0)
+    private fun serverFor(
+        root: File,
+        deviceId: String,
+        key: ByteArray?,
+        records: PeerRecords? = null
+    ): PeerServer =
+        PeerServer(deviceId, DirectoryPeerFiles(root, deviceId), { key }, { records }, port = 0)
+
+    /**
+     * A device's vectors, as little of one as the transport can tell apart.
+     *
+     * A record here is "key:payload", because what the transport is being asked to prove is that
+     * the right keys are asked about and the right records come back — what a record *means* is
+     * judged by the coordinator and tested where that judging lives.
+     */
+    private class Desk(
+        held: Map<String, String> = emptyMap(),
+        missing: List<String> = emptyList()
+    ) : PeerRecords {
+        val holds = LinkedHashMap(held)
+        val gaps = ArrayList(missing)
+        val asked = ArrayList<List<String>>()
+        var servings = 0
+        private val seen = HashMap<String, String>()
+
+        override fun held(): Int = holds.size
+
+        override fun lacking(): Int = gaps.size
+
+        override fun wanted(max: Int): List<String> = gaps.take(max)
+
+        override fun serve(keys: List<String>): List<String> {
+            servings++
+            asked.add(keys)
+            return keys.mapNotNull { holds[it] }
+        }
+
+        override fun take(records: List<String>): Int {
+            for (record in records) {
+                val key = record.substringBefore(':')
+                holds[key] = record
+                gaps.remove(key)
+            }
+            return records.size
+        }
+
+        override fun worthAsking(peerDeviceId: String, have: Int, lacks: Int): Boolean =
+            seen[peerDeviceId] != fingerprint(have, lacks)
+
+        override fun remember(peerDeviceId: String, have: Int, lacks: Int) {
+            seen[peerDeviceId] = fingerprint(have, lacks)
+        }
+
+        private fun fingerprint(have: Int, lacks: Int) = "$have:$lacks:${holds.size}:${gaps.size}"
+    }
+
+    private fun trade(server: PeerServer, deviceId: String, root: File, records: PeerRecords) =
+        PeerClient.sync(
+            host = "127.0.0.1",
+            port = server.boundPort,
+            deviceId = deviceId,
+            files = DirectoryPeerFiles(root, deviceId),
+            key = key,
+            records = records
+        )
 
     @Test
     fun `both directions move in one pass`() {
@@ -299,6 +362,11 @@ class PeerTransportTest {
             PeerProtocol.Request.Index,
             PeerProtocol.Request.Fetch("history/2026-11-08.jsonl", 4096L, 1024),
             PeerProtocol.Request.Put("vectors/2026-11-08/0003.jsonl", 0L, byteArrayOf(1, 2, 3)),
+            PeerProtocol.Request.Vectors,
+            PeerProtocol.Request.Want(listOf("""{"t":"one"}""", """{"t":"two"}""")),
+            PeerProtocol.Request.Want(emptyList()),
+            PeerProtocol.Request.Wanted(PeerProtocol.MAX_RECORDS),
+            PeerProtocol.Request.Give(listOf("""{"k":{"t":"one"},"f":"AAA="}""")),
             PeerProtocol.Request.Bye
         )
         for (request in requests) {
@@ -310,6 +378,11 @@ class PeerTransportTest {
             PeerProtocol.Reply.Index(emptyList()),
             PeerProtocol.Reply.Chunk(0L, byteArrayOf(9, 8, 7), eof = true),
             PeerProtocol.Reply.Stored(12L),
+            PeerProtocol.Reply.Vectors(4543, 229),
+            PeerProtocol.Reply.Records(listOf("""{"k":{"t":"one"},"f":"AAA="}""")),
+            PeerProtocol.Reply.Records(emptyList()),
+            PeerProtocol.Reply.Keys(listOf("""{"t":"one"}""")),
+            PeerProtocol.Reply.Took(50),
             PeerProtocol.Reply.No("offset")
         )
         for (reply in replies) {
@@ -321,9 +394,170 @@ class PeerTransportTest {
             """{"q":"fetch","p":"history/2026-11-08.jsonl","at":0,"max":0}""",
             """{"q":"fetch","p":"history/2026-11-08.jsonl","at":0,"max":${PeerProtocol.MAX_CHUNK + 1}}""",
             """{"q":"put","p":"history/2026-11-08.jsonl","at":0,"b":"not base64!"}""",
-            """{"q":"put","p":"history/2026-11-08.jsonl","at":0,"b":""}"""
+            """{"q":"put","p":"history/2026-11-08.jsonl","at":0,"b":""}""",
+            """{"q":"wanted","max":0}""",
+            """{"q":"want","k":"not a list"}""",
+            """{"q":"want","k":[7]}""",
+            """{"q":"want","k":[""]}""",
+            """{"q":"give","v":[{"k":"an object, not a record"}]}"""
         )) {
             assertNull("принял «$rubbish»", PeerProtocol.readRequest(rubbish))
+        }
+    }
+
+    @Test
+    fun `a device is served the vectors it names and no others`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val alices = Desk(held = mapOf("A" to "A:one", "B" to "B:two", "C" to "C:three"))
+            val bobs = Desk(missing = listOf("A", "B", "X"))
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                assertEquals(2, outcome.vectorsTaken)
+                assertEquals(listOf("A:one", "B:two"), bobs.holds.values.toList())
+                // Asked about exactly what Bob was missing — including the one Alice turns out not
+                // to have — and nothing about the rest of her library.
+                assertEquals(listOf(listOf("A", "B", "X")), alices.asked)
+                assertEquals(listOf("X"), bobs.gaps)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a device missing nothing asks for nothing`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val alices = Desk(held = mapOf("A" to "A:one"))
+            val bobs = Desk(held = mapOf("A" to "A:one"))
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                assertEquals(0, outcome.vectorsTaken)
+                assertEquals(0, outcome.vectorsGiven)
+                assertEquals(0, alices.servings)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `nothing new on either side is not asked about a second time`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val alices = Desk(held = mapOf("A" to "A:one"))
+            val bobs = Desk(missing = listOf("A", "X"))
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                assertEquals(1, trade(server, bob, his, bobs).vectorsTaken)
+                assertEquals(1, alices.servings)
+
+                // X is still missing and Alice still has not got it. Asking again would carry the
+                // same keys every half minute for ever to be told the same thing.
+                val again = trade(server, bob, his, bobs)
+                assertNull(again.trouble)
+                assertEquals(0, again.vectorsTaken)
+                assertEquals(1, alices.servings)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `what the peer is missing is handed over, since it may be unable to dial`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val alices = Desk(missing = listOf("B"))
+            val bobs = Desk(held = mapOf("B" to "B:two"))
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                assertEquals(1, outcome.vectorsGiven)
+                assertEquals(listOf("B:two"), alices.holds.values.toList())
+                assertTrue(alices.gaps.isEmpty())
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a library's worth travels in one conversation`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val everything = (1..120).associate { "k$it" to "k$it:v$it" }
+            val alices = Desk(held = everything)
+            val bobs = Desk(missing = everything.keys.toList())
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                assertEquals(120, outcome.vectorsTaken)
+                assertTrue(bobs.gaps.isEmpty())
+                // Fifty to a message, so three messages rather than one nobody could send.
+                assertEquals(3, alices.servings)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a peer that carries no vectors at all is not a failure`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val bobs = Desk(missing = listOf("A"))
+            val server = serverFor(hers, alice, key)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                assertEquals(0, outcome.vectorsTaken)
+                assertEquals(listOf("A"), bobs.gaps)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
         }
     }
 }

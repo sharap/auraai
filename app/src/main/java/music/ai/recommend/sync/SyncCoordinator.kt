@@ -457,6 +457,163 @@ class SyncCoordinator<Track>(
         return PulledVectors(takenIn, refused, unmatched, alreadyHeld, outcome.more)
     }
 
+    /**
+     * ## Vectors over a socket, which are asked for rather than published
+     *
+     * A folder has to be written to speculatively: it is a dead drop, nobody is on the other end
+     * to ask, and the copy lying in it is the only reason a device that lost its analysis can be
+     * given it back. A socket is the opposite — there is somebody there, and the vector they hold
+     * in their own store *is* the second copy. Publishing a library's worth into a day file for
+     * them to fetch buys nothing and costs everything: measured on this pair, a phone that had its
+     * analysis cleared three times had written 59 197 708 bytes of vectors for the desktop, which
+     * took in none of them, having had every one already.
+     *
+     * So over a socket it goes the other way round. A device says which of its tracks have no
+     * vector and is sent only those, and the five methods below are the whole of it. They touch no
+     * file and no [SyncState]: there is nothing to record how far a file was read when there is no
+     * file, and these are called from a conversation thread while a pass may be running.
+     *
+     * The judging is deliberately the same code as for a batch out of a folder — same terms, same
+     * matcher, same verdicts — because the question "may I believe this vector" has one answer and
+     * it cannot depend on which pipe the record came down.
+     */
+    suspend fun vectorsHeld(): Int = vectors?.analysed()?.size ?: 0
+
+    /** How many of this device's tracks have no vector; zero before the library has been read. */
+    suspend fun vectorsLacking(): Int {
+        val vectors = vectors ?: return 0
+        val keys = library()
+        if (keys.isEmpty()) return 0
+        val analysed = vectors.analysed()
+        return keys.keys.count { it !in analysed }
+    }
+
+    /**
+     * The keys of tracks with no vector: what this device would ask a peer for.
+     *
+     * Bounded by [max] because the asking side pays for it in one message, and because a first
+     * exchange after a wipe is the whole library.
+     */
+    suspend fun vectorsWanted(max: Int): List<String> {
+        val vectors = vectors ?: return emptyList()
+        if (max <= 0) return emptyList()
+        val keys = library()
+        if (keys.isEmpty()) return emptyList()
+        val analysed = vectors.analysed()
+        val out = ArrayList<String>()
+        for ((track, key) in keys) {
+            if (track in analysed) continue
+            out.add(key.written().toString())
+            if (out.size >= max) break
+        }
+        return out
+    }
+
+    /**
+     * The records this device holds for exactly these keys.
+     *
+     * Resolved through the same [TrackMatcher] a reader uses, so a peer naming a track slightly
+     * differently is still understood, and the key written back is *this* device's own — the one
+     * its library actually holds — because that is what the receiver will judge.
+     */
+    suspend fun serveVectors(keys: List<String>): List<String> {
+        val vectors = vectors ?: return emptyList()
+        if (keys.isEmpty()) return emptyList()
+        val terms = vectors.terms() ?: return emptyList()
+        val library = library()
+        if (library.isEmpty()) return emptyList()
+        val matcher = TrackMatcher(library.map { (track, key) -> TrackMatcher.Entry(track, key) })
+        val analysed = vectors.analysed()
+        val asked = ArrayList<Track>()
+        for (text in keys) {
+            val key = keyFrom(text) ?: continue
+            val track = matcher.resolve(key) ?: continue
+            if (track !in analysed) continue
+            if (track !in asked) asked.add(track)
+        }
+        if (asked.isEmpty()) return emptyList()
+        val out = ArrayList<String>(asked.size)
+        for (one in vectors.held(asked)) {
+            val key = library[one.track] ?: continue
+            // The file has to be here to say which ten seconds were analysed, and a vector whose
+            // excerpt cannot be named cannot be judged by anyone. Stepped over rather than sent
+            // without it.
+            val start = vectors.excerptStartMs(one.track) ?: continue
+            out.add(
+                VectorRecord(
+                    track = key,
+                    excerptStartMs = start,
+                    decoder = vectors.decoderFor(one.track),
+                    model = terms.model,
+                    analysisVersion = terms.analysisVersion,
+                    vector = one.vector
+                ).toJson().toString()
+            )
+        }
+        return out
+    }
+
+    /**
+     * Takes in records a peer served, on the same terms as a batch out of a folder.
+     *
+     * Aliases learnt here are deliberately not kept: that is a note in [SyncState], this runs
+     * beside whatever pass is happening, and the cost of learning the same alias again next time
+     * is a string comparison.
+     *
+     * @return how many were stored.
+     */
+    suspend fun takeInVectors(records: List<String>): Int {
+        val vectors = vectors ?: return 0
+        if (records.isEmpty()) return 0
+        val terms = vectors.terms() ?: return 0
+        val library = library()
+        if (library.isEmpty()) return 0
+        val matcher = TrackMatcher(library.map { (track, key) -> TrackMatcher.Entry(track, key) })
+        state.aliases.forEach { (hash, text) ->
+            store.fromText(text)?.let { matcher.remember(hash, it) }
+        }
+        val analysed = vectors.analysed()
+        val taking = ArrayList<VectorStore.Held<Track>>()
+        val refused = HashMap<VectorVerdict, Int>()
+        var unmatched = 0
+        for (text in records) {
+            val record = recordFrom(text) ?: continue
+            val track = matcher.resolve(record.track)
+            if (track == null) {
+                unmatched++
+                continue
+            }
+            if (track in analysed) continue
+            val start = vectors.excerptStartMs(track)
+            if (start == null) {
+                unmatched++
+                continue
+            }
+            val verdict = terms.judge(record, vectors.decoderFor(track), start)
+            if (verdict != VectorVerdict.Usable) {
+                refused[verdict] = (refused[verdict] ?: 0) + 1
+                continue
+            }
+            taking.add(VectorStore.Held(track, record.vector))
+        }
+        if (refused.isNotEmpty() || unmatched > 0) {
+            note("Vectors asked for: ${taking.size} usable, $unmatched for tracks we lack, refused $refused")
+        }
+        if (taking.isEmpty()) return 0
+        return vectors.takeIn(taking)
+    }
+
+    // Gson rather than an import, so this file goes on standing on nothing but its own package.
+    private fun keyFrom(text: String): TrackKey? = jsonFrom(text)?.let { TrackKey.read(it) }
+
+    private fun recordFrom(text: String): VectorRecord? = jsonFrom(text)?.let { VectorRecord.fromJson(it) }
+
+    private fun jsonFrom(text: String): com.google.gson.JsonObject? = try {
+        com.google.gson.JsonParser.parseString(text) as? com.google.gson.JsonObject
+    } catch (e: RuntimeException) {
+        null
+    }
+
     data class PushedPlaylists(
         val written: Int,
         /** Changes made up out of what this device already had; see [PlaylistStore.current]. */

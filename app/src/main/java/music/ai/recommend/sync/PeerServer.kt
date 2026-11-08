@@ -7,10 +7,13 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * The listening side: answers what it has, hands over bytes, and takes in a peer's own files.
+ * The listening side: answers what it has, hands over bytes and records, and takes in a peer's own
+ * files.
  *
- * It serves exactly two things and refuses everything else. A caller may read **this** device's
- * directory, and it may append to **its own** — the one named after the id it said hello with.
+ * It serves exactly three things and refuses everything else. A caller may read **this** device's
+ * directory, it may append to **its own** — the one named after the id it said hello with — and it
+ * may ask for the vectors of tracks it names, which are served from the store rather than from any
+ * file; see [PeerRecords].
  * Nothing it can say reaches another device's directory or anything outside them, because every
  * path is checked against the shapes this program's writers produce and every write goes through
  * [PeerFiles.appendTo], which knows whose directory it is being asked about.
@@ -39,6 +42,11 @@ class PeerServer(
      * what the owner asked for when they changed it.
      */
     private val key: () -> ByteArray?,
+    /**
+     * Answers a peer asking for vectors by name, or null for a build that carries none and for the
+     * moments before this device has read its own library.
+     */
+    private val records: () -> PeerRecords? = { null },
     private val port: Int = PeerProtocol.PORT,
     /** Told about each finished conversation, for the line the settings screen shows. */
     private val onServed: (Served) -> Unit = {}
@@ -196,6 +204,24 @@ class PeerServer(
                             PeerProtocol.Reply.Stored(held)
                         }
                     }
+                    PeerProtocol.Request.Vectors -> records()?.let { desk ->
+                        PeerProtocol.Reply.Vectors(desk.held(), desk.lacking())
+                    } ?: PeerProtocol.Reply.No("no vectors here")
+                    is PeerProtocol.Request.Want -> records()?.let { desk ->
+                        val served = desk.serve(request.keys)
+                        // Counted as bytes given, because that is what they are: the settings
+                        // screen's "gave" should not go quiet just because a vector travelled as
+                        // a record instead of as part of a file.
+                        given += served.sumOf { line -> line.length.toLong() }
+                        PeerProtocol.Reply.Records(served)
+                    } ?: PeerProtocol.Reply.No("no vectors here")
+                    is PeerProtocol.Request.Wanted -> records()?.let { desk ->
+                        PeerProtocol.Reply.Keys(desk.wanted(request.max))
+                    } ?: PeerProtocol.Reply.No("no vectors here")
+                    is PeerProtocol.Request.Give -> records()?.let { desk ->
+                        taken += request.records.sumOf { line -> line.length.toLong() }
+                        PeerProtocol.Reply.Took(desk.take(request.records))
+                    } ?: PeerProtocol.Reply.No("no vectors here")
                     PeerProtocol.Request.Bye -> return
                 }
                 if (!link.send(PeerProtocol.write(reply))) return

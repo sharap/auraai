@@ -25,6 +25,13 @@ class PeerTransport(
     private val deviceId: String,
     /** The byte view of this device's own directory and its copies; null while there is none. */
     private val files: () -> PeerFiles?,
+    /**
+     * This device's vectors as a peer may ask for them, or null for a build that carries none.
+     *
+     * Fetched per call for the same reason as [files]: a listener comes up before the library has
+     * been read, and one that had been handed a null once would answer "nothing here" for ever.
+     */
+    private val records: () -> PeerRecords? = { null },
     private val note: (String) -> Unit = {}
 ) {
 
@@ -120,6 +127,7 @@ class PeerTransport(
                     now()?.appendTo(deviceId, path, at, bytes)
             },
             key = ::key,
+            records = records,
             port = port,
             onServed = { served ->
                 // Counted even when the conversation went nowhere: what this answers is "has
@@ -193,7 +201,8 @@ class PeerTransport(
                 port = port,
                 deviceId = deviceId,
                 files = own,
-                key = key
+                key = key,
+                records = records()
             )
             outcomes.add(outcome)
             lastOutcome = outcome
@@ -201,6 +210,9 @@ class PeerTransport(
                 note(
                     "Peer $host: took ${outcome.bytesTaken} in ${outcome.filesTaken} files, " +
                         "gave ${outcome.bytesGiven} in ${outcome.filesGiven}" +
+                        (if (outcome.vectorsTaken > 0 || outcome.vectorsGiven > 0)
+                            ", vectors ${outcome.vectorsTaken} in ${outcome.vectorsGiven} out"
+                        else "") +
                         (outcome.trouble?.let { ", $it" } ?: "")
                 )
             }

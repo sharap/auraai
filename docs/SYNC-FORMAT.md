@@ -608,7 +608,8 @@ dumb pipe, and that the folder was always behind an interface. A device keeps th
 whole job is to make those copies match. Everything above it is untouched: the same batches, the
 same readers, the same merge, the same note of how far each file was read.
 
-The conversation has three questions and two answers, because the layout only permits that many:
+The conversation has five questions about files, because the layout only permits that many, and four
+more about vectors, which do not travel as files at all — see the next section:
 
 | | |
 | --- | --- |
@@ -617,6 +618,10 @@ The conversation has three questions and two answers, because the layout only pe
 | `fetch` | bytes of one of those files, from an offset, at most 256 KB at a time |
 | `index` | what the answering device has of the **caller's** files |
 | `put` | bytes of the caller's own file, to be appended to its copy there |
+| `vectors` | how many vectors the answering device holds, and how many of its tracks have none |
+| `want` | the keys of tracks the caller has no vector for; the answer is the records, if any |
+| `wanted` | the keys the answering device has no vector for, so the caller can hand them over |
+| `give` | records for tracks the answering device said it lacks |
 
 Offsets are bytes rather than lines, because the files are append-only and a byte count is the one
 cursor two devices can agree on without trusting each other's line counting. A write is **strictly**
@@ -662,6 +667,50 @@ nothing of its to take in yet. A pass asked for every vector therefore counts as
 own — it was once gated on having read something first, which made the one pass whose whole purpose
 was the vectors publish none of them, and a phone whose analysis had been cleared could not be handed
 it back.
+
+### Vectors over a socket are asked for, not published
+
+A folder has to be written to speculatively. It is a dead drop: nobody is on the other end to ask,
+and the copy lying in it is the only reason a device that lost its analysis can be given it back.
+That is why every device offers everything it holds — the folder ends up carrying each vector once
+per device that has it, and that redundancy *is* the restorability.
+
+A socket is the opposite. There is somebody there, and the vector they hold in their own store is
+already the second copy. Publishing a library's worth into a day file for them to fetch buys
+nothing, and the bill arrives in megabytes. Measured on this pair: a phone whose analysis had been
+cleared three times held 4334 vectors and had written **59 197 708 bytes** of them into its own
+directory, every byte of which the desktop dutifully fetched and then took in **none** of, having
+had all of them already.
+
+So over a socket it goes the other way round. A device says which of its tracks have no vector and
+is sent only those. Nothing is published that nobody asked for; a device missing nothing asks for
+nothing and is sent nothing; and the first exchange after a wipe is a library's worth in one
+conversation, fifty records to a message.
+
+Both halves of it are needed because reachability is usually one-sided. **Asking** covers the
+caller, and is the half that guarantees the ground is covered — whichever device can dial asks for
+its own gaps directly. **Giving** covers a peer that may be unable to dial anybody and would
+otherwise never receive what was analysed on the other side: the caller asks what the peer lacks
+and hands over what it holds of it. The giving half is bounded and best-effort — the peer answers
+with the first few dozen keys it is missing, and if the caller holds none of them the round stops
+rather than asking again for the same list, because tracks neither side has analysed sit at the head
+of that list for ever.
+
+The cheap question comes first. `vectors` is two numbers, and if neither side has gained or lost
+anything since the last exchange with this peer, the last answer still stands and no keys are
+carried to hear it again. Without it, two devices simply missing the same few tracks would trade a
+few thousand keys every half minute for as long as both were running. It compares counts rather
+than the keys themselves, so a library that swapped one track for another on both counts is noticed
+only when something else moves — a delay, never a wrong vector.
+
+The judging does not change. A record that arrives this way is matched and judged by exactly the
+code that judges a batch out of a folder: same terms, same matcher, same verdicts. The question "may
+I believe this vector" has one answer and it cannot depend on which pipe the record came down.
+
+What a socket destination therefore has in its tree is history, playlists and the mix — and no
+`vectors/` directory at all. The one a device wrote before this was true is deleted, and the note of
+how far its lines had been read goes with it, since a line count against a file that is gone is a
+claim about nothing. A folder destination is untouched by all of this and still gets everything.
 
 ### Being reachable, which is often one-way
 
@@ -865,11 +914,12 @@ Three things must not drift, and each has a guard:
 | Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
 | The listening history knowing which device heard it | done on both sides, with the older store converted in place |
 | Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |
+| Vectors over a socket | asked for by name rather than published: nothing travels that nobody is missing, and a quiet pair is quiet |
 | A file that will not decode | remembered as a refusal, not as a vector of zeros: local to the device, expiring with the file, and turned away on reading |
 | Vectors whose track is gone | kept, counted and shown; removed only when the owner asks, and never the ones the history still mentions |
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
 | Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
-| The socket itself | done on both sides: sealed frames, three questions, byte offsets, tested end to end over a loopback socket |
+| The socket itself | done on both sides: sealed frames, five questions about files, byte offsets, tested end to end over a loopback socket |
 | Finding each other on a network | done: a sealed broadcast every pass, with an address to type where broadcasts do not arrive |
 | Sync without a shared folder on Android | done: the files live in the app's own storage, and nothing runs in the background |
 | Everything else here | designed, not written |

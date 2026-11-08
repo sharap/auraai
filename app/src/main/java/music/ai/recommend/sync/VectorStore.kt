@@ -73,6 +73,16 @@ interface VectorStore<Track> {
     suspend fun analysed(): Set<Track>
 
     /**
+     * The vectors this device holds for exactly these tracks, in no particular order.
+     *
+     * For a peer that asked by name instead of fetching a whole file: [toPublish] answers "what
+     * has not gone out yet", which is a different question and the wrong one once somebody has
+     * said precisely what they are missing. Tracks with no vector here are left out, and nothing
+     * is marked by asking — being served to a peer is not the same as having been published.
+     */
+    suspend fun held(tracks: List<Track>): List<Held<Track>>
+
+    /**
      * Stores vectors that came from elsewhere, as if this device had computed them.
      *
      * @return how many were stored. Zero for a failure, and the coordinator then leaves its

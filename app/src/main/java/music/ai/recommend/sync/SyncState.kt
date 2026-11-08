@@ -172,6 +172,18 @@ class SyncState private constructor(
      */
     fun fillVectorsFor(destination: String): Boolean = vectorsFilled.add(destination)
 
+    /**
+     * Forgets how far the vectors files were read.
+     *
+     * For a destination that has none: over a socket vectors are asked for by name rather than
+     * published, so those files are deleted, and a note of how many lines of a deleted file had
+     * been read is a claim about nothing. Everything else in [progress] is left alone.
+     *
+     * @return true when there was anything to forget.
+     */
+    fun forgetVectorProgress(): Boolean =
+        progress.keys.removeAll { it.contains("/${VectorWriter.DIRECTORY}/") }
+
     fun save(): Boolean = try {
         val json = JsonObject()
         json.addProperty("v", 1)

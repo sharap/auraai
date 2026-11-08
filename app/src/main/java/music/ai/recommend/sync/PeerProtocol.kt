@@ -48,6 +48,19 @@ object PeerProtocol {
     /** The most files one side will describe in a listing: a decade of day files for four kinds. */
     const val MAX_FILES = 10_000
 
+    /**
+     * The most records or keys in one message.
+     *
+     * Fifty records is about 185 KB of text, which fits a frame with room to spare after base64,
+     * and fifty keys is the same question asked in five kilobytes. The asking side chops its own
+     * list into messages this size, so a library's worth is a few dozen round trips down one
+     * connection rather than one message nobody can send.
+     */
+    const val MAX_RECORDS = 50
+
+    /** The most characters one record or key may be; a vector of 512 floats is about 3.6 KB. */
+    const val MAX_TEXT = 64 * 1024
+
     /** One file and how many bytes of it the speaker holds. */
     data class Held(val path: String, val bytes: Long)
 
@@ -75,6 +88,25 @@ object PeerProtocol {
                 31 * (31 * path.hashCode() + at.hashCode()) + bytes.contentHashCode()
         }
 
+        /**
+         * How many vectors have you got, and how many of your tracks have none?
+         *
+         * Two numbers, and the cheap question that decides whether the expensive ones are worth
+         * asking at all: neither side having gained or lost anything since the last exchange means
+         * the last answer still stands. Without it, two devices that are simply missing the same
+         * few tracks for ever would trade a few thousand keys every half minute to be told so.
+         */
+        object Vectors : Request()
+
+        /** I have no vector for these tracks; send the ones you hold. */
+        data class Want(val keys: kotlin.collections.List<String>) : Request()
+
+        /** Which of your tracks have no vector? At most [max] of them. */
+        data class Wanted(val max: Int) : Request()
+
+        /** Here are records for tracks you said you lack. */
+        data class Give(val records: kotlin.collections.List<String>) : Request()
+
         /** Nothing more; close cleanly rather than by timeout. */
         object Bye : Request()
     }
@@ -94,6 +126,18 @@ object PeerProtocol {
 
         /** How many bytes of the file the other side holds now, so the sender can check. */
         data class Stored(val bytes: Long) : Reply()
+
+        /** How many vectors the speaker holds, and how many of its tracks have none. */
+        data class Vectors(val have: Int, val lacks: Int) : Reply()
+
+        /** The records asked for, which may be fewer than the keys or none at all. */
+        data class Records(val records: kotlin.collections.List<String>) : Reply()
+
+        /** The keys of tracks the speaker has no vector for. */
+        data class Keys(val keys: kotlin.collections.List<String>) : Reply()
+
+        /** How many of the records handed over were stored. */
+        data class Took(val stored: Int) : Reply()
 
         /**
          * A refusal, with a word about why for the log. Sent only for things a well-behaved peer
@@ -123,6 +167,19 @@ object PeerProtocol {
                 addProperty("at", request.at)
                 addProperty("b", Base64Text.of(request.bytes))
             }
+            Request.Vectors -> addProperty("q", "vectors")
+            is Request.Want -> {
+                addProperty("q", "want")
+                add("k", texts(request.keys))
+            }
+            is Request.Wanted -> {
+                addProperty("q", "wanted")
+                addProperty("max", request.max)
+            }
+            is Request.Give -> {
+                addProperty("q", "give")
+                add("v", texts(request.records))
+            }
             Request.Bye -> addProperty("q", "bye")
         }
     }.toString()
@@ -149,6 +206,16 @@ object PeerProtocol {
                 if (bytes.isEmpty() || bytes.size > MAX_CHUNK) return null
                 Request.Put(path, at, bytes)
             }
+            "vectors" -> Request.Vectors
+            "want" -> texts(json, "k")?.let { Request.Want(it) }
+            "wanted" -> {
+                val max = json.get("max")?.asInt ?: return null
+                if (max <= 0) return null
+                // Their number, kept within ours: a peer asking for a hundred thousand keys gets
+                // as many as this version is willing to put in one message.
+                Request.Wanted(minOf(max, MAX_RECORDS))
+            }
+            "give" -> texts(json, "v")?.let { Request.Give(it) }
             "bye" -> Request.Bye
             else -> null
         }
@@ -182,6 +249,23 @@ object PeerProtocol {
                 addProperty("r", "put")
                 addProperty("n", reply.bytes)
             }
+            is Reply.Vectors -> {
+                addProperty("r", "vectors")
+                addProperty("have", reply.have)
+                addProperty("lacks", reply.lacks)
+            }
+            is Reply.Records -> {
+                addProperty("r", "records")
+                add("v", texts(reply.records))
+            }
+            is Reply.Keys -> {
+                addProperty("r", "keys")
+                add("k", texts(reply.keys))
+            }
+            is Reply.Took -> {
+                addProperty("r", "took")
+                addProperty("n", reply.stored)
+            }
             is Reply.No -> {
                 addProperty("r", "no")
                 addProperty("why", reply.why)
@@ -207,6 +291,19 @@ object PeerProtocol {
                 val bytes = json.get("n")?.asLong ?: return null
                 if (bytes < 0) return null
                 Reply.Stored(bytes)
+            }
+            "vectors" -> {
+                val have = json.get("have")?.asInt ?: return null
+                val lacks = json.get("lacks")?.asInt ?: return null
+                if (have < 0 || lacks < 0) return null
+                Reply.Vectors(have, lacks)
+            }
+            "records" -> texts(json, "v")?.let { Reply.Records(it) }
+            "keys" -> texts(json, "k")?.let { Reply.Keys(it) }
+            "took" -> {
+                val stored = json.get("n")?.asInt ?: return null
+                if (stored < 0) return null
+                Reply.Took(stored)
             }
             "no" -> Reply.No(json.get("why")?.asString.orEmpty())
             else -> null
@@ -235,6 +332,32 @@ object PeerProtocol {
             val bytes = item.get("n")?.asLong ?: return null
             if (bytes < 0) return null
             out.add(Held(path, bytes))
+        }
+        return out
+    }
+
+    private fun texts(values: kotlin.collections.List<String>) = com.google.gson.JsonArray().apply {
+        for (text in values.take(MAX_RECORDS)) add(text)
+    }
+
+    /**
+     * Keys or records as they arrived: a list of strings, each of a size this version is willing to
+     * hold, and no more of them than it is willing to answer.
+     *
+     * What is *in* them is not checked here and deliberately so. A key and a record are judged
+     * where every other key and record is judged — by the reader and the terms — and a protocol
+     * that also had an opinion about them would be a second place for that opinion to be wrong.
+     */
+    private fun texts(json: JsonObject, name: String): kotlin.collections.List<String>? {
+        val array = json.getAsJsonArray(name) ?: return null
+        if (array.size() > MAX_RECORDS) return null
+        val out = ArrayList<String>(array.size())
+        for (element in array) {
+            val primitive = element as? com.google.gson.JsonPrimitive ?: return null
+            if (!primitive.isString) return null
+            val text = primitive.asString
+            if (text.isEmpty() || text.length > MAX_TEXT) return null
+            out.add(text)
         }
         return out
     }

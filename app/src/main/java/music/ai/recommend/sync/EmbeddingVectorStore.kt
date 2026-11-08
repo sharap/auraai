@@ -74,6 +74,13 @@ class EmbeddingVectorStore(
 
     override suspend fun analysed(): Set<Long> = embeddings.ids()
 
+    override suspend fun held(tracks: List<Long>): List<VectorStore.Held<Long>> {
+        if (tracks.isEmpty()) return emptyList()
+        // The whole table is already a map in memory, so this is a few lookups rather than a query.
+        val all = embeddings.all()
+        return tracks.mapNotNull { id -> all[id]?.let { VectorStore.Held(id, it) } }
+    }
+
     override suspend fun takeIn(vectors: List<VectorStore.Held<Long>>): Int =
         // Left unoffered on purpose, so that this device will put them in the folder too. The
         // folder then holds every vector once per device that has it, which is what makes it a

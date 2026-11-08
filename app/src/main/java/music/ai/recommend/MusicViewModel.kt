@@ -71,12 +71,15 @@ import music.ai.recommend.sync.Sealing
 import music.ai.recommend.sync.PlaylistShelf
 import music.ai.recommend.sync.DirectoryPeerFiles
 import music.ai.recommend.sync.FileSyncFolder
+import music.ai.recommend.sync.PeerClient
 import music.ai.recommend.sync.PeerFiles
 import music.ai.recommend.sync.PeerTransport
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
 import music.ai.recommend.sync.SyncIdentity
 import music.ai.recommend.sync.SyncState
+import music.ai.recommend.sync.VectorCourier
+import music.ai.recommend.sync.VectorWriter
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
 import music.ai.recommend.scanner.MusicScanner
@@ -433,10 +436,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return DirectoryPeerFiles(File(localSyncRoot, "aura/v1"), deviceId)
     }
 
+    /**
+     * This device's vectors as a peer may ask for them.
+     *
+     * Over the cached coordinator and never one built here: this is called from whatever thread a
+     * peer's conversation is on, and building a coordinator — loading state, starting outboxes —
+     * from inside somebody else's phone call is not a thing to do. Until this device has one of
+     * its own, the honest answer to a peer is that there is nothing here.
+     */
+    private val vectorCourier = VectorCourier { syncCoordinator }
+
     /** The listener, the beacon and one exchange per pass; null until this device has an id. */
     private val peerTransport: PeerTransport? by lazy {
         syncDeviceId()?.let { id ->
-            PeerTransport(id, { peerFiles() }, { line -> Log.i(TAG, line) })
+            PeerTransport(
+                deviceId = id,
+                files = { peerFiles() },
+                records = { vectorCourier },
+                note = { line -> Log.i(TAG, line) }
+            )
         }
     }
     private var syncCoordinator: SyncCoordinator<Long>? = null
@@ -2243,8 +2261,70 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val outcomes = runCatching { transport.exchange(prefs.getString(KEY_SYNC_PEER, null)) }
             .onFailure { Log.e(TAG, "Could not talk to the other device", it) }
             .getOrDefault(emptyList())
+        noticeVectorsTraded(outcomes)
         refreshSyncSummary()
         outcomes.any { it.moved }
+    }
+
+    /**
+     * Puts the vectors a conversation moved into the card, and rebuilds what they change.
+     *
+     * Over a socket they no longer arrive inside a batch, so the pass that used to notice them
+     * never sees them. Without this the card would say nothing was taken in while the analysis of
+     * a whole library arrived, which is exactly how "it will not take any more" looked on a phone
+     * that was in fact filling up.
+     */
+    private fun noticeVectorsTraded(outcomes: List<PeerClient.Outcome>) {
+        val asked = outcomes.sumOf { it.vectorsTaken }
+        val served = outcomes.sumOf { it.vectorsGiven }
+        if (asked == 0 && served == 0) return
+        Log.i(TAG, "Vectors by name: $asked taken in, $served handed over")
+        _syncSummary.value = _syncSummary.value.let {
+            it.copy(
+                vectorsTakenIn = it.vectorsTakenIn + asked,
+                vectorsSent = it.vectorsSent + served
+            )
+        }
+        if (asked > 0) {
+            // Tracks that have become analysed without being scanned, which is what the smart
+            // albums and the playlist of the day are built from.
+            refreshScannedIds()
+            refreshVectorHousekeeping()
+            refreshSmartAlbums()
+            refreshDailyMix()
+        }
+    }
+
+    /**
+     * Removes the vectors files of a socket's directory tree, this device's own and the copies
+     * taken from a peer.
+     *
+     * They are a cache for a fetch that will not happen: over a socket a peer asks by name. Left
+     * where they are they would be served for ever to a peer that has to download them to find out
+     * it holds every one — which is what they were. The progress through them goes with them, since
+     * a line count against a file that is gone is a claim about nothing.
+     */
+    private fun dropPublishedVectors(state: SyncState) {
+        val root = File(localSyncRoot, "aura/v1")
+        var removed = 0
+        var bytes = 0L
+        for (device in root.listFiles().orEmpty()) {
+            val vectors = File(device, VectorWriter.DIRECTORY)
+            if (!vectors.isDirectory) continue
+            for (file in vectors.listFiles().orEmpty()) {
+                val size = file.length()
+                if (file.delete()) {
+                    removed++
+                    bytes += size
+                }
+            }
+            vectors.delete()
+        }
+        val forgotten = state.forgetVectorProgress()
+        if (removed > 0 || forgotten) {
+            state.save()
+            Log.i(TAG, "Vectors travel by name now: dropped $removed published file(s), $bytes bytes")
+        }
     }
 
     /**
@@ -2291,10 +2371,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             state.transport = transport
             state.save()
         }
-        // A destination that has never had this device's vectors gets them once. Not on every
-        // change — eleven megabytes for this library — but a folder that never receives them can
-        // never hand them back, which is most of what a folder is for.
-        if (state.fillVectorsFor(transport)) {
+        // A folder that has never had this device's vectors gets them once. Not on every change —
+        // eleven megabytes for this library — but a folder that never receives them can never hand
+        // them back, which is most of what a folder is for.
+        //
+        // A socket needs none of that. There is somebody on the other end to ask, so a device says
+        // which tracks it is missing and is served those by name, and the copy a folder has to hold
+        // is held instead by the peer's own store. See [PeerRecords].
+        if (transport == SyncState.DIRECT) {
+            dropPublishedVectors(state)
+        } else if (state.fillVectorsFor(transport)) {
             viewModelScope.launch {
                 val waiting = embeddings.offerEverythingAgain()
                 Log.i(TAG, "Vectors have not been to $transport yet: offering $waiting again")
@@ -2432,7 +2518,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // not read a folder that has only just been named — and gating it on having read
             // something first made it a pass that published no vectors at all, which was the whole
             // of what it was for. Found by a phone whose analysis the desktop could not hand back.
-            val sentVectors = if (pulled == null && !allVectors) null else
+            // Nothing is published to a socket: a peer asks for the tracks it is missing and is
+            // served them by name, so a library's worth written into a day file is seventeen
+            // megabytes nobody will ever fetch. Measured before this was true: a phone whose
+            // analysis had been cleared three times had written 59 197 708 bytes of vectors for a
+            // desktop that held every one of them already.
+            val sentVectors = if (prefs.getBoolean(KEY_SYNC_DIRECT, false) ||
+                (pulled == null && !allVectors)
+            ) null else
                 runCatching {
                     // Without a limit when it is not the end of an analysis, so the coordinator's
                     // own choice stands: naming the default here would quietly override whatever a
