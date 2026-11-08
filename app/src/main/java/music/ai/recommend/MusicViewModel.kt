@@ -50,6 +50,8 @@ import music.ai.recommend.ai.WaveSession
 import music.ai.recommend.ai.WaveSessions
 import music.ai.recommend.ai.WaveState
 import music.ai.recommend.ai.EmbeddingStore
+import music.ai.recommend.ai.SoundPrint
+import music.ai.recommend.ai.SoundPrintStore
 import music.ai.recommend.ai.ModelAsset
 import music.ai.recommend.ai.ModelProgress
 import music.ai.recommend.ai.ModelRepository
@@ -143,6 +145,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // renders them, so both sides must see the same cache and the same progress flow.
     private val modelRepository = ModelRepository.getInstance(application)
     private val embeddings = EmbeddingStore.getInstance(application)
+    private val soundPrints = SoundPrintStore.getInstance(application)
     private val textEncoder by lazy { ClapTextEncoder(modelRepository) }
     private val smartAlbumBuilder by lazy { SmartAlbumBuilder(application, modelRepository, embeddings, textEncoder) }
     private val playHistory = PlayHistory.getInstance(application)
@@ -605,6 +608,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _folders.value = listOf(allTracksFolder) + result
 
                 rebuildPlaylists() // Favorites is derived from allSongs, which just changed.
+                // Before the first pass, so that what this device asks for is named by its sound
+                // and not only by its spelling.
+                refreshSoundPrints()
                 refreshSmartAlbums()
                 refreshDailyMix()
                 refreshVectorHousekeeping()
@@ -1522,6 +1528,63 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Takes the prints of files that have none, or whose file has changed since.
+     *
+     * Not part of the scan and not part of a pass: a print is what makes a track nameable at all,
+     * and the tracks it matters most for are the ones with no vector yet — those are precisely
+     * what this device asks its peer about. Cheap enough for the whole library: a stat and a
+     * quarter of a megabyte each, 0.19 ms a file on a desktop and a couple of milliseconds on a
+     * phone, so four and a half thousand is seconds. Hashing whole files would have been minutes,
+     * and decoding each excerpt first, which was the other candidate, far longer than that.
+     */
+    private fun refreshSoundPrints() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val library = allSongs.associate { it.id to it.path }
+                if (library.isEmpty()) return@launch
+                val taken = soundPrints.refresh(library)
+                if (taken > 0) Log.i(TAG, "Took $taken sound prints")
+                soundPrints.keepOnly(library.keys)
+                // Always, and not only when prints were taken: the copies may have been waiting
+                // since before this device knew what their sound was.
+                if (fillTwinVectors() > 0) {
+                    refreshScannedIds()
+                    refreshVectorHousekeeping()
+                    refreshSmartAlbums()
+                    refreshDailyMix()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not take the sound prints", e)
+            }
+        }
+    }
+
+    /**
+     * Gives a track the vector of another copy of the same sound.
+     *
+     * No model and no network: the same sound has the same vector, which is what a print means.
+     * One library holds the same recording twice more often than one would think — 186 sounds of
+     * 4371 here — and every copy used to be analysed again from scratch. A copy could not even be
+     * filled by sync: a peer served the vector, this device recognised the sound as one it already
+     * had and dropped it as nothing new, so 99 tracks sat empty with the answer in the same table.
+     */
+    private suspend fun fillTwinVectors(): Int {
+        val prints = soundPrints.all()
+        if (prints.isEmpty()) return 0
+        val twins = SoundPrint.twins(prints, embeddings.ids())
+        if (twins.isEmpty()) return 0
+        val held = embeddings.all()
+        val copies = HashMap<Long, FloatArray>(twins.size * 2)
+        for ((empty, holder) in twins) {
+            copies[empty] = held[holder] ?: continue
+        }
+        if (copies.isEmpty()) return 0
+        val stored = embeddings.putAll(copies)
+        if (stored > 0) Log.i(TAG, "Filled $stored vectors from another copy of the same sound")
+        return stored
+    }
+
     private fun refreshScannedIds() {
         viewModelScope.launch {
             try {
@@ -2402,7 +2465,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return SyncCoordinator(
             deviceId = deviceId,
             state = state,
-            store = PlayHistoryStore(playHistory) { allSongs },
+            store = PlayHistoryStore(playHistory, { allSongs }, { soundPrints.all() }),
             folder = { syncFolder() },
             keepDays = PlayHistory.KEEP_DAYS,
             note = { Log.i(TAG, it) },

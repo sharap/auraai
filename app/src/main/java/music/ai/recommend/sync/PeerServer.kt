@@ -205,7 +205,7 @@ class PeerServer(
                         }
                     }
                     PeerProtocol.Request.Vectors -> records()?.let { desk ->
-                        PeerProtocol.Reply.Vectors(desk.held(), desk.lacking())
+                        PeerProtocol.Reply.Vectors(desk.held(), desk.lacking(), desk.named())
                     } ?: PeerProtocol.Reply.No("no vectors here")
                     is PeerProtocol.Request.Want -> records()?.let { desk ->
                         val served = desk.serve(request.keys)

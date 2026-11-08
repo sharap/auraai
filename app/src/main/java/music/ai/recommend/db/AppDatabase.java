@@ -9,11 +9,14 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 8, exportSchema = false)
+@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class, SoundPrintEntity.class},
+        version = 9, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
 
     public abstract PlayEventDao playEventDao();
+
+    public abstract SoundPrintDao soundPrintDao();
 
     private static volatile AppDatabase INSTANCE;
 
@@ -129,6 +132,22 @@ public abstract class AppDatabase extends RoomDatabase {
     };
 
     /**
+     * The sound of a file, kept apart from what any model made of it.
+     *
+     * Nothing is computed here. The table starts empty and fills as files are met — on an analysis,
+     * which reads the file anyway, and on a sync that could not name a track by its spelling.
+     */
+    static final Migration MIGRATION_8_9 = new Migration(8, 9) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS sound_prints ("
+                    + "songId INTEGER NOT NULL PRIMARY KEY,"
+                    + " stamp TEXT,"
+                    + " print TEXT)");
+        }
+    };
+
+    /**
      * Every migration this build knows, in the order they apply.
      *
      * Visible beyond this class so that a test can open an older file through exactly the path the
@@ -136,7 +155,7 @@ public abstract class AppDatabase extends RoomDatabase {
      */
     public static final Migration[] MIGRATIONS = {
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9
     };
 
     public static AppDatabase getDatabase(final Context context) {

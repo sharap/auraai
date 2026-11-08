@@ -139,8 +139,14 @@ object PeerProtocol {
         /** How many bytes of the file the other side holds now, so the sender can check. */
         data class Stored(val bytes: Long) : Reply()
 
-        /** How many vectors the speaker holds, and how many of its tracks have none. */
-        data class Vectors(val have: Int, val lacks: Int) : Reply()
+        /**
+         * How many vectors the speaker holds, how many of its tracks have none, and how many of
+         * them it can name by their sound.
+         *
+         * The third number is why a settled pair looks again: prints change what a key means
+         * without changing any total.
+         */
+        data class Vectors(val have: Int, val lacks: Int, val named: Int = 0) : Reply()
 
         /** The records asked for, which may be fewer than the keys or none at all. */
         data class Records(val records: kotlin.collections.List<String>) : Reply()
@@ -265,6 +271,7 @@ object PeerProtocol {
                 addProperty("r", "vectors")
                 addProperty("have", reply.have)
                 addProperty("lacks", reply.lacks)
+                addProperty("named", reply.named)
             }
             is Reply.Records -> {
                 addProperty("r", "records")
@@ -307,8 +314,11 @@ object PeerProtocol {
             "vectors" -> {
                 val have = json.get("have")?.asInt ?: return null
                 val lacks = json.get("lacks")?.asInt ?: return null
-                if (have < 0 || lacks < 0) return null
-                Reply.Vectors(have, lacks)
+                // Absent from a device built before prints existed, which is not a refusal to
+                // answer: it names nothing by sound, and zero says exactly that.
+                val named = json.get("named")?.asInt ?: 0
+                if (have < 0 || lacks < 0 || named < 0) return null
+                Reply.Vectors(have, lacks, named)
             }
             "records" -> texts(json, "v")?.let { Reply.Records(it) }
             "keys" -> texts(json, "k", MAX_KEYS)?.let { Reply.Keys(it) }

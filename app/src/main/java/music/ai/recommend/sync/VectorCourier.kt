@@ -34,6 +34,8 @@ class VectorCourier(private val coordinator: () -> SyncCoordinator<*>?) : PeerRe
 
     override fun lacking(): Int = through { it.vectorsLacking() } ?: 0
 
+    override fun named(): Int = through { it.vectorsNamed() } ?: 0
+
     override fun wanted(max: Int): List<String> = through { it.vectorsWanted(max) } ?: emptyList()
 
     override fun serve(keys: List<String>): List<String> =
@@ -41,11 +43,11 @@ class VectorCourier(private val coordinator: () -> SyncCoordinator<*>?) : PeerRe
 
     override fun take(records: List<String>): Int = through { it.takeInVectors(records) } ?: 0
 
-    override fun worthAsking(peerDeviceId: String, have: Int, lacks: Int): Boolean =
-        lastExchange[peerDeviceId] != fingerprint(have, lacks)
+    override fun worthAsking(peerDeviceId: String, have: Int, lacks: Int, named: Int): Boolean =
+        lastExchange[peerDeviceId] != fingerprint(have, lacks, named)
 
-    override fun remember(peerDeviceId: String, have: Int, lacks: Int) {
-        lastExchange[peerDeviceId] = fingerprint(have, lacks)
+    override fun remember(peerDeviceId: String, have: Int, lacks: Int, named: Int) {
+        lastExchange[peerDeviceId] = fingerprint(have, lacks, named)
     }
 
     /**
@@ -54,8 +56,8 @@ class VectorCourier(private val coordinator: () -> SyncCoordinator<*>?) : PeerRe
      * Kept in memory and not in [SyncState] on purpose: it is an optimisation and not a fact about
      * the data, and the cost of forgetting it is one more exchange after a restart.
      */
-    private fun fingerprint(have: Int, lacks: Int): String =
-        "$have:$lacks:${held()}:${lacking()}"
+    private fun fingerprint(have: Int, lacks: Int, named: Int): String =
+        "$have:$lacks:$named:${held()}:${lacking()}:${named()}"
 
     private fun <T> through(body: suspend (SyncCoordinator<*>) -> T): T? {
         val present = coordinator() ?: return null

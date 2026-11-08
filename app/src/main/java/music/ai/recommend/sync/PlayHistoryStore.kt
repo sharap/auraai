@@ -12,7 +12,16 @@ import music.ai.recommend.model.Song
  */
 class PlayHistoryStore(
     private val history: PlayHistory,
-    private val songs: suspend () -> List<Song>
+    private val songs: suspend () -> List<Song>,
+    /**
+     * The print of each file's sound, for the tracks this device has taken one of.
+     *
+     * The key carries it when it is known, and then identity stops being a judgement call about
+     * spelling: two copies of one recording agree however their tags were written, and two
+     * different recordings under one name stop being the same track. Null for a file nobody has
+     * hashed yet, which is the honest answer and the one the tags are for.
+     */
+    private val prints: suspend () -> Map<Long, String> = { emptyMap() }
 ) : HistoryStore<Long> {
 
     override suspend fun own(afterId: Long, limit: Int): List<OwnListen<Long>> =
@@ -38,13 +47,15 @@ class PlayHistoryStore(
 
     override suspend fun library(): Map<Long, TrackKey> {
         val library = songs()
+        val known = prints()
         val keys = LinkedHashMap<Long, TrackKey>(library.size * 2)
         for (song in library) {
             keys[song.id] = TrackKey.describe(
                 artist = song.artist,
                 title = song.title,
                 fileName = song.path.substringAfterLast('/'),
-                durationMs = song.duration
+                durationMs = song.duration,
+                hash = known[song.id]
             )
         }
         return keys

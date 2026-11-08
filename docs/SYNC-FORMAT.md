@@ -717,6 +717,63 @@ What a socket destination therefore has in its tree is history, playlists and th
 how far its lines had been read goes with it, since a line count against a file that is gone is a
 claim about nothing. A folder destination is untouched by all of this and still gets everything.
 
+### What a recording is, by its own sound
+
+A track has to be named to another device, and the two descriptions it can be named by both fail in
+their own way. Tags and a duration are a judgement call about spelling, and measured on one real
+pair of libraries the judgement went wrong 57 times out of 231: 24 artists the two tag readers
+disagreed about (`flёur` against `fl¸ur`, `демо` against `äåìî` — each side mangling what the other
+read correctly), 15 titles one reader found and the other did not, 18 durations more than a second
+apart because one side reads whole seconds from a header. Worse, tags are not unique: 213 keys on
+that desktop named **more than one file** — 452 files in all — and the right copy was then chosen by
+whichever duration was closer, which is a coin toss. Those 157 tracks could never arrive: the vector
+served was the other copy's, its excerpt did not match, and it was refused every time, correctly.
+
+So the bytes — but not the file's bytes. That was the first idea and it is wrong: a file is mostly
+tags and artwork at the front, and editing a tag would change the one thing that was supposed to be
+exact. What is hashed is the **sound**:
+
+| | |
+| --- | --- |
+| mp3 and anything else | past a leading ID3v2 tag (its synchsafe size, plus its footer when it says it has one), and before a trailing ID3v1 or APE tag |
+| flac | past `fLaC` and the metadata blocks, each of which states its own length |
+| wav | the contents of the `data` chunk |
+| mp4 and m4a | the contents of the `mdat` box |
+
+Then: **sha256 of the sound's length as eight big-endian bytes, followed by up to 256 KiB from the
+middle of the sound.** The middle, because that is also where the excerpt the analysis listens to
+comes from; the length, so that a copy cut short is never mistaken for the whole; a quarter of a
+megabyte, because that is about fifteen seconds of music and over 300 real mp3s it gave 300 distinct
+prints.
+
+**No decoding, deliberately.** A device only carries vectors for formats it shares a decoder with,
+but it carries history, playlists and the playlist of the day for everything it can play, and those
+name tracks too. An identity that needed a decoder would leave exactly the formats that already lose
+the most with nothing but their spelling. Finding where the sound sits needs no decoder, so an ogg
+is named as well as an mp3 — and a format this does not know is still named consistently by both
+devices, which is all that is asked of it.
+
+It is also the cheapest of the three candidates, by a wide margin:
+
+| | per file |
+| --- | --- |
+| a slice of the sound | **0.19 ms** |
+| the whole file | 3 ms for an mp3, 27 ms for a flac |
+| the decoded excerpt | 39 ms |
+
+So a library of four and a half thousand is about a second on a desktop and seconds on a phone, and
+nothing has to be scheduled, rationed or explained to the owner.
+
+A print is kept with the **stamp** of the file it was taken from — its length and modification time,
+exactly as a refusal records one — and that is the only reason it is ever taken again. One notion of
+"this file has changed", not two.
+
+The print travels in the key's `h` field, which the format has carried from the beginning and which
+nothing until now computed. `TrackKey.matches` compares hashes alone when both sides have one, and
+`TrackMatcher` looks in its hash index before it looks at tags — so two copies of one recording
+agree however their tags were written, and two different recordings under one name stop being the
+same track.
+
 ### A VPN, which takes the room next door with it
 
 A VPN takes the whole routing table, the address of the machine in the next room included. A phone
@@ -939,6 +996,7 @@ Three things must not drift, and each has a guard:
 | Pairing, the key in hardware, discovery | with the network transport, not before |
 | The device id, the writer and the reader | written and tested, the folder behind an interface |
 | Matching a key to a local track | written and tested |
+| Naming a recording by its sound | done on both sides: a slice of the sound, no decoding, 0.19 ms a file — see above |
 | Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
 | The listening history knowing which device heard it | done on both sides, with the older store converted in place |
 | Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |

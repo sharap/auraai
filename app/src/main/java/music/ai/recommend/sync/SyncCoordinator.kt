@@ -479,6 +479,21 @@ class SyncCoordinator<Track>(
      */
     suspend fun vectorsHeld(): Int = vectors?.analysed()?.size ?: 0
 
+    /**
+     * How many of this device's tracks it can name by their sound.
+     *
+     * Part of what makes an exchange worth having: a device that has taken prints since the last
+     * one can now be understood where it could not be before, and two libraries whose counts have
+     * not moved can still have become nameable. Without this in the reckoning, a pair that had
+     * settled would never find out — measured exactly that way, a phone took 4560 prints and the
+     * desktop went on holding the 157 vectors it had never been able to place.
+     */
+    suspend fun vectorsNamed(): Int {
+        val keys = library()
+        if (keys.isEmpty()) return 0
+        return keys.values.count { it.hash != null }
+    }
+
     /** How many of this device's tracks have no vector; zero before the library has been read. */
     suspend fun vectorsLacking(): Int {
         val vectors = vectors ?: return 0

@@ -66,11 +66,15 @@ class PeerTransportTest {
         val gaps = ArrayList(missing)
         val asked = ArrayList<List<String>>()
         var servings = 0
+        /** How many of its tracks this device can name by sound; see [PeerRecords.named]. */
+        var names = 0
         private val seen = HashMap<String, String>()
 
         override fun held(): Int = holds.size
 
         override fun lacking(): Int = gaps.size
+
+        override fun named(): Int = names
 
         override fun wanted(max: Int): List<String> = gaps.take(max)
 
@@ -92,14 +96,15 @@ class PeerTransportTest {
             return stored
         }
 
-        override fun worthAsking(peerDeviceId: String, have: Int, lacks: Int): Boolean =
-            seen[peerDeviceId] != fingerprint(have, lacks)
+        override fun worthAsking(peerDeviceId: String, have: Int, lacks: Int, named: Int): Boolean =
+            seen[peerDeviceId] != fingerprint(have, lacks, named)
 
-        override fun remember(peerDeviceId: String, have: Int, lacks: Int) {
-            seen[peerDeviceId] = fingerprint(have, lacks)
+        override fun remember(peerDeviceId: String, have: Int, lacks: Int, named: Int) {
+            seen[peerDeviceId] = fingerprint(have, lacks, named)
         }
 
-        private fun fingerprint(have: Int, lacks: Int) = "$have:$lacks:${holds.size}:${gaps.size}"
+        private fun fingerprint(have: Int, lacks: Int, named: Int) =
+            "$have:$lacks:$named:${holds.size}:${gaps.size}:$names"
     }
 
     private fun trade(server: PeerServer, deviceId: String, root: File, records: PeerRecords) =
@@ -445,7 +450,8 @@ class PeerTransportTest {
             PeerProtocol.Reply.Index(emptyList()),
             PeerProtocol.Reply.Chunk(0L, byteArrayOf(9, 8, 7), eof = true),
             PeerProtocol.Reply.Stored(12L),
-            PeerProtocol.Reply.Vectors(4543, 229),
+            PeerProtocol.Reply.Vectors(4543, 229, 4560),
+            PeerProtocol.Reply.Vectors(0, 0, 0),
             PeerProtocol.Reply.Records(listOf("""{"k":{"t":"one"},"f":"AAA="}""")),
             PeerProtocol.Reply.Records(emptyList()),
             PeerProtocol.Reply.Keys(listOf("""{"t":"one"}""")),
@@ -544,6 +550,39 @@ class PeerTransportTest {
                 assertNull(again.trouble)
                 assertEquals(0, again.vectorsTaken)
                 assertEquals(1, alices.servings)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a peer that has learnt to name its tracks is asked again`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            val alices = Desk(held = mapOf("A" to "A:one"))
+            val bobs = Desk(missing = listOf("A", "X"))
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                assertEquals(1, trade(server, bob, his, bobs).vectorsTaken)
+                assertEquals(1, alices.servings)
+
+                // Settled: X is still missing and Alice still has not got it.
+                trade(server, bob, his, bobs)
+                assertEquals(1, alices.servings)
+
+                // Alice has taken her prints. She holds nothing new and lacks nothing new, and yet
+                // what she can be *asked* about has changed — which is exactly the case that kept
+                // 157 vectors from ever arriving: a phone hashed its whole library and the pair
+                // went on believing there was nothing to discuss.
+                alices.names = 4560
+                trade(server, bob, his, bobs)
+                assertEquals(2, alices.servings)
             } finally {
                 server.stop()
             }

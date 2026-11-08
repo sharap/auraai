@@ -227,7 +227,7 @@ object PeerClient {
         }
         // Nothing has changed on either side since the last exchange with this peer, so the last
         // answer still stands and the keys need not be carried again to hear it.
-        if (!records.worthAsking(peer, theirs.have, theirs.lacks)) return outcome
+        if (!records.worthAsking(peer, theirs.have, theirs.lacks, theirs.named)) return outcome
 
         if (theirs.have > 0) {
             for (chunk in records.wanted(MAX_WANTED).chunked(PeerProtocol.MAX_RECORDS)) {
@@ -294,7 +294,7 @@ object PeerClient {
             // them however many times it asks.
             if (gave == 0) break
         }
-        records.remember(peer, theirs.have, theirs.lacks)
+        records.remember(peer, theirs.have, theirs.lacks, theirs.named)
         return outcome
     }
 

@@ -38,6 +38,9 @@ interface PeerRecords {
     /** How many of this device's tracks have no vector. */
     fun lacking(): Int
 
+    /** How many of this device's tracks it can name by their sound; see `SoundPrint`. */
+    fun named(): Int
+
     /** The keys of tracks with no vector, at most [max] of them. */
     fun wanted(max: Int): List<String>
 
@@ -59,14 +62,19 @@ interface PeerRecords {
     /**
      * Whether an exchange with this peer is worth having at all.
      *
-     * Both sides' counts decide it. Nothing analysed here, nothing analysed there and nothing new
-     * missing means the last answer still stands, and asking again would carry a few thousand keys
-     * every half minute for ever to be told the same thing. It compares counts rather than the keys
-     * themselves, so a library that swapped one track for another on both counts is noticed only
-     * once something else moves — which costs a delay and never a wrong vector.
+     * Both sides' counts decide it: what each holds, what each is missing, and how much of it each
+     * can name by sound. Nothing new on either count means the last answer still stands, and asking
+     * again would carry a few thousand keys every half minute for ever to be told the same thing.
+     * Naming belongs in it because it changes the answer without changing the totals — a device
+     * that has just taken its prints can be understood where it could not be a minute ago, and a
+     * pair that had settled would otherwise never find out.
+     *
+     * It compares counts rather than the keys themselves, so a library that swapped one track for
+     * another on both counts is noticed only once something else moves — a delay, never a wrong
+     * vector.
      */
-    fun worthAsking(peerDeviceId: String, have: Int, lacks: Int): Boolean
+    fun worthAsking(peerDeviceId: String, have: Int, lacks: Int, named: Int): Boolean
 
     /** Remembers what both sides held, so an unchanged pair is not asked again. */
-    fun remember(peerDeviceId: String, have: Int, lacks: Int)
+    fun remember(peerDeviceId: String, have: Int, lacks: Int, named: Int)
 }
