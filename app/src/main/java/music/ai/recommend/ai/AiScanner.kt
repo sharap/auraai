@@ -17,6 +17,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -38,9 +39,30 @@ sealed interface ScanStage {
 class AiScanner(
     context: Context,
     private val models: ModelRepository,
-    private val embeddings: EmbeddingStore
+    private val embeddings: EmbeddingStore,
+    /**
+     * Whether another device has announced itself recently; see `PeerTransport.somebodyNear`.
+     *
+     * Asked before waiting for anything, because waiting is only sensible when there is somebody
+     * to wait for. False in a build or a test with no transport, and then a scan starts at once as
+     * it always did.
+     */
+    private val peerNear: () -> Boolean = { false },
+    /**
+     * How many conversations have happened, in either direction; see
+     * `PeerTransport.conversationsHad`.
+     *
+     * The wait ends when this moves without the vectors moving: the other device has been and
+     * gone and brought nothing, so there is nothing to wait for. An event rather than a number of
+     * seconds, which matters because the devices this runs on are not equally fast and the one
+     * doing the waiting is usually the slower.
+     */
+    private val conversationsHad: () -> Int = { 0 }
 ) {
     private val appContext = context.applicationContext
+
+    /** The prints of this device's files, so that what is asked for is named by its sound. */
+    private val prints = SoundPrintStore.getInstance(context)
     private val audioProcessor = AudioProcessor()
 
     private var ortEnv: OrtEnvironment? = null
@@ -126,7 +148,36 @@ class AiScanner(
             refusals = embeddings.refusals(),
             stampOf = { id -> stampOf(pathsById[id]) }
         ).toHashSet()
-        val songsToProcess = songs.filter { it.id in pending }
+        var songsToProcess = songs.filter { it.id in pending }
+
+        // Asking is a hundred times cheaper than answering. A print costs a couple of
+        // milliseconds — a seek and a quarter of a megabyte — and lets the other device recognise
+        // the track by its sound; analysing the same track costs seconds of decoding and
+        // inference. So the backlog is named first, and then whatever the other device is still
+        // handing over is given a moment to arrive before any of it is computed here.
+        prints.refresh(songsToProcess.associate { it.id to it.path })
+        val askedAt = System.currentTimeMillis()
+        val asked = songsToProcess.size
+        if (letVectorsArrive(asked, onStage)) {
+            val arrived = embeddings.ids()
+            songsToProcess = songsToProcess.filter { it.id !in arrived }
+            Log.i(
+                TAG,
+                "Waited ${System.currentTimeMillis() - askedAt} ms for the other device: " +
+                    "${asked - songsToProcess.size} of $asked arrived, " +
+                    "${songsToProcess.size} are left to analyse"
+            )
+        } else {
+            // Said out loud, because the silent version of this line is how a whole library came
+            // to be analysed twice without anything in the log admitting it: the decision not to
+            // wait looked exactly like no decision at all.
+            Log.i(
+                TAG,
+                "Nothing arrived in the ${System.currentTimeMillis() - askedAt} ms before the " +
+                    "scan set off, so all $asked will be analysed here"
+            )
+        }
+
         val total = songsToProcess.size
 
         if (total == 0) {
@@ -223,6 +274,67 @@ class AiScanner(
      * which is after it finished with the first, so the buffer about to be refilled is never the one
      * being read.
      */
+    /**
+     * Waits while vectors are still arriving from the other device, and no longer.
+     *
+     * The moment a scan starts, the app asks its peer for everything this device is missing — and
+     * what comes back costs nothing to use. Analysing a track the other device has already
+     * analysed is the one kind of work here that is purely wasted, and on a phone it is also
+     * battery.
+     *
+     * Bounded by events and not by a clock, which is the only way to bound it. Three of them end
+     * the wait: vectors stopped arriving after arriving, the other device has been and gone
+     * without bringing any, or nobody was there to begin with. A measured number of seconds would
+     * end it wrongly on at least one device, because the phone doing the waiting may be a cheap
+     * one and the thing it is waiting for runs somewhere else entirely — the two have no reason to
+     * be in proportion.
+     *
+     * What makes the third case fast rather than a thirty-second timer is the beacon: this device
+     * announces how many vectors it is missing, and a peer that hears it dials at once instead of
+     * on its own schedule. That matters most where it is needed most — a phone under a VPN cannot
+     * dial at all, so without the announcement its only hope was to be called by chance.
+     *
+     * @return true when something arrived, so the caller knows to look again.
+     */
+    private suspend fun letVectorsArrive(waiting: Int, onStage: (ScanStage) -> Unit): Boolean {
+        if (waiting == 0) return false
+        // Nobody has announced themselves, so there is nobody to ask and nothing to wait for. A
+        // library with one device pays nothing at all for this.
+        if (!runCatching { peerNear() }.getOrDefault(false)) return false
+        val conversationsBefore = runCatching { conversationsHad() }.getOrDefault(0)
+        var held = embeddings.ids().size
+        val before = held
+        var quiet = 0
+        var rounds = 0
+        while (!isStopping && rounds++ < MOST_ROUNDS) {
+            delay(ARRIVAL_PAUSE_MS)
+            currentCoroutineContext().ensureActive()
+            val now = embeddings.ids().size
+            if (now > held) {
+                quiet = 0
+                held = now
+                // Said, because otherwise this is a minute of a screen that claims to be starting
+                // and visibly is not.
+                onStage(ScanStage.Scanning("", held, held + waiting, 0L))
+            } else {
+                quiet++
+                // The other device answered and brought nothing of ours. Nothing is coming, and
+                // the answer arrived as fast as the network allows rather than as fast as some
+                // constant guessed on one developer's phone.
+                val answered = runCatching { conversationsHad() }.getOrDefault(0) >
+                    conversationsBefore
+                if (held == before && answered) break
+            }
+            // Something has arrived, so more is probably coming, and the gaps between one round
+            // and the next are seconds: measured once at two seconds of patience, the scan set off
+            // after half the library had arrived and computed 2308 vectors that were on their way
+            // to it. Nothing has arrived yet and nobody has answered either, so the wait stands —
+            // bounded only by [MOST_ROUNDS], which is there for a peer that never replies at all.
+            if (held > before && quiet >= PATIENT_ROUNDS) break
+        }
+        return held > before
+    }
+
     private suspend fun decodeInto(channel: SendChannel<Prepared>, songs: List<Song>) {
         val buffers = arrayOf(FloatArray(AudioProcessor.FEATURE_SIZE), FloatArray(AudioProcessor.FEATURE_SIZE))
         var slot = 0
@@ -230,6 +342,10 @@ class AiScanner(
             for (song in songs) {
                 if (isStopping) break
                 currentCoroutineContext().ensureActive()
+
+                // It may have arrived since the list was made: a pass runs while this walks the
+                // library, and a vector in hand is worth more than the one this would compute.
+                if (embeddings.has(song.id)) continue
 
                 val features = try {
                     val pcm = decodeExcerpt(song)
@@ -605,6 +721,26 @@ class AiScanner(
     }
 
     private companion object {
+
+        /**
+         * How long one quiet moment is: how often the wait looks up to see what has changed.
+         *
+         * A second, which is short against anything it is waiting for — a conversation opening, a
+         * round of fifty vectors arriving — and cheap, because looking costs a count of a map
+         * already in memory. There is deliberately no constant here for *how long to wait*: that
+         * is decided by what happens, not by a number. See [letVectorsArrive].
+         */
+        private const val ARRIVAL_PAUSE_MS = 1_000L
+
+        /**
+         * Something has arrived, so wait for the stream to really stop. Ten seconds of quiet,
+         * because the gap between one conversation and the next is a few seconds and a scan that
+         * sets off into the middle of a restore computes what is already on its way to it.
+         */
+        private const val PATIENT_ROUNDS = 10
+
+        /** However patient, not for ever: five minutes is longer than a library takes to arrive. */
+        private const val MOST_ROUNDS = 300
         const val TAG = "AiScanner"
         const val EMBEDDING_SIZE = 512
         /** Upper bound on one track's decode, so a stuck codec cannot hang the scan. */

@@ -629,7 +629,14 @@ class SyncCoordinator<Track>(
             note("Vectors by name: ${taking.size} usable, $unmatched for tracks we lack, refused $refused")
         }
         if (taking.isEmpty()) return 0
-        return vectors.takeIn(taking)
+        val stored = vectors.takeIn(taking)
+        // Said even when nothing was refused, because this is the only place a device that
+        // answered a conversation rather than starting it can say it received anything: the
+        // summary at the end belongs to whoever dialled. 4223 vectors once arrived on a phone
+        // without one line admitting it, while the phone's own scanner concluded that nothing was
+        // coming and set about computing them again.
+        note("Vectors by name: $stored taken in")
+        return stored
     }
 
     // Gson rather than an import, so this file goes on standing on nothing but its own package.

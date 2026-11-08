@@ -10,7 +10,7 @@ import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
 @Database(entities = {EmbeddingEntity.class, PlayEventEntity.class, SoundPrintEntity.class},
-        version = 9, exportSchema = false)
+        version = 10, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
 
@@ -148,6 +148,21 @@ public abstract class AppDatabase extends RoomDatabase {
     };
 
     /**
+     * The excerpt start beside the print; see {@link SoundPrintEntity#excerptStartMs}.
+     *
+     * Added rather than recreated, and null for every existing row: null means "nobody has worked
+     * this out", which is the truth about a file hashed before this column existed, and the first
+     * conversation that needs the number works it out once and writes it here. Null rather than
+     * zero because zero is a real answer — see {@link SoundPrintEntity#excerptStartMs}.
+     */
+    static final Migration MIGRATION_9_10 = new Migration(9, 10) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE sound_prints ADD COLUMN excerptStartMs INTEGER");
+        }
+    };
+
+    /**
      * Every migration this build knows, in the order they apply.
      *
      * Visible beyond this class so that a test can open an older file through exactly the path the
@@ -155,7 +170,8 @@ public abstract class AppDatabase extends RoomDatabase {
      */
     public static final Migration[] MIGRATIONS = {
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+            MIGRATION_9_10
     };
 
     public static AppDatabase getDatabase(final Context context) {

@@ -874,6 +874,24 @@ hand rather than taken from mDNS so that both platforms run the same thirty line
 network drops broadcasts between its clients, which drops mDNS too, there is a field to type an
 address into.
 
+A beacon also carries **what the sender is short of** — one number, *how many tracks I have no
+vector for* — and that is how a device which cannot dial gets to ask. Under a VPN that forbids
+bypassing the tunnel a phone answers conversations and never starts one, so everything it needs
+arrives on somebody else's initiative; the broadcast is the one thing of ours that still leaves the
+tunnel. A peer that hears the number dials at once instead of on its own timer, which turns a wait
+of up to thirty seconds into a round trip. The field is left out entirely when nothing is wanted, so
+the ordinary beacon is byte for byte the length it always was and a build that never heard of
+errands reads it unchanged; it is sealed with the rest, because how much music somebody is missing
+is a fact about their library.
+
+What the number is *for* is the one decision a scan makes before it spends an hour: analysing a
+track the other device has already analysed is the only purely wasted work here, and on a phone it
+is also battery. So the scan waits — but it waits on events, never on a measured interval. Three
+things end the wait: vectors stopped arriving after arriving, the other device has been and gone
+without bringing any, or nobody announced themselves at all. A number of seconds would be wrong on
+at least one device, because the one doing the waiting may be a cheap phone while the thing it waits
+for runs elsewhere, and the two have no reason to be in proportion.
+
 What is still the phrase's job and not pairing's: a code shown on one device and read on the other,
 with a random key kept in hardware, is the next step and is what will let the phrase go. The
 transport is built so that this changes one function — where the key comes from — and nothing else.
@@ -1037,7 +1055,7 @@ Three things must not drift, and each has a guard:
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
 | Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
 | The socket itself | done on both sides: sealed frames, five questions about files, byte offsets, tested end to end over a loopback socket |
-| Working with a VPN running | done on the phone: each dialled socket and each beacon is put on the local network, so a tunnel does not take the room next door with it |
+| Working with a VPN running | done on the phone: each dialled socket and each beacon is put on the local network, so a tunnel does not take the room next door with it; and a phone that can only answer still asks, by saying in its beacon how many vectors it is missing |
 | Finding each other on a network | done: a sealed broadcast every pass, with an address to type where broadcasts do not arrive |
 | Sync without a shared folder on Android | done: the files live in the app's own storage, and nothing runs in the background |
 | Everything else here | designed, not written |

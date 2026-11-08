@@ -87,7 +87,11 @@ class AiScanService : Service() {
             val active = AiScanner(
                 context = this,
                 models = ModelRepository.getInstance(this),
-                embeddings = EmbeddingStore.getInstance(this)
+                embeddings = EmbeddingStore.getInstance(this),
+                // Through a process-wide holder rather than a reference, because the transport
+                // belongs to the view model and this service may outlive it; see [PeerPresence].
+                peerNear = { music.ai.recommend.sync.PeerPresence.somebodyNear() },
+                conversationsHad = { music.ai.recommend.sync.PeerPresence.conversationsHad() }
             )
             scanner = active
             active.scanSongs(songs) { stage ->

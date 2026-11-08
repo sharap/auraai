@@ -21,7 +21,7 @@ class BeaconTest {
     fun `an announcement says who and where`() {
         val packed = Beacon.pack(device, 54_333, now, key)
         assertNotNull(packed)
-        assertEquals(device to 54_333, Beacon.unpack(packed!!, key, now))
+        assertEquals(Beacon.Heard(device, 54_333, 0), Beacon.unpack(packed!!, key, now))
     }
 
     @Test
@@ -83,5 +83,46 @@ class BeaconTest {
     fun `an announcement fits a datagram with room to spare`() {
         val packed = Beacon.pack(device, 65_535, now, key)!!
         assertTrue("маячок ${packed.size} байт", packed.size < 200)
+    }
+
+    @Test
+    fun `an errand is carried and says nothing to anybody else`() {
+        val packed = Beacon.pack(device, 54_333, now, key, wanted = 4_328)!!
+        assertEquals(Beacon.Heard(device, 54_333, 4_328), Beacon.unpack(packed, key, now))
+        // Sealed with the rest of it. How much music a device is missing is a fact about the
+        // owner's library, and it is broadcast to the whole network every few seconds.
+        assertTrue("4328" !in packed.toString(Charsets.ISO_8859_1))
+        assertTrue(packed.size < 200)
+    }
+
+    @Test
+    fun `wanting nothing is said by saying nothing`() {
+        // The field is left out entirely, so a beacon from a device with nothing to ask for is
+        // byte for byte the length it always was — and a build that never heard of errands reads
+        // it unchanged.
+        val quiet = Beacon.pack(device, 54_333, now, key)!!
+        val alsoQuiet = Beacon.pack(device, 54_333, now, key, wanted = 0)!!
+        assertEquals(quiet.size, alsoQuiet.size)
+        assertEquals(0, Beacon.unpack(alsoQuiet, key, now)?.wanted)
+        // And a nonsense errand is read as none rather than as a negative one.
+        val odd = Beacon.pack(device, 54_333, now, key, wanted = -5)!!
+        assertEquals(0, Beacon.unpack(odd, key, now)?.wanted)
+    }
+
+    @Test
+    fun `an announcement asks for what the device is short of, freshly each time`() {
+        // Asked per announcement and not kept, because the number's whole value is being current:
+        // a device handed four thousand vectors must stop asking for them in the next breath.
+        val answers = listOf(4_000, 0).iterator()
+        val asked = java.util.concurrent.atomic.AtomicInteger(0)
+        val beacon = Beacon(
+            deviceId = device,
+            port = 54_333,
+            key = { key },
+            wanted = { asked.incrementAndGet(); if (answers.hasNext()) answers.next() else 0 }
+        )
+        beacon.announce(now)
+        beacon.announce(now)
+        assertEquals(2, asked.get())
     }
 }

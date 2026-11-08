@@ -116,6 +116,32 @@ class EmbeddingStore private constructor(context: Context) {
      * counter and sync all mean by the word. Reads only the id column when the vectors are not
      * already cached. Refused tracks are not analysed; see [refusals].
      */
+    /**
+     * Whether this track has a vector right now.
+     *
+     * One lookup rather than a copy of every id, because the scan asks it per track: a vector that
+     * arrived from the other device while the scan was walking the library saves a decode and an
+     * inference, and asking [ids] for that would copy four and a half thousand of them each time.
+     */
+    suspend fun has(songId: Long): Boolean = withContext(Dispatchers.IO) {
+        cache?.containsKey(songId) ?: ids().contains(songId)
+    }
+
+    /**
+     * How many tracks the analysis has already dealt with — vectors and refusals alike — or null
+     * while the table has not been read yet.
+     *
+     * Without suspending, unlike everything else here, because of where it is asked from: the
+     * beacon announces what this device is missing from a socket thread every few seconds, and a
+     * question that could block or touch the database there would be the wrong question in the
+     * wrong place. Null rather than zero for "not known yet", since zero is what a device with an
+     * empty table truthfully has.
+     */
+    fun dealtWithNow(): Int? {
+        val held = cache ?: return null
+        return held.size + (refused?.size ?: 0)
+    }
+
     suspend fun ids(): Set<Long> = withContext(Dispatchers.IO) {
         cache?.keys?.toSet() ?: mutex.withLock {
             cache?.keys?.toSet() ?: run {

@@ -76,6 +76,7 @@ import music.ai.recommend.sync.FileSyncFolder
 import music.ai.recommend.sync.PeerClient
 import music.ai.recommend.sync.PhraseVault
 import music.ai.recommend.sync.PeerFiles
+import music.ai.recommend.sync.PeerPresence
 import music.ai.recommend.sync.PeerTransport
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
@@ -468,8 +469,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // A VPN takes the route to the machine in the next room along with everything
                 // else, and in the places this app is most wanted a VPN is ordinary.
                 network = WifiNetwork(getApplication()),
+                // What this device is short of, announced so that a device which cannot dial can
+                // still ask. Under a VPN that is this device: it answers conversations and never
+                // starts one, so without saying this out loud its only hope was to be called by
+                // chance on somebody else's thirty-second timer.
+                vectorsWanted = {
+                    val dealtWith = embeddings.dealtWithNow()
+                    if (dealtWith == null) 0 else (allSongs.size - dealtWith).coerceAtLeast(0)
+                },
+                onPeerInNeed = { peer ->
+                    Log.i(TAG, "${peer.deviceId.take(8)} is missing ${peer.wanted} vectors; dialling")
+                    viewModelScope.launch { syncPass(force = true, takeIn = true) }
+                },
                 note = { line -> Log.i(TAG, line) }
-            )
+            ).also { transport ->
+                // So that the scan, which runs in a service of its own, can ask whether waiting
+                // for vectors is waiting for anybody; see [PeerPresence].
+                PeerPresence.offer(
+                    near = { transport.somebodyNear() },
+                    conversations = { transport.conversationsHad() }
+                )
+            }
         }
     }
     private var syncCoordinator: SyncCoordinator<Long>? = null
@@ -2487,7 +2507,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             folder = { syncFolder() },
             keepDays = PlayHistory.KEEP_DAYS,
             note = { Log.i(TAG, it) },
-            vectors = EmbeddingVectorStore(embeddings, modelRepository) { allSongs },
+            vectors = EmbeddingVectorStore(embeddings, modelRepository, soundPrints) { allSongs },
             playlists = PlaylistShelf(
                 songs = { allSongs },
                 favouriteIds = { _favoriteSongIds.value },
@@ -2536,6 +2556,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // rest back until somebody happens to open the app is what makes this feel jerky.
                 if (wasScanning && !scanning) {
                     syncPass(force = true, takeIn = true, allVectors = true)
+                }
+                // And the moment it starts, because the other device may already hold what this
+                // one is about to spend an hour computing. The scan waits for whatever is on its
+                // way; see AiScanner.letVectorsArrive.
+                if (!wasScanning && scanning) {
+                    syncPass(force = true, takeIn = true)
                 }
                 wasScanning = scanning
             }

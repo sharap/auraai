@@ -34,6 +34,20 @@ class PeerTransport(
     private val records: () -> PeerRecords? = { null },
     /** Where the local devices are, for a platform that can say; see [LocalNetwork]. */
     private val network: LocalNetwork? = null,
+    /**
+     * How many tracks this device has no vector for; see [Beacon]. Announced, so that a device
+     * which cannot dial can still ask.
+     */
+    private val vectorsWanted: () -> Int = { 0 },
+    /**
+     * Called when a peer announces that it is short of vectors.
+     *
+     * The point of the call is *when* it happens. A device that cannot dial — a phone under a
+     * tunnel — is reachable only on somebody else's initiative, and that initiative used to be a
+     * thirty-second timer. Hearing the beacon turns the wait into a round trip, which is the
+     * difference between a scan that pauses and a scan that recomputes a library.
+     */
+    private val onPeerInNeed: (Beacon.Peer) -> Unit = {},
     private val note: (String) -> Unit = {}
 ) {
 
@@ -77,6 +91,9 @@ class PeerTransport(
 
     private val seen = LinkedHashMap<String, Beacon.Peer>()
 
+    /** When each peer's errand was last acted on; guarded by [seen]. See [ERRAND_FLOOR_MS]. */
+    private val errands = HashMap<String, Long>()
+
     @Volatile
     private var lastOutcome: PeerClient.Outcome? = null
 
@@ -86,10 +103,35 @@ class PeerTransport(
     @Volatile
     private var tunnelled: Boolean = false
 
+    /**
+     * Whether some device has announced itself recently enough for its address to mean anything.
+     *
+     * Asked by the scan before it decides whether waiting for vectors is waiting for anybody. The
+     * question is about the other device, not about this one, which is the only way to put it that
+     * does not quietly assume how fast this phone happens to be.
+     */
+    fun somebodyNear(now: Long = System.currentTimeMillis()): Boolean =
+        synchronized(seen) { seen.values.any { it.seenAt >= now - FORGET_PEERS_MS } }
+
+    /** How many conversations this device has answered; see [State.served]. */
+    fun conversationsServed(): Int = served.get()
+
+    /** How many conversations happened in either direction; see [conversations]. */
+    fun conversationsHad(): Int = conversations.get()
+
     /** Whether a conversation is going on right now; see [exchange]. */
     private val talking = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val served = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Conversations that actually happened, answered or dialled, since the listener came up.
+     *
+     * Counted so that something waiting for vectors can wait on an event instead of on a clock.
+     * "The other device has been and gone" is the one thing that reliably means *no more is
+     * coming*, and it means the same on a fast phone and a slow one.
+     */
+    private val conversations = java.util.concurrent.atomic.AtomicInteger(0)
 
     val state: State
         get() = State(
@@ -149,6 +191,7 @@ class PeerTransport(
                 // anything ever reached this port", and a peer that connected and then failed to
                 // open a frame has at least proved that the port is reachable.
                 this.served.incrementAndGet()
+                if (served.peerDeviceId != null) conversations.incrementAndGet()
                 if (served.bytesGiven > 0 || served.bytesTaken > 0 || served.trouble != null) {
                     note(
                         "Peer ${served.peerDeviceId?.take(8) ?: "?"}: gave ${served.bytesGiven}, " +
@@ -167,7 +210,22 @@ class PeerTransport(
             port = listener.boundPort,
             key = ::key,
             network = network,
-            onSeen = { peer -> synchronized(seen) { seen[peer.deviceId] = peer } }
+            wanted = { runCatching { vectorsWanted() }.getOrDefault(0) },
+            onSeen = { peer ->
+                val errand = synchronized(seen) {
+                    seen[peer.deviceId] = peer
+                    // Not on every beacon that repeats the same errand. A beacon goes out every
+                    // few seconds while answering one takes a conversation, so a dial per beacon
+                    // would be a queue of calls that the one-at-a-time guard in [exchange] then
+                    // throws away. Not once and never again either: a dial can fail, and the next
+                    // beacon is the news that it is still wanted.
+                    val overdue = peer.wanted > 0 &&
+                        peer.seenAt - (errands[peer.deviceId] ?: 0L) >= ERRAND_FLOOR_MS
+                    if (overdue) errands[peer.deviceId] = peer.seenAt
+                    overdue
+                }
+                if (errand) runCatching { onPeerInNeed(peer) }
+            }
         ).also { beacon = it }
         announcer.listen()
         return true
@@ -175,11 +233,15 @@ class PeerTransport(
 
     fun stop() {
         served.set(0)
+        conversations.set(0)
         server?.stop()
         beacon?.stop()
         server = null
         beacon = null
-        synchronized(seen) { seen.clear() }
+        synchronized(seen) {
+            seen.clear()
+            errands.clear()
+        }
         trouble = null
     }
 
@@ -238,6 +300,10 @@ class PeerTransport(
             )
             outcomes.add(outcome)
             lastOutcome = outcome
+            // A dial that got as far as the other device naming itself is a conversation, whether
+            // or not it carried anything. One that never opened is not, and must not be: a scan
+            // waiting for vectors would read it as "nobody is coming" when nobody was even asked.
+            if (outcome.peerDeviceId != null) conversations.incrementAndGet()
             if (outcome.moved || outcome.trouble != null) {
                 note(
                     "Peer $host: took ${outcome.bytesTaken} in ${outcome.filesTaken} files, " +
@@ -263,5 +329,15 @@ class PeerTransport(
          * so one lost datagram does not make a device vanish from the owner's screen.
          */
         const val FORGET_PEERS_MS = 90_000L
+
+        /**
+         * How long one peer's errand holds before the same errand is acted on again.
+         *
+         * Long enough that a stream of beacons saying the same thing is one dial and not twenty,
+         * short enough that a dial which failed is retried while the other device is still
+         * waiting. It paces this device's own calls, so it says nothing about how fast either
+         * device is — which is the point, since one of them may be a cheap phone.
+         */
+        const val ERRAND_FLOOR_MS = 10_000L
     }
 }

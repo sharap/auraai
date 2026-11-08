@@ -68,15 +68,29 @@ class PhraseVault(
     @Volatile
     private var held: Where = Where.PLAIN
 
+    /**
+     * The phrase once it has been read, because the keystore is not free.
+     *
+     * Measured on this phone: 218 ms for one keystore operation. The phrase is not asked for once
+     * a pass — the writer asks what seals each batch, the readers ask per file — so dozens of
+     * unwraps turned into seconds of a pass doing nothing, and the other device looked slow. The
+     * process that holds the secret in a variable is the one the keystore would hand it to anyway,
+     * so nothing is given away by keeping it.
+     */
+    @Volatile
+    private var remembered: String? = null
+
     /** Where the phrase is kept as things stand; meaningful after the first read or write. */
     val where: Where get() = held
 
     /** The phrase, or null when the owner has not set one. */
     fun phrase(): String? {
+        remembered?.let { return it.takeIf { text -> text.isNotEmpty() } }
         val wrapped = prefs.getString(KEY_WRAPPED, null)
         if (wrapped != null) {
             unwrap(wrapped)?.let {
                 held = security()
+                remembered = it
                 return it.takeIf { text -> text.isNotEmpty() }
             }
             // Wrapped and unreadable: the keystore key has gone — a restore onto another phone, a
@@ -92,6 +106,7 @@ class PhraseVault(
         if (plain.isNotEmpty() && keep(plain)) {
             Log.i(TAG, "The phrase now lives in the keystore")
         }
+        remembered = plain
         return plain.takeIf { it.isNotEmpty() }
     }
 
@@ -102,6 +117,7 @@ class PhraseVault(
      *   preferences instead, which the owner is told about rather than left to assume.
      */
     fun keep(phrase: String): Boolean {
+        remembered = phrase
         if (phrase.isEmpty()) {
             forget()
             return true
@@ -131,6 +147,7 @@ class PhraseVault(
     }
 
     private fun forget() {
+        remembered = ""
         prefs.edit().remove(KEY_WRAPPED).remove(KEY_PLAIN).apply()
         runCatching { keystore()?.deleteEntry(alias) }
         held = Where.PLAIN
@@ -196,12 +213,24 @@ class PhraseVault(
             init(builder.build())
             generateKey()
         }
-    } catch (e: StrongBoxUnavailableException) {
-        // Asked for the secure element and this phone has none. Said quietly: the keystore key is
-        // still outside the app's storage, which is the point.
-        null
     } catch (e: Exception) {
-        Log.e(TAG, "Could not make a wrapping key" + if (strongBox) " in the secure element" else "", e)
+        // Asked for the secure element and this phone has none: said quietly, because the
+        // keystore key is still outside the app's storage, which is the point.
+        //
+        // Recognised by asking the platform rather than by catching the exception type. A catch
+        // clause names its type in the method's exception table, and on the Android versions this
+        // app still supports — 23 up — StrongBoxUnavailableException does not exist at all, so
+        // naming it there is a NoClassDefFoundError waiting for the first exception that passes
+        // through here for any other reason.
+        val noSecureElement = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            e is StrongBoxUnavailableException
+        if (!noSecureElement) {
+            Log.e(
+                TAG,
+                "Could not make a wrapping key" + if (strongBox) " in the secure element" else "",
+                e
+            )
+        }
         null
     }
 

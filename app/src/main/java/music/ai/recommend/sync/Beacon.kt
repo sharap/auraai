@@ -38,6 +38,14 @@ import javax.crypto.spec.SecretKeySpec
  * replayed beacon points at an address where nothing answers, and the timestamp keeps even that
  * within [FRESH_SECONDS].
  *
+ * It also carries what the sender is short of, which is how a device that cannot dial gets to ask.
+ * Under a VPN that forbids bypassing the tunnel a phone can answer a conversation but never start
+ * one, so everything it needs has to arrive on somebody else's initiative — and the broadcast is
+ * the one thing of ours that still leaves the tunnel. A beacon saying *I am missing four thousand
+ * vectors* turns the other device's next move from a thirty-second timer into an answer, and that
+ * is the difference between a scan that waits a moment and a scan that computes a whole library
+ * which was already on its way to it.
+ *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
 class Beacon(
@@ -48,6 +56,14 @@ class Beacon(
     private val key: () -> ByteArray?,
     /** Where the local devices are; see [LocalNetwork]. A beacon down a tunnel reaches nobody. */
     private val network: LocalNetwork? = null,
+    /**
+     * How many tracks this device has no vector for, as of now; zero says nothing is wanted.
+     *
+     * Asked afresh on every announcement rather than kept, because the whole value of the number
+     * is that it is current: a device that has just been handed four thousand vectors should stop
+     * asking for them in the very next breath.
+     */
+    private val wanted: () -> Int = { 0 },
     private val onSeen: (Peer) -> Unit = {}
 ) {
 
@@ -56,8 +72,13 @@ class Beacon(
         val deviceId: String,
         val address: String,
         val port: Int,
-        val seenAt: Long
+        val seenAt: Long,
+        /** How many vectors it said it was missing, or 0 if it said nothing of the kind. */
+        val wanted: Int = 0
     )
+
+    /** What one announcement said. */
+    data class Heard(val deviceId: String, val port: Int, val wanted: Int)
 
     @Volatile
     private var socket: DatagramSocket? = null
@@ -107,7 +128,8 @@ class Beacon(
      */
     fun announce(now: Long = System.currentTimeMillis()): Boolean {
         val phraseKey = key() ?: return false
-        val payload = pack(deviceId, port, now, phraseKey) ?: return false
+        val short = runCatching { wanted() }.getOrDefault(0)
+        val payload = pack(deviceId, port, now, phraseKey, short) ?: return false
         var sent = false
         try {
             DatagramSocket().use { out ->
@@ -143,13 +165,14 @@ class Beacon(
             ) ?: continue
             // Our own broadcast comes back to us; so does a second copy of the app on this
             // machine, which would be a conversation with ourselves.
-            if (heard.first == deviceId) continue
+            if (heard.deviceId == deviceId) continue
             onSeen(
                 Peer(
-                    deviceId = heard.first,
+                    deviceId = heard.deviceId,
                     address = packet.address?.hostAddress ?: continue,
-                    port = heard.second,
-                    seenAt = System.currentTimeMillis()
+                    port = heard.port,
+                    seenAt = System.currentTimeMillis(),
+                    wanted = heard.wanted
                 )
             )
         }
@@ -193,6 +216,8 @@ class Beacon(
             port: Int,
             now: Long,
             phraseKey: ByteArray,
+            /** How many vectors the sender is missing; left out of the payload when zero. */
+            wanted: Int = 0,
             random: SecureRandom = SecureRandom()
         ): ByteArray? = try {
             val nonce = ByteArray(NONCE_BYTES).also(random::nextBytes)
@@ -200,6 +225,9 @@ class Beacon(
                 addProperty("d", deviceId)
                 addProperty("p", port)
                 addProperty("t", now / 1000)
+                // Left out when there is nothing to ask for, so that the common beacon stays the
+                // size it always was and an older build reads it unchanged.
+                if (wanted > 0) addProperty("w", wanted)
             }
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
@@ -214,10 +242,10 @@ class Beacon(
         }
 
         /**
-         * @return the device id and its port, or null for a datagram that is not ours, was sealed
+         * @return what the announcement said, or null for a datagram that is not ours, was sealed
          *   under another phrase, or is too old to mean anything.
          */
-        fun unpack(datagram: ByteArray, phraseKey: ByteArray, now: Long): Pair<String, Int>? {
+        fun unpack(datagram: ByteArray, phraseKey: ByteArray, now: Long): Heard? {
             if (datagram.size <= NONCE_BYTES || datagram.size > MAX_BEACON) return null
             return try {
                 val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -239,7 +267,10 @@ class Beacon(
                 // A beacon from the future is as suspect as one from last week: both mean the
                 // datagram is not describing where a device is right now.
                 if (kotlin.math.abs(now / 1000 - at) > FRESH_SECONDS) return null
-                deviceId to port
+                // Absent in a beacon from a build that did not say it, and in any beacon from a
+                // device that wants nothing. Both mean the same thing to the reader: no errand.
+                val wanted = json.get("w")?.asInt ?: 0
+                Heard(deviceId, port, wanted.coerceAtLeast(0))
             } catch (e: Exception) {
                 null
             }

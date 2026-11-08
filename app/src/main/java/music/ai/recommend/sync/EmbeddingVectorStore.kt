@@ -7,6 +7,7 @@ import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.Excerpt
 import music.ai.recommend.ai.SharedDecoder
 import music.ai.recommend.ai.ModelRepository
+import music.ai.recommend.ai.SoundPrintStore
 import music.ai.recommend.model.Song
 import java.io.File
 
@@ -21,6 +22,13 @@ import java.io.File
 class EmbeddingVectorStore(
     private val embeddings: EmbeddingStore,
     private val models: ModelRepository,
+    /**
+     * Where what is known about a file from its bytes is kept, which here is the excerpt start:
+     * working it out costs a walk over the file, and a conversation asks for it once per track in
+     * either direction. Null in a test that does not care, and then every answer is worked out
+     * afresh — correct, and slow in exactly the way this exists to stop.
+     */
+    private val prints: SoundPrintStore? = null,
     private val songs: suspend () -> List<Song>
 ) : VectorStore<Long> {
 
@@ -57,11 +65,17 @@ class EmbeddingVectorStore(
 
     override suspend fun excerptStartMs(track: Long): Long? {
         val path = pathFor(track) ?: return null
+        val prints = prints ?: return excerptStartFromFile(File(path))
+        return prints.excerptStartOf(track, path) { file -> excerptStartFromFile(file) }
+    }
+
+    /** The walk itself, which is what [SoundPrintStore.excerptStartOf] exists to do once. */
+    private fun excerptStartFromFile(file: File): Long? {
         // For a format the shared decoder handles, the decoder's own count of the samples — which
         // is what it chose the window by. The platform's duration is a different number and naming
         // the window with it is how a correct vector comes to be refused.
-        SharedDecoder.startMs(File(path))?.let { return it }
-        val duration = containerDurationMs(path) ?: return null
+        SharedDecoder.startMs(file)?.let { return it }
+        val duration = containerDurationMs(file.path) ?: return null
         return Excerpt.startMs(duration)
     }
 
