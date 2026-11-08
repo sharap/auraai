@@ -252,4 +252,19 @@
     <string name="orphaned_vectors_kept">%1$d из них ещё есть в истории прослушиваний — они остаются.</string>
     <string name="clear_orphaned_vectors">Убрать %1$d</string>
     <string name="orphaned_vectors_cleared">Убрано векторов без трека: %1$d</string>
+
+    <!-- Sync carried by this app over the network: the listener, who was found, where to type an address. -->
+    <string name="sync_direct">Напрямую по сети</string>
+    <string name="sync_direct_hint">Приложение переносит данные само — без общей папки и без сторонней программы. Фраза должна быть одинаковой на обоих устройствах; телефон общается, пока открыт.</string>
+    <string name="sync_listening">Слушает порт %1$d</string>
+    <string name="sync_not_listening">Не слушает</string>
+    <string name="sync_this_device_at">Это устройство: %1$s</string>
+    <string name="sync_peers">Найдено: %1$s</string>
+    <string name="sync_no_peers">Другое устройство пока не отозвалось</string>
+    <string name="sync_peer_trouble">Последняя попытка: %1$s</string>
+    <string name="sync_peer_address">Адрес другого устройства</string>
+    <string name="sync_peer_address_hint">Нужен только там, где сеть не пропускает широковещание. Адрес или адрес:порт.</string>
+    <string name="sync_peer_address_set">Сохранить адрес</string>
+    <string name="sync_peer_address_in_use">Звоним на %1$s и всем, кто отзовётся</string>
+    <string name="sync_nobody_reached_us">Сюда пока никто не дозвонился. Если на другом устройстве файервол, оно не слышит ни маячка, ни соединения — тогда впишите адрес этого устройства, указанный выше, в настройках на нём.</string>
 </resources>

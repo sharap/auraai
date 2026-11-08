@@ -26,6 +26,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,6 +69,10 @@ import music.ai.recommend.sync.GcmSealing
 import music.ai.recommend.sync.MixShelf
 import music.ai.recommend.sync.Sealing
 import music.ai.recommend.sync.PlaylistShelf
+import music.ai.recommend.sync.DirectoryPeerFiles
+import music.ai.recommend.sync.FileSyncFolder
+import music.ai.recommend.sync.PeerFiles
+import music.ai.recommend.sync.PeerTransport
 import music.ai.recommend.sync.SyncCoordinator
 import music.ai.recommend.sync.SyncFolder
 import music.ai.recommend.sync.SyncIdentity
@@ -347,6 +352,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val waveLock = Mutex()
     private var waveState: WaveState? = null
     private var waveRestoreJob: Job? = null
+    /** Dials the other device on a timer while the network transport is on; see startPeerPolling. */
+    private var peerPollJob: Job? = null
     private var waveTracks: List<MixTrack> = emptyList()
     private var waveTrackById: Map<Long, MixTrack> = emptyMap()
     private var savedPlaylists: List<Playlist> = emptyList()
@@ -383,13 +390,55 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val unopened: Int = 0,
         val waiting: Int = 0,
         val busy: Boolean = false,
-        val lastRunAt: Long = 0L
+        val lastRunAt: Long = 0L,
+        /** Whether this device carries sync itself over the network instead of through a folder. */
+        val direct: Boolean = false,
+        /** Whether the listener is up, and on which port; see [PeerTransport]. */
+        val listening: Boolean = false,
+        val port: Int = -1,
+        /** This device's addresses, to type on the other one where broadcasts do not arrive. */
+        val addresses: List<String> = emptyList(),
+        /** Devices heard announcing themselves: the first eight characters of each id, and where. */
+        val peers: List<String> = emptyList(),
+        /** Why the listener is not up, or what the last conversation stumbled on. */
+        val peerTrouble: String? = null,
+        /** The address the owner typed, if any: dialled as well as whoever answers a beacon. */
+        val peerAddressInUse: String = "",
+        /**
+         * How many conversations this device has answered. Zero while listening is the signature of
+         * a firewall, which is the one failure that looks like success from the inside.
+         */
+        val served: Int = 0
     )
 
     private val _syncSummary = MutableStateFlow(SyncSummary())
     val syncSummary: StateFlow<SyncSummary> = _syncSummary.asStateFlow()
 
     private val syncDirectory by lazy { File(getApplication<Application>().filesDir, "sync") }
+
+    /**
+     * Where the socket transport keeps everything: this device's own day files and its copies of
+     * the other devices'.
+     *
+     * Inside the app's own storage, which is the point. A folder in shared storage is readable by
+     * anything holding the storage permission and is reached through the storage access framework,
+     * and between them that is most of what makes sync unpleasant on a phone. Nothing here is
+     * shared with another app, so none of it applies.
+     */
+    private val localSyncRoot by lazy { File(syncDirectory, "folder") }
+
+    /** The byte view of [localSyncRoot] the socket transport works through. */
+    private fun peerFiles(): PeerFiles? {
+        val deviceId = syncDeviceId() ?: return null
+        return DirectoryPeerFiles(File(localSyncRoot, "aura/v1"), deviceId)
+    }
+
+    /** The listener, the beacon and one exchange per pass; null until this device has an id. */
+    private val peerTransport: PeerTransport? by lazy {
+        syncDeviceId()?.let { id ->
+            PeerTransport(id, { peerFiles() }, { line -> Log.i(TAG, line) })
+        }
+    }
     private var syncCoordinator: SyncCoordinator<Long>? = null
 
     /** One pass over the folder at a time; see [syncPass]. */
@@ -425,6 +474,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         refreshScannedIds()
         observeScan()
         observeSync()
+        // Only does anything when the owner asked for the network transport; see startPeerListener.
+        startPeerListener()
 
         viewModelScope.launch(Dispatchers.IO) {
             loadFavorites()
@@ -2100,10 +2151,123 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { syncPass(force = true, takeIn = true) }
     }
 
+    /**
+     * Where batches are written and read: the app's own directory when this device carries sync
+     * over the network, and the folder the owner picked when something else carries it.
+     *
+     * One at a time, and the owner chooses. Both at once would need two of everything that
+     * remembers how far a file was read, for no gain: the two transports carry the same records.
+     */
     private fun syncFolder(): SyncFolder? {
-        val uri = prefs.getString(KEY_SYNC_FOLDER, null)?.toUri() ?: return null
         val deviceId = syncDeviceId() ?: return null
+        if (prefs.getBoolean(KEY_SYNC_DIRECT, false)) {
+            return FileSyncFolder({ localSyncRoot.also { if (!it.isDirectory) it.mkdirs() } }, deviceId)
+        }
+        val uri = prefs.getString(KEY_SYNC_FOLDER, null)?.toUri() ?: return null
         return SafSyncFolder.fromTree(getApplication(), uri, deviceId)
+    }
+
+    /**
+     * Where this device's records go, as the state names it; see [SyncState.transport].
+     *
+     * Null when there is nowhere: no folder chosen and the network transport off. That is not the
+     * same as "a folder whose path happens to be empty", and the difference matters — a device that
+     * wrote a destination it has not got would record progress and outbox marks against it, and
+     * every real destination afterwards would look like a change of mind.
+     *
+     * The folder is named and not merely called "a folder", so that choosing a *different* folder
+     * counts as a change: it is an empty destination whose files share the old one's names, which
+     * is the same situation as switching transports and was invisible while this said "folder".
+     */
+    private fun destination(): String? = SyncState.destinationOf(
+        direct = prefs.getBoolean(KEY_SYNC_DIRECT, false),
+        folder = prefs.getString(KEY_SYNC_FOLDER, null)
+    )
+
+    /**
+     * Turns the network transport on or off.
+     *
+     * The coordinator is dropped rather than kept, because the folder it was built around has
+     * changed; the next pass builds one against the new one and reads it from the top.
+     */
+    fun enableDirectSync(on: Boolean) {
+        prefs.edit().putBoolean(KEY_SYNC_DIRECT, on).apply()
+        syncCoordinator = null
+        if (on) startPeerListener() else {
+            peerPollJob?.cancel()
+            peerTransport?.stop()
+        }
+        refreshSyncSummary()
+        viewModelScope.launch { syncPass(force = true, takeIn = true) }
+    }
+
+    /** The address of the other device, for a network where broadcasts do not arrive. */
+    fun setPeerAddress(text: String) {
+        prefs.edit().putString(KEY_SYNC_PEER, text.trim()).apply()
+        refreshSyncSummary()
+        viewModelScope.launch { syncPass(force = true, takeIn = true) }
+    }
+
+    /**
+     * Starts listening, if the owner asked for the network transport.
+     *
+     * While this ViewModel lives, which is while the app is on the screen and a little after. That
+     * is the limit a phone should have: a socket that outlives the app wants a foreground service
+     * and a permanent notification, and a desktop that listens all day covers the common pair
+     * without either.
+     */
+    private fun startPeerListener() {
+        if (!prefs.getBoolean(KEY_SYNC_DIRECT, false)) return
+        val transport = peerTransport ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            transport.setPhrase(prefs.getString(KEY_SYNC_PHRASE, null))
+            if (!transport.start()) Log.w(TAG, "Could not listen for the other device")
+            refreshSyncSummary()
+        }
+        startPeerPolling()
+    }
+
+    /**
+     * One exchange with whoever is reachable, which is what the folder's writer and reader would
+     * otherwise be waiting on Syncthing for.
+     *
+     * Called twice in a pass on purpose: once before the readers run, so they see what the other
+     * device has written, and once after the writers, so what this pass produced does not sit here
+     * until the next one. Each is two round trips when there is nothing to move.
+     */
+    private suspend fun peerExchange(): Boolean = withContext(Dispatchers.IO) {
+        if (!prefs.getBoolean(KEY_SYNC_DIRECT, false)) return@withContext false
+        val transport = peerTransport ?: return@withContext false
+        transport.setPhrase(prefs.getString(KEY_SYNC_PHRASE, null))
+        if (!transport.state.listening) transport.start()
+        val outcomes = runCatching { transport.exchange(prefs.getString(KEY_SYNC_PEER, null)) }
+            .onFailure { Log.e(TAG, "Could not talk to the other device", it) }
+            .getOrDefault(emptyList())
+        refreshSyncSummary()
+        outcomes.any { it.moved }
+    }
+
+    /**
+     * Dials the other device every so often while the network transport is on.
+     *
+     * Needed because reachability is often one-way. A desktop behind a firewall — Fedora's default
+     * zone allows ssh and mDNS and nothing else — can dial a phone perfectly well and cannot be
+     * dialled or even heard announcing itself, so whichever side *can* reach the other has to try
+     * on its own rather than waiting to be called. Two round trips when there is nothing to move,
+     * and only while the app is open.
+     */
+    private fun startPeerPolling() {
+        peerPollJob?.cancel()
+        peerPollJob = viewModelScope.launch {
+            while (isActive) {
+                delay(PEER_POLL_MS)
+                if (!prefs.getBoolean(KEY_SYNC_DIRECT, false)) continue
+                // A full pass when something arrived — reading the folder for nothing is the
+                // expensive half — or when the last pass said it had stopped short, since then
+                // what is left to read is already here and nothing else will come to fetch it.
+                if (peerExchange() || _syncSummary.value.vectorsWaiting) drainPasses()
+            }
+        }
     }
 
     private fun syncDeviceId(): String? =
@@ -2112,7 +2276,32 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun coordinator(): SyncCoordinator<Long>? {
         syncCoordinator?.let { return it }
         val deviceId = syncDeviceId() ?: return null
+        // Nowhere to send and nowhere to read: no coordinator, and nothing written down about a
+        // destination this device has not got.
+        val transport = destination() ?: return null
         val state = SyncState.load(File(syncDirectory, "state.json")).also { syncState = it }
+        // The two transports have folders of their own whose files carry the same relative paths,
+        // so progress made through one says nothing about the other — and believing it would step
+        // over everything the other device has written. See [SyncState.transport].
+        if (state.transport != transport) {
+            if (state.transport != null) {
+                Log.i(TAG, "Records now go to $transport; reading it again from the top")
+            }
+            state.startOutboxAgain()
+            state.transport = transport
+            state.save()
+        }
+        // A destination that has never had this device's vectors gets them once. Not on every
+        // change — eleven megabytes for this library — but a folder that never receives them can
+        // never hand them back, which is most of what a folder is for.
+        if (state.fillVectorsFor(transport)) {
+            viewModelScope.launch {
+                val waiting = embeddings.offerEverythingAgain()
+                Log.i(TAG, "Vectors have not been to $transport yet: offering $waiting again")
+                state.save()
+                syncPass(force = true, takeIn = false, allVectors = true)
+            }
+        }
         return SyncCoordinator(
             deviceId = deviceId,
             state = state,
@@ -2186,7 +2375,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             foreground.collectLatest { inFront ->
                 while (inFront) {
                     delay(FOREGROUND_POLL_MS)
-                    syncPass(force = false, takeIn = true)
+                    drainPasses()
                 }
             }
         }
@@ -2215,8 +2404,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         throttled: Boolean = false,
         allVectors: Boolean = false
     ) = withContext(Dispatchers.IO) {
-        val coordinator = coordinator() ?: return@withContext
+        val coordinator = coordinator() ?: return@withContext false
         syncGate.withLock {
+            // Before the readers: bring in whatever the other device has written since.
+            if (takeIn) peerExchange()
             val now = System.currentTimeMillis()
             val sent = runCatching { coordinator.push(now, force).written }
                 .getOrElse { Log.e(TAG, "Could not write the history out", it); 0 }
@@ -2235,7 +2426,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // nothing new to publish then, and reading a library's worth of them would be work for
             // nothing. During a backfill this is the expensive part of a pass — a few hundred file
             // reads to name their excerpts — and in the steady state it costs one empty query.
-            val sentVectors = if (pulled == null) null else
+            //
+            // A pass asked for every vector is such a moment by itself, even when it takes nothing
+            // in. The first pass to a new destination is exactly that — hand it the library, and do
+            // not read a folder that has only just been named — and gating it on having read
+            // something first made it a pass that published no vectors at all, which was the whole
+            // of what it was for. Found by a phone whose analysis the desktop could not hand back.
+            val sentVectors = if (pulled == null && !allVectors) null else
                 runCatching {
                     // Without a limit when it is not the end of an analysis, so the coordinator's
                     // own choice stands: naming the default here would quietly override whatever a
@@ -2318,6 +2515,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (it.written > 0) Log.i(TAG, "Daily mix out: ${it.day}, attempt ${it.attempt}")
             }
 
+            // After the writers: hand over what this pass produced, rather than leaving it here
+            // until the next one. Nothing to do when the folder transport is in use.
+            peerExchange()
+
             _syncSummary.value = _syncSummary.value.let {
                 it.copy(
                     // Totals since this run started, not of the last pass: most passes happen on
@@ -2335,7 +2536,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     mixTakenIn = it.mixTakenIn + (if (tookMix?.adopted == true) 1 else 0),
                     unopened = coordinator.unopenedBatches,
                     lastRunAt = now
-                )
+                ).withTransport()
             }
             // Listens taken in change what counts as recently played, which the daily mix uses.
             if ((pulled?.takenIn ?: 0) > 0) refreshDailyMix()
@@ -2345,8 +2546,37 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 refreshScannedIds()
                 refreshSmartAlbums()
                 refreshDailyMix()
+                // These are the numbers the AI card shows, and nothing but what the owner did here
+                // used to recompute them: while the desktop handed a cleared phone its analysis
+                // back, the card sat at the count from the moment the window was opened — 491 of
+                // them — which read as "it will not take any more".
+                refreshVectorHousekeeping()
             }
+            // True when a reader stopped short of the end: it takes in only so much at a time
+            // and says so. Whoever drives the passes can then come straight back instead of
+            // waiting for the next arrival — see [drainPasses].
+            //
+            // It has to have got through something as well. A pass that reports more and sees
+            // nothing must not become a loop.
+            tookVectors?.let { it.more && it.takenIn + it.alreadyHeld + it.unmatched > 0 } == true
         }
+    }
+
+    /**
+     * Passes until nothing is left waiting.
+     *
+     * A reader takes in only so much at a time and says when it stopped short, and leaving the
+     * rest for the next pass is right as long as passes keep coming. The pass that *brought* the
+     * file is often the last one for a while, though: nothing more arrives, so nothing more is
+     * read, and the device sits on a complete file with part of it unread. Found exactly that way
+     * — a phone holding all seventeen megabytes of the desktop's vectors with sixty of the
+     * ninety-one batches read, and no reason left to look at the rest.
+     *
+     * Bounded, and only while the passes are getting through it.
+     */
+    private suspend fun drainPasses(limit: Int = 500) {
+        var passes = 0
+        while (passes++ < limit && syncPass(force = false, takeIn = true)) { /* more waiting */ }
     }
 
     /** Takes the folder the owner picked, for good: the grant has to outlive this process. */
@@ -2407,9 +2637,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Fills in what the network transport is doing, so the two places that build a summary say the
+     * same thing about it.
+     */
+    private fun SyncSummary.withTransport(): SyncSummary {
+        val direct = prefs.getBoolean(KEY_SYNC_DIRECT, false)
+        val state = peerTransport?.state
+        return copy(
+            direct = direct,
+            listening = direct && state?.listening == true,
+            port = state?.port ?: -1,
+            addresses = if (direct) state?.addresses.orEmpty() else emptyList(),
+            peers = if (!direct) emptyList() else state?.peers.orEmpty().map {
+                "${it.deviceId.take(8)} · ${it.address}"
+            },
+            peerTrouble = if (!direct) null else state?.trouble ?: state?.last?.trouble,
+            peerAddressInUse = if (direct) prefs.getString(KEY_SYNC_PEER, null).orEmpty() else "",
+            served = state?.served ?: 0
+        )
+    }
+
     private fun refreshSyncSummary() {
         val uri = prefs.getString(KEY_SYNC_FOLDER, null)
-        _syncSummary.value = _syncSummary.value.copy(
+        _syncSummary.value = _syncSummary.value.withTransport().copy(
             folder = uri?.let { readableFolderName(it) },
             deviceId = if (uri == null) "" else syncDeviceId().orEmpty().take(8),
             sealed = !prefs.getString(KEY_SYNC_PHRASE, null).isNullOrEmpty()
@@ -2426,6 +2677,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // The listener goes with the app on a phone, deliberately: see [startPeerListener].
+        peerPollJob?.cancel()
+        peerTransport?.stop()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         stopProgressUpdate()
         textEncoder.release()
@@ -2472,6 +2726,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
          * key is exchanged between devices instead of typed by a person.
          */
         const val KEY_SYNC_PHRASE = "sync_phrase"
+
+        /** Whether this device carries sync itself over the network; see [PeerTransport]. */
+        const val KEY_SYNC_DIRECT = "sync_direct"
+
+        /** An address typed by the owner, for a network that does not carry broadcasts. */
+        const val KEY_SYNC_PEER = "sync_peer_address"
+
+        /**
+         * How often this device dials the other while the network transport is on.
+         *
+         * Half a minute: a beacon stays fresh for one, so this also keeps this device findable,
+         * and it is the cadence at which a listen made on one device shows up on the other.
+         */
+        const val PEER_POLL_MS = 30_000L
 
         /**
          * How soon after one read the folder may be read again by a pass nobody asked for.

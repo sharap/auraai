@@ -1,6 +1,7 @@
 package music.ai.recommend.sync
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -110,6 +111,83 @@ class SyncStateTest {
         assertEquals(SyncState.MAX_UNRESOLVED, state.unresolved.size)
         // The oldest went: a listen that has waited longest is the least likely to find its file.
         assertEquals("track 501", state.unresolved.first().record.track.title)
+    }
+
+    @Test
+    fun changingTransportStartsEveryOutboxAgainButNotTheVectors() {
+        val file = stateFile()
+        val state = SyncState.load(file)
+        state.exportedUpTo = 9_000L
+        state.playlistsPublishedUpTo = 42L
+        state.playlistsSeeded = true
+        state.mixPublished = "2026-11-08#1"
+        state.progress["aura/v1/other/history/2026-11-08.jsonl"] = 900
+        // The counters that must *not* move: a batch number going backwards would collide with
+        // batches already out there, and the vectors are the one thing not worth re-writing.
+        state.sequence = 17L
+        state.vectorSequence = 5L
+        state.transport = "folder"
+
+        state.startOutboxAgain()
+        state.transport = "direct"
+        assertTrue(state.save())
+
+        val back = SyncState.load(file)
+        assertEquals(0L, back.exportedUpTo)
+        assertEquals(0L, back.playlistsPublishedUpTo)
+        assertEquals(false, back.playlistsSeeded)
+        assertEquals(null, back.mixPublished)
+        assertEquals(emptyMap<String, Int>(), back.progress)
+        assertEquals("direct", back.transport)
+        assertEquals(17L, back.sequence)
+        assertEquals(5L, back.vectorSequence)
+    }
+
+    @Test
+    fun nowhereIsNothingRatherThanAnEmptyNameForSomewhere() {
+        // How this went wrong: a device whose settings had not loaded yet looked like "network
+        // sync off, no folder chosen" and named that `folder:`. Written into the state, it is a
+        // destination nothing can match, so the real one looked like a change of mind — progress
+        // cleared, outboxes restarted — and with the coordinator cached, a whole run was spent
+        // syncing into a folder with no path.
+        assertEquals(null, SyncState.destinationOf(direct = false, folder = null))
+        assertEquals(null, SyncState.destinationOf(direct = false, folder = ""))
+        assertEquals("direct", SyncState.destinationOf(direct = true, folder = null))
+        // The socket needs no folder, and having one changes nothing about where it writes.
+        assertEquals("direct", SyncState.destinationOf(direct = true, folder = "/home/user/Sync"))
+        assertEquals(
+            "folder:content://tree/one",
+            SyncState.destinationOf(direct = false, folder = "content://tree/one")
+        )
+        // Two folders are two destinations, which is the whole point of naming them.
+        assertTrue(
+            SyncState.destinationOf(direct = false, folder = "/a") !=
+                SyncState.destinationOf(direct = false, folder = "/b")
+        )
+    }
+
+    @Test
+    fun aDestinationGetsTheVectorsOnceHoweverOftenTheOwnerSwitches() {
+        val file = stateFile()
+        val state = SyncState.load(file)
+        // Each destination needs them the first time and never again, so toggling the switch back
+        // and forth does not re-send eleven megabytes on every flick.
+        assertTrue(state.fillVectorsFor("direct"))
+        assertFalse(state.fillVectorsFor("direct"))
+        assertTrue(state.fillVectorsFor("folder:content://tree/one"))
+        assertFalse(state.fillVectorsFor("folder:content://tree/one"))
+        // A different folder is a different destination: it is empty, and its files share the
+        // other one's names.
+        assertTrue(state.fillVectorsFor("folder:content://tree/two"))
+        assertTrue(state.save())
+
+        val back = SyncState.load(file)
+        assertFalse(back.fillVectorsFor("direct"))
+        assertFalse(back.fillVectorsFor("folder:content://tree/one"))
+        assertFalse(back.fillVectorsFor("folder:content://tree/two"))
+        // And a state file written before this existed remembers nothing, so the destination in
+        // use is filled once on the next pass.
+        assertTrue(back.fillVectorsFor("folder:content://tree/three"))
     }
 
     @Test

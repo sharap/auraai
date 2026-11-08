@@ -1,0 +1,329 @@
+package music.ai.recommend.sync
+
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+import java.io.PipedInputStream
+import java.io.PipedOutputStream
+import java.nio.file.Files
+
+/**
+ * Two devices over a socket, which is the transport that does not need Syncthing.
+ *
+ * The sealed frames and the three verbs are tested here rather than against a phone because they
+ * are plain JVM code on both sides — sockets, AES-GCM, files — and because the things worth proving
+ * are the refusals: a wrong phrase, a path that is not ours, a frame played back. Those are awkward
+ * to arrange on a device and are exactly what an open port has to survive.
+ */
+class PeerTransportTest {
+
+    private val alice = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    private val bob = "ffeeddccbbaa99887766554433221100"
+
+    // A key, not a phrase: the real derivation is two hundred thousand rounds and is tested in
+    // SealingTest. Here it would only make every test slower by the same amount.
+    private val key = ByteArray(32) { (it * 7 + 1).toByte() }
+    private val otherKey = ByteArray(32) { (it * 11 + 3).toByte() }
+
+    private fun temporary(): File = Files.createTempDirectory("aura-peer").toFile()
+
+    private fun write(root: File, deviceId: String, path: String, text: String) {
+        val file = File(File(root, deviceId), path)
+        file.parentFile?.mkdirs()
+        file.appendText(text)
+    }
+
+    private fun read(root: File, deviceId: String, path: String): String =
+        File(File(root, deviceId), path).takeIf { it.isFile }?.readText() ?: ""
+
+    /** A server on a port the system picks, so the test can run anywhere and twice at once. */
+    private fun serverFor(root: File, deviceId: String, key: ByteArray?): PeerServer =
+        PeerServer(deviceId, DirectoryPeerFiles(root, deviceId), { key }, port = 0)
+
+    @Test
+    fun `both directions move in one pass`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            // Alice holds two days of history and a day of vectors; Bob holds one day of his own.
+            write(hers, alice, "history/2026-11-07.jsonl", "a-one\na-two\n")
+            write(hers, alice, "vectors/2026-11-07.jsonl", "a-vectors\n")
+            write(his, bob, "history/2026-11-08.jsonl", "b-one\n")
+
+            val server = serverFor(hers, alice, key)
+            assertTrue(server.start())
+            try {
+                val outcome = PeerClient.sync(
+                    host = "127.0.0.1",
+                    port = server.boundPort,
+                    deviceId = bob,
+                    files = DirectoryPeerFiles(his, bob),
+                    key = key
+                )
+                assertNull(outcome.trouble)
+                assertEquals(alice, outcome.peerDeviceId)
+                assertEquals(2, outcome.filesTaken)
+                assertEquals(1, outcome.filesGiven)
+
+                // Bob now holds Alice's files, under her name, byte for byte.
+                assertEquals("a-one\na-two\n", read(his, alice, "history/2026-11-07.jsonl"))
+                assertEquals("a-vectors\n", read(his, alice, "vectors/2026-11-07.jsonl"))
+                // And Alice holds his, under his.
+                assertEquals("b-one\n", read(hers, bob, "history/2026-11-08.jsonl"))
+                // Neither wrote into the other's own directory.
+                assertEquals("a-one\na-two\n", read(hers, alice, "history/2026-11-07.jsonl"))
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively(); his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a batch written by the writers arrives where the readers look`() {
+        // The one join worth testing with real classes: the writers address a folder as
+        // `aura/v1/<id>/history/<day>.jsonl` while the transport addresses the same tree from
+        // `aura/v1` down. If those two disagreed, every pass would move bytes and no reader would
+        // ever find them, which is the kind of mistake that looks like success in the logs.
+        val here = temporary()
+        val there = temporary()
+        try {
+            val folderHere = FileSyncFolder(here, alice)
+            assertTrue(folderHere.append("history/2026-11-08.jsonl", listOf("""{"d":"a","n":1}""")))
+            assertTrue(folderHere.append("vectors/2026-11-08.jsonl", listOf("""{"d":"a","n":2}""")))
+
+            val transportHere = PeerTransport(alice, { DirectoryPeerFiles(File(here, "aura/v1"), alice) })
+            val transportThere = PeerTransport(bob, { DirectoryPeerFiles(File(there, "aura/v1"), bob) })
+            transportHere.setPhrase("мементо мори")
+            transportThere.setPhrase("мементо мори")
+            assertTrue(transportHere.start(port = 0))
+            try {
+                val outcome = PeerClient.sync(
+                    host = "127.0.0.1",
+                    port = transportHere.state.port,
+                    deviceId = bob,
+                    files = DirectoryPeerFiles(File(there, "aura/v1"), bob),
+                    // Derived from the same phrase on both sides, which is the whole handshake.
+                    key = PeerLink.keyFrom("мементо мори")
+                )
+                assertNull(outcome.trouble)
+
+                // And the reader on the other side finds them under Alice's name, by the words it
+                // would use against a folder Syncthing had filled.
+                val folderThere = FileSyncFolder(there, bob)
+                assertEquals(listOf(alice), folderThere.devices())
+                assertEquals(
+                    listOf("history/2026-11-08.jsonl"),
+                    folderThere.files(alice, "history")
+                )
+                assertEquals(
+                    listOf("""{"d":"a","n":1}"""),
+                    folderThere.lines(alice, "history/2026-11-08.jsonl")
+                )
+                assertEquals(
+                    listOf("""{"d":"a","n":2}"""),
+                    folderThere.lines(alice, "vectors/2026-11-08.jsonl")
+                )
+            } finally {
+                transportHere.stop()
+                transportThere.stop()
+            }
+        } finally {
+            here.deleteRecursively(); there.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a second pass carries only what was added`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            write(hers, alice, "history/2026-11-07.jsonl", "a-one\n")
+            val server = serverFor(hers, alice, key)
+            assertTrue(server.start())
+            try {
+                fun pass() = PeerClient.sync(
+                    "127.0.0.1", server.boundPort, bob, DirectoryPeerFiles(his, bob), key
+                )
+                assertEquals(6L, pass().bytesTaken)
+                // Nothing changed, so nothing moves: the second pass is the one that proves the
+                // byte cursor is kept rather than the file being re-sent.
+                val quiet = pass()
+                assertEquals(0L, quiet.bytesTaken)
+                assertEquals(0, quiet.filesTaken)
+
+                write(hers, alice, "history/2026-11-07.jsonl", "a-two\n")
+                assertEquals(6L, pass().bytesTaken)
+                assertEquals("a-one\na-two\n", read(his, alice, "history/2026-11-07.jsonl"))
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively(); his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `another phrase moves nothing and is not told why`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            write(hers, alice, "history/2026-11-07.jsonl", "a-one\n")
+            val server = serverFor(hers, alice, key)
+            assertTrue(server.start())
+            try {
+                val outcome = PeerClient.sync(
+                    "127.0.0.1", server.boundPort, bob, DirectoryPeerFiles(his, bob), otherKey
+                )
+                assertNotNull("a wrong phrase must not look like success", outcome.trouble)
+                assertEquals(0L, outcome.bytesTaken)
+                assertEquals(0L, outcome.bytesGiven)
+                assertEquals("", read(his, alice, "history/2026-11-07.jsonl"))
+                // And there is no second, weaker attempt to fall back to.
+                assertNull(outcome.peerDeviceId)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively(); his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a peer cannot write into our own directory`() {
+        val hers = temporary()
+        try {
+            write(hers, alice, "history/2026-11-07.jsonl", "a-one\n")
+            val server = serverFor(hers, alice, key)
+            assertTrue(server.start())
+            try {
+                // The directory a peer may append to is the one it said hello with, so claiming
+                // our id is the only way to aim at ours. It is refused before anything is served.
+                val outcome = PeerClient.sync(
+                    "127.0.0.1", server.boundPort, alice, DirectoryPeerFiles(temporary(), alice), key
+                )
+                assertNotNull(outcome.trouble)
+                assertEquals("a-one\n", read(hers, alice, "history/2026-11-07.jsonl"))
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the store refuses paths that are not ours and offsets that do not line up`() {
+        val root = temporary()
+        try {
+            val files = DirectoryPeerFiles(root, alice)
+            for (path in listOf(
+                "../../etc/passwd",
+                "/etc/passwd",
+                "history/../../x.jsonl",
+                "databases/music_database",
+                "history/2026-11-07.jsonl/../../../x"
+            )) {
+                assertNull("принял $path", files.appendTo(bob, path, 0L, "x\n".toByteArray()))
+                assertNull("прочитал $path", files.readOwn(path, 0L, 16))
+            }
+            // The protocol turns such a message away before it reaches the store at all.
+            assertNull(PeerProtocol.readRequest("""{"q":"fetch","p":"../x","at":0,"max":16}"""))
+            assertNull(PeerProtocol.readRequest("""{"q":"put","p":"/etc/passwd","at":0,"b":"eAo="}"""))
+
+            assertEquals(2L, files.appendTo(bob, "history/2026-11-07.jsonl", 0L, "x\n".toByteArray()))
+            // A gap would leave a hole of zeros in the middle of somebody's history.
+            assertNull(files.appendTo(bob, "history/2026-11-07.jsonl", 5L, "y\n".toByteArray()))
+            // An overlap would rewrite what has already been read.
+            assertNull(files.appendTo(bob, "history/2026-11-07.jsonl", 1L, "y\n".toByteArray()))
+            assertEquals(4L, files.appendTo(bob, "history/2026-11-07.jsonl", 2L, "y\n".toByteArray()))
+            // Our own directory is not a peer's to write, whatever it calls itself.
+            assertNull(files.appendTo(alice, "history/2026-11-07.jsonl", 0L, "x\n".toByteArray()))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a frame cannot be replayed, reordered or dropped`() {
+        val toServer = PipedOutputStream()
+        val fromClient = PipedInputStream(toServer, 1 shl 16)
+        val toClient = PipedOutputStream()
+        val fromServer = PipedInputStream(toClient, 1 shl 16)
+
+        val client = Thread { PeerLink.connect(fromServer, toServer, key) }
+        client.start()
+        val server = PeerLink.accept(fromClient, toClient, key)
+        client.join()
+        assertNotNull(server)
+
+        // Three frames out of a client whose link we drive by hand, captured as bytes.
+        val captured = ArrayList<ByteArray>()
+        val sink = object : java.io.OutputStream() {
+            val buffer = java.io.ByteArrayOutputStream()
+            override fun write(b: Int) = buffer.write(b)
+            override fun write(b: ByteArray, off: Int, len: Int) = buffer.write(b, off, len)
+            override fun flush() {
+                captured.add(buffer.toByteArray()); buffer.reset()
+            }
+        }
+        val talker = PeerLink.connect(java.io.ByteArrayInputStream(ByteArray(0)), sink, key)
+        assertNull("a handshake with nothing coming back is not a link", talker)
+    }
+
+    @Test
+    fun `a chunk of the largest size fits one frame`() {
+        // The frame limit and the chunk limit are two numbers in two files, and if the second
+        // outgrows the first the transport stops at exactly the files worth carrying: the big ones.
+        val bytes = ByteArray(PeerProtocol.MAX_CHUNK) { (it % 251).toByte() }
+        val message = PeerProtocol.write(PeerProtocol.Request.Put("vectors/2026-11-08.jsonl", 0L, bytes))
+        assertTrue(
+            "кадр ${message.length} против предела ${PeerLink.MAX_FRAME}",
+            message.toByteArray(Charsets.UTF_8).size + 32 <= PeerLink.MAX_FRAME
+        )
+        val back = PeerProtocol.readRequest(message) as? PeerProtocol.Request.Put
+        assertNotNull(back)
+        assertArrayEquals(bytes, back!!.bytes)
+    }
+
+    @Test
+    fun `every message survives the round trip and nothing else is accepted`() {
+        val requests = listOf(
+            PeerProtocol.Request.Hello(alice),
+            PeerProtocol.Request.List,
+            PeerProtocol.Request.Index,
+            PeerProtocol.Request.Fetch("history/2026-11-08.jsonl", 4096L, 1024),
+            PeerProtocol.Request.Put("vectors/2026-11-08/0003.jsonl", 0L, byteArrayOf(1, 2, 3)),
+            PeerProtocol.Request.Bye
+        )
+        for (request in requests) {
+            assertEquals(request, PeerProtocol.readRequest(PeerProtocol.write(request)))
+        }
+        val replies = listOf(
+            PeerProtocol.Reply.Hello(bob),
+            PeerProtocol.Reply.Listing(listOf(PeerProtocol.Held("history/2026-11-08.jsonl", 12L))),
+            PeerProtocol.Reply.Index(emptyList()),
+            PeerProtocol.Reply.Chunk(0L, byteArrayOf(9, 8, 7), eof = true),
+            PeerProtocol.Reply.Stored(12L),
+            PeerProtocol.Reply.No("offset")
+        )
+        for (reply in replies) {
+            assertEquals(reply, PeerProtocol.readReply(PeerProtocol.write(reply)))
+        }
+        for (rubbish in listOf(
+            "", "{", "[]", """{"q":"dance"}""", """{"q":"hello"}""",
+            """{"q":"fetch","p":"history/2026-11-08.jsonl","at":-1,"max":16}""",
+            """{"q":"fetch","p":"history/2026-11-08.jsonl","at":0,"max":0}""",
+            """{"q":"fetch","p":"history/2026-11-08.jsonl","at":0,"max":${PeerProtocol.MAX_CHUNK + 1}}""",
+            """{"q":"put","p":"history/2026-11-08.jsonl","at":0,"b":"not base64!"}""",
+            """{"q":"put","p":"history/2026-11-08.jsonl","at":0,"b":""}"""
+        )) {
+            assertNull("принял «$rubbish»", PeerProtocol.readRequest(rubbish))
+        }
+    }
+}

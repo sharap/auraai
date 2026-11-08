@@ -252,4 +252,19 @@
     <string name="orphaned_vectors_kept">%1$d of them are still in your listening history, and those are kept.</string>
     <string name="clear_orphaned_vectors">Remove %1$d</string>
     <string name="orphaned_vectors_cleared">Removed %1$d vectors with no track</string>
+
+    <!-- Sync carried by this app over the network: the listener, who was found, where to type an address. -->
+    <string name="sync_direct">Straight over the network</string>
+    <string name="sync_direct_hint">This app carries sync itself, with no shared folder and no other program. Both devices need the same phrase, and the phone talks while it is open.</string>
+    <string name="sync_listening">Listening on port %1$d</string>
+    <string name="sync_not_listening">Not listening</string>
+    <string name="sync_this_device_at">This device: %1$s</string>
+    <string name="sync_peers">Found: %1$s</string>
+    <string name="sync_no_peers">No other device heard yet</string>
+    <string name="sync_peer_trouble">Last attempt: %1$s</string>
+    <string name="sync_peer_address">Address of the other device</string>
+    <string name="sync_peer_address_hint">Only needed where the network does not carry broadcasts. Host, or host:port.</string>
+    <string name="sync_peer_address_set">Save address</string>
+    <string name="sync_peer_address_in_use">Dialling %1$s as well as whoever answers</string>
+    <string name="sync_nobody_reached_us">Nothing has reached this device yet. If the other one is a computer with a firewall, it hears neither the beacon nor a connection — type the address of this device, shown above, in its settings instead.</string>
 </resources>

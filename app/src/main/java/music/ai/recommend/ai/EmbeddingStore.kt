@@ -233,6 +233,21 @@ class EmbeddingStore private constructor(context: Context) {
         }
     }
 
+    /**
+     * Offers every vector to the other devices again; see [music.ai.recommend.db.EmbeddingDao.offerEverythingAgain].
+     *
+     * @return how many will now go out, or zero if the table could not be written.
+     */
+    suspend fun offerEverythingAgain(): Int = withContext(Dispatchers.IO) {
+        try {
+            dao.offerEverythingAgain()
+            dao.countNotPublished()
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not offer the vectors again", e)
+            0
+        }
+    }
+
     suspend fun clear() = withContext(Dispatchers.IO) {
         mutex.withLock {
             dao.deleteAll()

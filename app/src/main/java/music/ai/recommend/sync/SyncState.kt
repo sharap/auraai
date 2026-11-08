@@ -89,6 +89,35 @@ class SyncState private constructor(
      */
     var sealingKey: String?,
     /**
+     * Where the records this device has sent went, and where the ones it has read came from.
+     *
+     * Not a kind of transport but a *destination*: `direct` for the socket, which fills the app's
+     * own directory, and `folder:<uri>` for a folder something else carries. Both matter, and for
+     * the same reason as [sealingKey]: each destination has files of its own at the *same* relative
+     * paths, so progress made against one says nothing about another. Without noticing the change,
+     * a device would believe it had already read nine hundred lines of a file that has four, and
+     * everything it had not seen would be stepped over for good. A change clears [progress], which
+     * costs a re-read and no records, since the stores turn away what they already hold.
+     *
+     * Naming the folder and not merely the kind is what makes *choosing a new folder* a change too.
+     * It is the same situation exactly — an empty destination whose files share the old one's
+     * names — and it was invisible while this said only "folder".
+     */
+    var transport: String?,
+    /**
+     * Destinations whose copy of this device's **vectors** has already been filled.
+     *
+     * Vectors are the one thing not re-sent on every change of destination: eleven megabytes for a
+     * library this size, and the device at the other end already holds what it was given. But a
+     * destination that has *never* had them is a different matter — it can never hand them back,
+     * and a folder that cannot restore a device is only half a folder. So each destination gets
+     * them exactly once, and this is how that once is remembered.
+     *
+     * Kept per destination rather than per vector: the question is about the folder, not about the
+     * row, and a set of two or three short strings answers it without a column in the table.
+     */
+    val vectorsFilled: MutableSet<String>,
+    /**
      * The terms vectors were last read on, as [VectorTerms.fingerprint] spells them.
      *
      * Kept so that a change of them can undo the reading. A vector refused because it was made by
@@ -112,6 +141,37 @@ class SyncState private constructor(
         }
     }
 
+    /**
+     * Starts every outbox again, for a folder this device has not written into before.
+     *
+     * Switching transports gives this device an empty directory of its own while its outboxes still
+     * say that everything has been sent — so without this the other device would receive only what
+     * happens from now on, and a folder meant to be a cache a device can be restored from would
+     * begin life missing its past.
+     *
+     * [progress] goes for the mirror-image reason: it counts lines read out of files in the folder
+     * that is no longer in use, and the files in the new one carry the same names.
+     *
+     * The **vectors are not** reset, and that is a judgement rather than an oversight. They are
+     * eleven megabytes of this library, the other device already holds a copy of every one it was
+     * ever given, and re-writing them all on the flick of a switch would cost minutes of radio for
+     * records nobody is missing. A device that loses its analysis gets it back by being handed it
+     * again — which is what `publishedAt` being zeroed on an analysis change is for.
+     */
+    fun startOutboxAgain() {
+        exportedUpTo = 0L
+        playlistsPublishedUpTo = 0L
+        playlistsSeeded = false
+        mixPublished = null
+        progress.clear()
+    }
+
+    /**
+     * Whether this destination still needs this device's vectors — and records that it is about to
+     * get them, so a destination is filled once however often the owner switches back and forth.
+     */
+    fun fillVectorsFor(destination: String): Boolean = vectorsFilled.add(destination)
+
     fun save(): Boolean = try {
         val json = JsonObject()
         json.addProperty("v", 1)
@@ -134,6 +194,8 @@ class SyncState private constructor(
             aliases.forEach { (hash, track) -> addProperty(hash, track) }
         })
         mixPublished?.let { json.addProperty("mixPublished", it) }
+        transport?.let { json.addProperty("transport", it) }
+        json.add("vectorsFilled", JsonArray().apply { vectorsFilled.forEach(::add) })
         sealingKey?.let { json.addProperty("sealingKey", it) }
         appendWorks?.let { json.addProperty("appendWorks", it) }
         vectorTerms?.let { json.addProperty("vectorTerms", it) }
@@ -149,6 +211,31 @@ class SyncState private constructor(
     companion object {
 
         /**
+         * Where a device's records go, named the way [transport] records it, or null for nowhere.
+         *
+         * One function because two platforms were each deciding this for themselves, and one of
+         * them could answer `folder:` — a folder with no path — which is what a device looks like
+         * *before its settings have been read*. Written down, that is a destination nothing can
+         * ever match, so every real one afterwards looks like a change of mind: progress cleared,
+         * outboxes restarted, and on a cached coordinator a whole run spent syncing into nowhere.
+         * Nowhere has to be nothing, not an empty name for somewhere.
+         *
+         * @param folder where the folder transport writes — a tree uri on the phone, a path on the
+         *   desktop. Null or empty means none has been chosen.
+         */
+        fun destinationOf(direct: Boolean, folder: String?): String? {
+            if (direct) return DIRECT
+            val where = folder?.takeIf { it.isNotEmpty() } ?: return null
+            return "$FOLDER$where"
+        }
+
+        /** The socket transport: one destination, since the device's own directory is its own. */
+        const val DIRECT = "direct"
+
+        /** A folder destination is named after the folder, so that choosing another is a change. */
+        const val FOLDER = "folder:"
+
+        /**
          * How many listens may wait for their tracks. Twenty thousand is years of someone else's
          * listening and a few megabytes of state; past that, the folder is describing a library
          * this device is never going to have.
@@ -161,7 +248,7 @@ class SyncState private constructor(
          * trying to rescue half of it.
          */
         fun load(file: File): SyncState {
-            // Named, because a constructor of fifteen fields where several are numbers is one
+            // Named, because a constructor of seventeen fields where several are numbers is one
             // where a positional call compiles and means something else.
             val empty = SyncState(
                 file = file,
@@ -178,6 +265,8 @@ class SyncState private constructor(
                 aliases = HashMap(),
                 appendWorks = null,
                 sealingKey = null,
+                transport = null,
+                vectorsFilled = HashSet(),
                 vectorTerms = null
             )
             val json = try {
@@ -218,6 +307,10 @@ class SyncState private constructor(
                     },
                     appendWorks = json.get("appendWorks")?.asBoolean,
                     sealingKey = json.get("sealingKey")?.asString,
+                    transport = json.get("transport")?.asString,
+                    vectorsFilled = HashSet<String>().apply {
+                        json.getAsJsonArray("vectorsFilled")?.forEach { add(it.asString) }
+                    },
                     vectorTerms = json.get("vectorTerms")?.asString
                 )
             } catch (e: RuntimeException) {

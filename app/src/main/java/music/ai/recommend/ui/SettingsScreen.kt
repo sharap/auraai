@@ -438,20 +438,93 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
 
     SettingsCard {
         Column(modifier = Modifier.padding(16.dp)) {
+            // What carries sync, which is the owner's choice: this app over the network, or a
+            // folder something else keeps in step.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(id = R.string.sync_direct),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = summary.direct,
+                    onCheckedChange = { viewModel.enableDirectSync(it) }
+                )
+            }
             Text(
-                text = summary.folder ?: stringResource(id = R.string.sync_no_folder),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = if (summary.folder == null) {
-                    stringResource(id = R.string.sync_hint)
-                } else {
-                    stringResource(id = R.string.sync_device, summary.deviceId)
-                },
+                text = stringResource(id = R.string.sync_direct_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = LocalMutedOnSurface.current
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            if (summary.direct) {
+                Text(
+                    text = if (summary.listening) {
+                        stringResource(id = R.string.sync_listening, summary.port)
+                    } else {
+                        stringResource(id = R.string.sync_not_listening)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (summary.addresses.isNotEmpty()) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.sync_this_device_at,
+                            summary.addresses.joinToString(", ")
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalMutedOnSurface.current
+                    )
+                }
+                Text(
+                    text = if (summary.peers.isEmpty()) {
+                        stringResource(id = R.string.sync_no_peers)
+                    } else {
+                        stringResource(id = R.string.sync_peers, summary.peers.joinToString(", "))
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+                summary.peerTrouble?.let { trouble ->
+                    Text(
+                        text = stringResource(id = R.string.sync_peer_trouble, trouble),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                // Listening and never once reached is what a firewall on the other device looks
+                // like from here, and from here it looks exactly like everything working.
+                if (summary.listening && summary.served == 0) {
+                    Text(
+                        text = stringResource(id = R.string.sync_nobody_reached_us),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalMutedOnSurface.current
+                    )
+                }
+                Text(
+                    text = stringResource(id = R.string.sync_device, summary.deviceId),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+            } else {
+                Text(
+                    text = summary.folder ?: stringResource(id = R.string.sync_no_folder),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (summary.folder == null) {
+                        stringResource(id = R.string.sync_hint)
+                    } else {
+                        stringResource(id = R.string.sync_device, summary.deviceId)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMutedOnSurface.current
+                )
+            }
 
             if (summary.lastRunAt > 0L) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -511,9 +584,10 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                 )
             }
 
-            // The phrase, and what the folder looks like without one. Only shown once a folder
-            // has been chosen: before that there is nothing to seal.
-            if (summary.folder != null) {
+            // The phrase. Needed by both transports and for the same reason: it is the only
+            // secret either of them has — it seals the records in a folder, and it is what a device
+            // on the network proves it is one of the owner's by.
+            if (summary.folder != null || summary.direct) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = stringResource(
@@ -560,6 +634,50 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                         }
                     }
                 }
+            }
+
+            if (summary.direct) {
+                Spacer(modifier = Modifier.height(12.dp))
+                var address by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text(stringResource(id = R.string.sync_peer_address)) },
+                    supportingText = { Text(stringResource(id = R.string.sync_peer_address_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (summary.peerAddressInUse.isNotEmpty()) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.sync_peer_address_in_use,
+                            summary.peerAddressInUse
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalMutedOnSurface.current
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = {
+                            viewModel.setPeerAddress(address)
+                            address = ""
+                        },
+                        enabled = address.isNotBlank()
+                    ) {
+                        Text(text = stringResource(id = R.string.sync_peer_address_set))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(onClick = { viewModel.syncNow() }, enabled = !summary.busy) {
+                        if (summary.busy) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(text = stringResource(id = R.string.sync_now))
+                        }
+                    }
+                }
+                return@Column
             }
 
             Spacer(modifier = Modifier.height(12.dp))

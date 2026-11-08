@@ -60,6 +60,17 @@ public interface EmbeddingDao {
     @Query("UPDATE embeddings SET publishedAt = :at WHERE songId IN (:songIds)")
     void markPublished(List<Long> songIds, long at);
 
+    /**
+     * Offers every vector to the other devices again.
+     *
+     * Run when this device's records start going somewhere they have never been — a folder just
+     * chosen, or the socket's own directory the first time it is used. The marks say "already
+     * offered", which was true of the *previous* destination and says nothing about this one, and a
+     * destination that never receives them can never hand them back.
+     */
+    @Query("UPDATE embeddings SET publishedAt = 0 WHERE refusedStamp IS NULL")
+    void offerEverythingAgain();
+
     @Query("SELECT COUNT(*) FROM embeddings WHERE publishedAt = 0 AND refusedStamp IS NULL")
     int countNotPublished();
 

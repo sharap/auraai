@@ -590,9 +590,129 @@ A device reads every directory but its own and writes only its own. There is no 
 and no server. Android reaches the folder through the storage access framework, so the user picks
 it once and the grant persists.
 
-Syncthing is the transport today, because that is what is already running. Direct transfer over the
-local network is the obvious next step and changes none of the above: the same sealed batches,
-handed over a socket instead of a folder, which is most of why sealing them is worth doing.
+Two transports carry that, and the owner picks one. A **folder** something else keeps in step —
+Syncthing, a network share, a stick — or this app's own **socket**. The second is the reason the
+layout above is worth reading twice: it changes nothing about it.
+
+### Carrying it over a socket
+
+Syncthing was the transport first, because it was already running, and on Android it is the part
+that goes wrong. A phone's background limits fight a sync daemon, the folder has to live in shared
+storage where any app with the permission can read it, and reaching it goes through the storage
+access framework, which is slow and refuses to append on some providers. None of that is Syncthing
+being bad at its job; it is a phone being a phone. So the app carries the files itself.
+
+What makes that a small piece of work is that the records are already sealed, so the transport is a
+dumb pipe, and that the folder was always behind an interface. A device keeps the same tree in its
+**own private storage** — its own directory, and a copy of each other device's — and the socket's
+whole job is to make those copies match. Everything above it is untouched: the same batches, the
+same readers, the same merge, the same note of how far each file was read.
+
+The conversation has three questions and two answers, because the layout only permits that many:
+
+| | |
+| --- | --- |
+| `hello` | which device is calling, so the right directory is offered |
+| `list` | what the answering device has of **its own**, with the byte count of each file |
+| `fetch` | bytes of one of those files, from an offset, at most 256 KB at a time |
+| `index` | what the answering device has of the **caller's** files |
+| `put` | bytes of the caller's own file, to be appended to its copy there |
+
+Offsets are bytes rather than lines, because the files are append-only and a byte count is the one
+cursor two devices can agree on without trusting each other's line counting. A write is **strictly**
+at the end: a gap would leave a hole of zeros inside somebody's history and an overlap would rewrite
+what has already been read, so both are refused and the caller asks for the index again next pass.
+
+A caller may read the answering device's own directory and append to the one named after the id it
+said hello with. It may not touch any other, which is a safety property rather than a convenience:
+a device that could write *our* directory could forge our batches to a third device. Every path is
+checked against the shapes this program's own writers produce, which is also what keeps `..`,
+absolute paths and a peer's imagination out of the file system.
+
+One connection does both directions — take first, then give — because a device cannot count on
+being called back. A phone with its screen off is not listening, so whichever side is awake does
+the whole exchange. For the common pair that is the phone dialling a desktop that listens all day,
+and **the phone needs no background service at all**: it listens only while the app is on the
+screen, and dials on every pass. Two phones sync while both apps are open. That is a limit, stated
+rather than hidden, and it is the limit that removes the thing Syncthing suffers from.
+
+### Changing where the records go
+
+What the state remembers is not a *kind* of transport but a **destination**: `direct` for the
+socket, `folder:<uri>` for a particular folder. Naming the folder is what makes choosing a different
+one count as a change, which it is — an empty destination whose files carry the old one's names, the
+same situation as switching transports and invisible while the state said only "folder".
+
+On a change, progress through every file goes (none of the new destination's files has been read)
+and every outbox starts again, so that the new destination ends up holding what this device knows
+rather than only what happened after the switch. Batch counters are untouched: a number going
+backwards would collide with batches already out there.
+
+The vectors are the one thing not re-sent on *every* change — eleven megabytes for a library this
+size — but a destination that has **never** had them gets them once, and the state remembers which
+destinations those were. The reason is what a folder is for: a device that loses its analysis is
+handed it back by whoever holds a copy, and a destination that never received the vectors cannot
+hand back anything. That holds for the socket too, where a device's own files are fetched by its
+peer and kept there: the peer's copy is the backup, and it exists only because the vectors were
+published. Switching back and forth therefore costs one fill per destination, ever, and nothing on
+the flicks after that.
+
+That fill is a pass that gives without reading: the destination has only just been named, so there is
+nothing of its to take in yet. A pass asked for every vector therefore counts as a full pass on its
+own — it was once gated on having read something first, which made the one pass whose whole purpose
+was the vectors publish none of them, and a phone whose analysis had been cleared could not be handed
+it back.
+
+### Being reachable, which is often one-way
+
+A desktop's firewall is the ordinary case, not the exception. Measured on this machine — Fedora,
+firewalld, zone `public`: a phone on the same network could reach **neither** the TCP port nor the
+beacon's UDP port, while the desktop reached the phone's TCP port on the first try. Outgoing is not
+blocked; incoming is, and the default zone allows ssh and mDNS and nothing else.
+
+Two things follow, and both are built in. First, **whichever side can reach the other dials on its
+own**, every half minute while the transport is on, rather than waiting to be called: that is what
+makes a one-way path enough, and it is also what keeps the beacon fresh. Second, a listener that has
+never been reached says so — *nothing has reached this machine yet* — because that is the one
+failure that looks from the inside exactly like everything working.
+
+The owner then has a choice, and the smaller of the two is worth knowing: opening the **beacon's UDP
+port alone** is enough, because once this machine can hear the other announce itself it can dial out
+to it and the TCP port need never be open. Typing an address works with nothing opened at all, at
+the price of a number that changes when the lease does.
+
+### The frames, and finding each other
+
+Every frame is sealed with AES-256-GCM under a key derived from the owner's phrase — the same
+phrase, salted with this transport's own name, so that sealing a conversation never uses the key
+that seals a record. Each connection then gets a key of its own: both sides send sixteen random
+bytes in the clear, and the session key is `HMAC(phraseKey, "aura-session-v1" || clientNonce ||
+serverNonce)`. That is what makes counters safe as nonces — a fresh key per connection means a
+counter starting at zero cannot repeat one — and each direction counts separately and says which it
+is, so the two sides cannot collide either. The counter is authenticated rather than sent, so a
+frame replayed, dropped or swapped does not open.
+
+The payload is sealed already, so this layer is not where trust is decided. What it protects is the
+*shape* of the conversation: device ids, how many files each side holds, which days they are named
+for, how many bytes move and when. On a café's network that is a presence log, and it costs about
+thirty lines not to hand it over. There is deliberately **no fallback**: a frame that will not open
+ends the conversation, because breaking the protected attempt and letting the client retry in the
+clear is the classic way to turn a secure protocol into an insecure one.
+
+Finding each other is a short broadcast every pass — *here is a device, at this port* — on a fixed
+UDP port beside the TCP one, with the announcement sealed under the same key. Sealed because a
+beacon goes to everyone on the network, repeatedly, and in the clear it would announce a device's id
+to a café every few seconds; its nonce is random rather than a counter, since a beacon has no
+conversation to count within. A beacon proves only that somebody holding the phrase was recently at
+that address, which is all it has to prove: the connection proves the rest, a replayed beacon points
+at an address where nothing answers, and a timestamp keeps even that within a minute. Written by
+hand rather than taken from mDNS so that both platforms run the same thirty lines — and where a
+network drops broadcasts between its clients, which drops mDNS too, there is a field to type an
+address into.
+
+What is still the phrase's job and not pairing's: a code shown on one device and read on the other,
+with a random key kept in hardware, is the next step and is what will let the phrase go. The
+transport is built so that this changes one function — where the key comes from — and nothing else.
 
 ## How often it is written
 
@@ -700,8 +820,8 @@ Three things must not drift, and each has a guard:
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
 - Everything under `sync/` exists in both repositories and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Thirty-four
-  files: the records and the track key, the batch envelope, the merge, the device id, the writers
+  naming which side the copy is on, exactly like the two excerpt files. Diff them. Forty-two
+  files, the socket transport among them: the records and the track key, the batch envelope, the merge, the device id, the writers
   and the readers for history, vectors, playlists and the mix, the playlist log and its replay, the
   matcher, the terms a vector is believed on, the sealing and the base64 it rides in, the state kept between
   runs, the coordinator, and the interfaces that keep the folder and the stores out of all of it.
@@ -709,10 +829,12 @@ Three things must not drift, and each has a guard:
   because four kinds of record carry one: a listen, a vector, a playlist change, the mix. Four
   copies of those four lines is four chances for a device to describe a track in a way the other
   one reads as a different track.
-- Five pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
-  the folder (`SafSyncFolder` against `FileSyncFolder`), the history store (`PlayHistoryStore`
-  against `PlayLogStore`), the vector store (`EmbeddingVectorStore` against `DaoVectorStore`), the
-  playlists (`PlaylistShelf` against `M3uShelf`) and the mix (`MixShelf` against `PathMixShelf`).
+- Four pairs under `sync/` are deliberately **not** copies, and say so in their own first lines:
+  the history store (`PlayHistoryStore` against `PlayLogStore`), the vector store
+  (`EmbeddingVectorStore` against `DaoVectorStore`), the playlists (`PlaylistShelf` against
+  `M3uShelf`) and the mix (`MixShelf` against `PathMixShelf`). `SafSyncFolder` has no opposite
+  number at all: reaching a document tree is a question only Android has, and `FileSyncFolder` —
+  an ordinary directory, which both platforms now use — is a copy like the rest.
   Each is how one platform answers a question only it can: how to reach a folder, where listens
   are kept, where vectors are kept and what decoder and excerpt a file of its own would have, and
   whether a playlist is a blob of MediaStore ids or a file of paths. None of them shares a name
@@ -747,7 +869,9 @@ Three things must not drift, and each has a guard:
 | Vectors whose track is gone | kept, counted and shown; removed only when the owner asks, and never the ones the history still mentions |
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
 | Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
-| The socket itself | not started |
+| The socket itself | done on both sides: sealed frames, three questions, byte offsets, tested end to end over a loopback socket |
+| Finding each other on a network | done: a sealed broadcast every pass, with an address to type where broadcasts do not arrive |
+| Sync without a shared folder on Android | done: the files live in the app's own storage, and nothing runs in the background |
 | Everything else here | designed, not written |
 
 The excerpt had to come first. Until the two sides agreed on which samples to listen to, a synced
