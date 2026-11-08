@@ -113,6 +113,17 @@ class PeerTransport(
     fun somebodyNear(now: Long = System.currentTimeMillis()): Boolean =
         synchronized(seen) { seen.values.any { it.seenAt >= now - FORGET_PEERS_MS } }
 
+    /**
+     * Whether a conversation is open right now, in either direction.
+     *
+     * Dialled or answered, because the cost is the same from the scan's point of view: both ends
+     * of one connection seal, store and read, and on a phone those compete with the analysis for
+     * the same cores. Said as a fact about now rather than as a window of seconds, because a
+     * window would have to guess the gap between one round of records and the next — and that gap
+     * belongs to the network, which is the one thing here nobody can measure in advance.
+     */
+    fun conversationInFlight(): Boolean = talking.get() || (server?.inFlight() ?: 0) > 0
+
     /** How many conversations this device has answered; see [State.served]. */
     fun conversationsServed(): Int = served.get()
 

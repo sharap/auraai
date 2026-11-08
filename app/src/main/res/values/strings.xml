@@ -15,6 +15,7 @@
     <string name="start_ai_scan">Start AI Scan</string>
     <string name="stop_ai_scan">Stop AI Scan</string>
     <string name="ai_scan_complete">Scan Complete</string>
+    <string name="ai_scan_receiving">Taking vectors from the other device: %1$d of %2$d</string>
     <string name="ai_scan_stopped">Scan Stopped</string>
     <string name="ai_scan_error">Scan Error: %1$s</string>
     <string name="ai_scan_hint">Analyze your library for AI recommendations</string>

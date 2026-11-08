@@ -487,7 +487,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // for vectors is waiting for anybody; see [PeerPresence].
                 PeerPresence.offer(
                     near = { transport.somebodyNear() },
-                    conversations = { transport.conversationsHad() }
+                    conversations = { transport.conversationsHad() },
+                    inFlight = { transport.conversationInFlight() }
                 )
             }
         }
@@ -1479,12 +1480,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun observeScan() {
         viewModelScope.launch {
-            var lastRefreshedAt = 0
+            // Two counters and not one: a vector arriving and a track being analysed are both
+            // progress, but they are counted differently — arrivals are the whole table, analysis
+            // starts from zero each scan. Sharing one high-water mark would mean the first
+            // analysed track sits below it and nothing is refreshed for the rest of the scan.
+            var analysedAt = 0
+            var arrivedAt = 0
             AiScanState.stage.collect { stage ->
                 applyScanStage(stage)
-                if (stage is ScanStage.Scanning && stage.done - lastRefreshedAt >= SCAN_REFRESH_EVERY) {
-                    lastRefreshedAt = stage.done
-                    refreshScannedIds()
+                when (stage) {
+                    is ScanStage.Scanning ->
+                        if (stage.done - analysedAt >= SCAN_REFRESH_EVERY) {
+                            analysedAt = stage.done
+                            refreshScannedIds()
+                        }
+                    // Refreshed while they arrive as well. Four thousand vectors can land in half
+                    // a minute, and a screen that only catches up at the end is a screen that
+                    // spent that half minute saying something untrue.
+                    is ScanStage.Receiving ->
+                        if (stage.held - arrivedAt >= SCAN_REFRESH_EVERY) {
+                            arrivedAt = stage.held
+                            refreshScannedIds()
+                        }
+                    else -> Unit
                 }
             }
         }
@@ -1526,14 +1544,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _aiScanStatus.value = context.getString(R.string.ai_engine_init)
             }
 
+            is ScanStage.Receiving -> {
+                // Said as what it is. Nothing is being analysed here: the other device already
+                // did it, and this is the handover.
+                //
+                // Clamped, because the table can hold rows for tracks the library no longer has —
+                // a file deleted between one scan and the next — and a bar past its end is a bug
+                // the eye reads before any number does. The counts themselves are left as they
+                // are: if they disagree with the library, that is worth seeing.
+                _aiScanProgress.value =
+                    if (stage.library == 0) 0f
+                    else (stage.held.toFloat() / stage.library).coerceIn(0f, 1f)
+                _aiScanStatus.value =
+                    context.getString(R.string.ai_scan_receiving, stage.held, stage.library)
+            }
+
             is ScanStage.Scanning -> {
-                _aiScanProgress.value = if (stage.total == 0) 0f else stage.done.toFloat() / stage.total
-                _aiScanStatus.value = if (stage.title.isEmpty()) {
-                    context.getString(R.string.ai_scan_complete)
-                } else {
-                    val progress = context.getString(R.string.scan_progress, stage.done, stage.total, formatEtr(stage.etrSeconds))
+                _aiScanProgress.value =
+                    if (stage.total == 0) 0f
+                    else (stage.done.toFloat() / stage.total).coerceIn(0f, 1f)
+                val progress = context.getString(
+                    R.string.scan_progress, stage.done, stage.total, formatEtr(stage.etrSeconds)
+                )
+                _aiScanStatus.value =
                     "${context.getString(R.string.scanning_track, stage.title)}\n$progress"
-                }
+            }
+
+            is ScanStage.Finished -> {
+                _aiScanProgress.value = 1f
+                _aiScanStatus.value = context.getString(R.string.ai_scan_complete)
             }
 
             is ScanStage.Failed -> {

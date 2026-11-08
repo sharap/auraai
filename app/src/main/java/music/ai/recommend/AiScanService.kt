@@ -193,10 +193,15 @@ class AiScanService : Service() {
             is ScanStage.DownloadingModel ->
                 getString(R.string.ai_model_downloading) to (stage.progress.fraction * 100).toInt()
             is ScanStage.PreparingModel -> getString(R.string.ai_engine_init) to -1
+            is ScanStage.Receiving -> {
+                val percent = if (stage.library == 0) 0 else stage.held * 100 / stage.library
+                getString(R.string.ai_scan_receiving, stage.held, stage.library) to percent
+            }
             is ScanStage.Scanning -> {
                 val percent = if (stage.total == 0) 0 else stage.done * 100 / stage.total
                 getString(R.string.scan_progress, stage.done, stage.total, formatEtr(stage.etrSeconds)) to percent
             }
+            is ScanStage.Finished -> getString(R.string.ai_scan_complete) to 100
             is ScanStage.Failed -> getString(R.string.ai_scan_error, stage.reason) to -1
             ScanStage.Idle -> return
         }

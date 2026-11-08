@@ -94,6 +94,15 @@ class PeerServer(
         }
     }
 
+    /**
+     * How many conversations are open right now.
+     *
+     * Asked by the scan, which steps aside while one is: on a phone the analysis has every core
+     * busy, and a device that is being handed four thousand vectors is better off taking them than
+     * computing the ones it is being handed.
+     */
+    fun inFlight(): Int = connections.get()
+
     fun stop() {
         val opened = socket
         socket = null

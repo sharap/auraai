@@ -26,16 +26,21 @@ object PeerPresence {
     @Volatile
     private var conversations: () -> Int = { 0 }
 
+    @Volatile
+    private var inFlight: () -> Boolean = { false }
+
     /** Offered by whoever owns the transport, once it is up. */
-    fun offer(near: () -> Boolean, conversations: () -> Int) {
+    fun offer(near: () -> Boolean, conversations: () -> Int, inFlight: () -> Boolean) {
         this.near = near
         this.conversations = conversations
+        this.inFlight = inFlight
     }
 
     /** Called when the transport goes away, so nothing is waited for on its behalf. */
     fun forget() {
         near = { false }
         conversations = { 0 }
+        inFlight = { false }
     }
 
     /** Whether a device has announced itself recently; see `PeerTransport.somebodyNear`. */
@@ -43,4 +48,13 @@ object PeerPresence {
 
     /** Conversations in either direction; see `PeerTransport.conversationsHad`. */
     fun conversationsHad(): Int = runCatching { conversations() }.getOrDefault(0)
+
+    /**
+     * Whether a conversation is open right now; see `PeerTransport.conversationInFlight`.
+     *
+     * Read by the analysis between tracks, so that a phone handed a library does not spend its
+     * cores computing what is arriving on them. False when there is no transport, and then the
+     * analysis never steps aside for anything.
+     */
+    fun conversationInFlight(): Boolean = runCatching { inFlight() }.getOrDefault(false)
 }

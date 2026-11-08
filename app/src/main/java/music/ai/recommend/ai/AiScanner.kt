@@ -22,6 +22,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import music.ai.recommend.model.Song
+import music.ai.recommend.sync.PeerPresence
 import java.io.File
 import java.nio.FloatBuffer
 import java.util.concurrent.CountDownLatch
@@ -32,7 +33,34 @@ sealed interface ScanStage {
     data object Idle : ScanStage
     data class DownloadingModel(val progress: ModelProgress) : ScanStage
     data object PreparingModel : ScanStage
+
+    /**
+     * Vectors are arriving from another device, and nothing is being computed here.
+     *
+     * A stage of its own rather than a [Scanning] with no title. "No title means finished" was
+     * the convention until the wait for vectors started reporting progress through it, and then
+     * the screen said *scan complete* over a moving bar for half a minute — two true things
+     * rendered as one false one.
+     */
+    data class Receiving(
+        /** How many vectors this device holds now. */
+        val held: Int,
+        /**
+         * How many tracks the library has — not how many are still expected.
+         *
+         * Absolute on purpose. It used to carry "how many are still waiting", and the screen added
+         * the two together to get a total: as vectors arrived the first number grew while the
+         * second stood still, so the total grew with it and the screen read *1000 of 8000* out of
+         * a library of four and a half thousand. A total that moves is not a total.
+         */
+        val library: Int
+    ) : ScanStage
+
     data class Scanning(val title: String, val done: Int, val total: Int, val etrSeconds: Long) : ScanStage
+
+    /** Nothing left to analyse, whether this device computed it or was handed it. */
+    data class Finished(val analysed: Int) : ScanStage
+
     data class Failed(val reason: String) : ScanStage
 }
 
@@ -158,7 +186,7 @@ class AiScanner(
         prints.refresh(songsToProcess.associate { it.id to it.path })
         val askedAt = System.currentTimeMillis()
         val asked = songsToProcess.size
-        if (letVectorsArrive(asked, onStage)) {
+        if (letVectorsArrive(asked, songs.size, onStage)) {
             val arrived = embeddings.ids()
             songsToProcess = songsToProcess.filter { it.id !in arrived }
             Log.i(
@@ -181,7 +209,7 @@ class AiScanner(
         val total = songsToProcess.size
 
         if (total == 0) {
-            onStage(ScanStage.Scanning("", songs.size, songs.size, 0L))
+            onStage(ScanStage.Finished(songs.size))
             return@withContext
         }
 
@@ -194,21 +222,44 @@ class AiScanner(
                 // 8-core phone that is roughly 1.93 s -> 1.23 s.
                 val prepared = Channel<Prepared>(Channel.RENDEZVOUS)
 
-                launch { decodeInto(prepared, songsToProcess) }
+                // Counted rather than inferred: a track whose vector arrives mid-scan never
+                // reaches the consumer at all, so without this the estimate of the time remaining
+                // would go on promising to analyse tracks that nobody is going to analyse.
+                val arrivedMeanwhile = java.util.concurrent.atomic.AtomicInteger(0)
+                launch { decodeInto(prepared, songsToProcess, arrivedMeanwhile) }
 
                 var done = 0
+                var pausedMs = 0L
                 for (item in prepared) {
                     if (isStopping) break
                     currentCoroutineContext().ensureActive()
 
-                    val elapsed = System.currentTimeMillis() - startTime
+                    pausedMs += stepAsideForTheConversation(done + scannedIds.size, songs.size, onStage)
+
+                    // It may have arrived while we stood aside, in which case the inference about
+                    // to be run has already been run elsewhere. One lookup against a map in
+                    // memory, against a second of this phone's eight cores.
+                    if (embeddings.has(item.song.id)) {
+                        done++
+                        continue
+                    }
+
+                    val elapsed = System.currentTimeMillis() - startTime - pausedMs
                     val avgPerSong = if (done > 0) elapsed / done else 0L
-                    val etrSeconds = ((total - done) * avgPerSong) / 1000
+                    val left = (total - done - arrivedMeanwhile.get()).coerceAtLeast(0)
+                    val etrSeconds = (left * avgPerSong) / 1000
 
                     onStage(
                         ScanStage.Scanning(
                             title = item.song.title,
-                            done = done + scannedIds.size,
+                            // What this device has dealt with now, asked afresh, and not the count
+                            // taken when the scan started plus what it has analysed since. The
+                            // stale version was how the bar collapsed from nine tenths to a
+                            // twentieth the moment the handover ended: the vectors that had just
+                            // arrived were missing from the baseline, so the screen forgot them.
+                            // The same quantity [ScanStage.Receiving] shows, which is why the two
+                            // stages now join up instead of contradicting each other.
+                            done = embeddings.dealtWithNow() ?: (done + scannedIds.size),
                             total = songs.size,
                             etrSeconds = etrSeconds
                         )
@@ -238,7 +289,7 @@ class AiScanner(
             }
 
             if (!isStopping) {
-                onStage(ScanStage.Scanning("", songs.size, songs.size, 0L))
+                onStage(ScanStage.Finished(songs.size))
             }
         } finally {
             // Also runs when the user stops the scan, so the ~280 MB session is not left resident.
@@ -275,6 +326,60 @@ class AiScanner(
      * being read.
      */
     /**
+     * Stands aside while a conversation with the other device is open, and reports that it is.
+     *
+     * The analysis keeps every core of a phone busy, and a conversation at the same time is two
+     * jobs competing for one processor — the worse of the two bargains, because what arrives over
+     * the socket is work somebody else has already done. Measured on the pair this was written
+     * against: one round of fifty vectors took 0.6 s while the phone was analysing and 0.35 s
+     * while it was not, so standing aside makes the handover almost twice as fast and costs the
+     * analysis nothing that it was not about to be handed anyway.
+     *
+     * Between tracks and not inside one: whatever is being decoded or inferred right now finishes.
+     * With a rendezvous channel that also stops the decoder after at most one more track, since
+     * its send waits for a receive that is not coming yet.
+     *
+     * Polled briskly rather than once a second, because the signal includes this device's own
+     * dial attempts and under a tunnel those fail in milliseconds, several times a second. Landing
+     * inside one is rare, but when it happens the pause should cost what the attempt cost and not
+     * a round number of seconds.
+     *
+     * @return how long it stood aside, so that the estimate of the time remaining stays an
+     *   estimate about analysing and not about waiting.
+     */
+    private suspend fun stepAsideForTheConversation(
+        done: Int,
+        total: Int,
+        onStage: (ScanStage) -> Unit
+    ): Long {
+        if (!PeerPresence.conversationInFlight()) return 0L
+        val from = System.currentTimeMillis()
+        var held = embeddings.ids().size
+        var movedAt = from
+        var rounds = 0
+        while (!isStopping && PeerPresence.conversationInFlight() && rounds++ < ASIDE_ROUNDS) {
+            // Said, so that a scan which has visibly stopped says why it has stopped.
+            onStage(ScanStage.Receiving(held = embeddings.dealtWithNow() ?: held, library = total))
+            delay(ASIDE_POLL_MS)
+            currentCoroutineContext().ensureActive()
+            val now = embeddings.ids().size
+            if (now > held) {
+                held = now
+                movedAt = System.currentTimeMillis()
+            } else if (System.currentTimeMillis() - movedAt >= ASIDE_QUIET_MS) {
+                // The socket is open and nothing is coming down it. That is what the other device
+                // disappearing looks like from here — a dropped peer holds a connection for the
+                // read timeout, twenty seconds, and standing idle through those is exactly the
+                // waste this was meant to avoid. There is work here that nobody is sending.
+                break
+            }
+        }
+        val waited = System.currentTimeMillis() - from
+        Log.i(TAG, "Stood aside for $waited ms; $held vectors held when the analysis resumed")
+        return waited
+    }
+
+    /**
      * Waits while vectors are still arriving from the other device, and no longer.
      *
      * The moment a scan starts, the app asks its peer for everything this device is missing — and
@@ -296,7 +401,11 @@ class AiScanner(
      *
      * @return true when something arrived, so the caller knows to look again.
      */
-    private suspend fun letVectorsArrive(waiting: Int, onStage: (ScanStage) -> Unit): Boolean {
+    private suspend fun letVectorsArrive(
+        waiting: Int,
+        library: Int,
+        onStage: (ScanStage) -> Unit
+    ): Boolean {
         if (waiting == 0) return false
         // Nobody has announced themselves, so there is nobody to ask and nothing to wait for. A
         // library with one device pays nothing at all for this.
@@ -315,7 +424,10 @@ class AiScanner(
                 held = now
                 // Said, because otherwise this is a minute of a screen that claims to be starting
                 // and visibly is not.
-                onStage(ScanStage.Scanning("", held, held + waiting, 0L))
+                // Reported as what the analysis reports, so the two stages are one number and the
+            // bar neither jumps nor collapses when one hands over to the other. The loop's own
+            // decisions stay on the vector count: a refusal recorded elsewhere is not an arrival.
+            onStage(ScanStage.Receiving(held = embeddings.dealtWithNow() ?: held, library = library))
             } else {
                 quiet++
                 // The other device answered and brought nothing of ours. Nothing is coming, and
@@ -335,7 +447,12 @@ class AiScanner(
         return held > before
     }
 
-    private suspend fun decodeInto(channel: SendChannel<Prepared>, songs: List<Song>) {
+    private suspend fun decodeInto(
+        channel: SendChannel<Prepared>,
+        songs: List<Song>,
+        /** Tracks dropped from the backlog because their vector arrived; see [scanSongs]. */
+        arrivedMeanwhile: java.util.concurrent.atomic.AtomicInteger
+    ) {
         val buffers = arrayOf(FloatArray(AudioProcessor.FEATURE_SIZE), FloatArray(AudioProcessor.FEATURE_SIZE))
         var slot = 0
         try {
@@ -345,7 +462,10 @@ class AiScanner(
 
                 // It may have arrived since the list was made: a pass runs while this walks the
                 // library, and a vector in hand is worth more than the one this would compute.
-                if (embeddings.has(song.id)) continue
+                if (embeddings.has(song.id)) {
+                    arrivedMeanwhile.incrementAndGet()
+                    continue
+                }
 
                 val features = try {
                     val pcm = decodeExcerpt(song)
@@ -731,6 +851,23 @@ class AiScanner(
          * is decided by what happens, not by a number. See [letVectorsArrive].
          */
         private const val ARRIVAL_PAUSE_MS = 1_000L
+
+        /** How often the pause between tracks looks up; see [stepAsideForTheConversation]. */
+        private const val ASIDE_POLL_MS = 200L
+
+        /** The same five minutes as [MOST_ROUNDS], counted in the briefer poll above. */
+        private const val ASIDE_ROUNDS = 1_500
+
+        /**
+         * How long the pause tolerates an open conversation that is sending nothing.
+         *
+         * Three seconds, against a round of fifty vectors measured at 0.35 s on an idle phone and
+         * 0.6 s on a busy one: five slow rounds, so a live handover is never cut short. It is the
+         * other end of that tolerance that matters — a peer that vanished mid-conversation holds
+         * the socket until the read times out, and twenty idle seconds is not something to wait
+         * through when there are tracks here to analyse.
+         */
+        private const val ASIDE_QUIET_MS = 3_000L
 
         /**
          * Something has arrived, so wait for the stream to really stop. Ten seconds of quiet,

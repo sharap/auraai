@@ -15,6 +15,7 @@
     <string name="start_ai_scan">Начать AI Сканирование</string>
     <string name="stop_ai_scan">Остановить AI Сканирование</string>
     <string name="ai_scan_complete">Сканирование завершено</string>
+    <string name="ai_scan_receiving">Получаем векторы с другого устройства: %1$d из %2$d</string>
     <string name="ai_scan_stopped">Сканирование остановлено</string>
     <string name="ai_scan_error">Ошибка сканирования: %1$s</string>
     <string name="ai_scan_hint">Проанализируйте вашу библиотеку для AI рекомендаций</string>
