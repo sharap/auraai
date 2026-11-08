@@ -131,7 +131,7 @@ class VectorCoordinatorTest {
         return SyncCoordinator(
             deviceId = deviceId,
             state = state,
-            store = PlayHistoryStore(history) { library },
+            store = PlayHistoryStore(history, { library }),
             folder = { sink },
             vectors = EmbeddingVectorStore(embeddings, models) { library }
         )

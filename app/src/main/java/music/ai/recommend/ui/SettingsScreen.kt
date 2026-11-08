@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
+import music.ai.recommend.sync.PhraseVault
 import music.ai.recommend.BuildConfig
 import music.ai.recommend.MusicViewModel
 import music.ai.recommend.ai.AudioModelVariant
@@ -611,6 +612,26 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                         text = stringResource(id = R.string.sync_unopened, summary.unopened),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
+                    )
+                }
+                // Where the one secret of this whole arrangement is kept. Said plainly because the
+                // promise is otherwise unverifiable from the outside, and because the third case
+                // is one the owner may want to do something about.
+                if (summary.sealed) {
+                    Text(
+                        text = stringResource(
+                            id = when (summary.phraseKept) {
+                                PhraseVault.Where.HARDWARE -> R.string.sync_phrase_in_hardware
+                                PhraseVault.Where.KEYSTORE -> R.string.sync_phrase_in_keystore
+                                PhraseVault.Where.PLAIN -> R.string.sync_phrase_in_prefs
+                            }
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (summary.phraseKept == PhraseVault.Where.PLAIN) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            LocalMutedOnSurface.current
+                        }
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))

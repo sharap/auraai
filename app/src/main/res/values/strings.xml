@@ -234,6 +234,9 @@
     <string name="sync_not_sealed">The folder is plain text. Anything on this phone that can read storage can read it.</string>
     <string name="sync_unopened">%1$d batches would not open. The phrase here is probably not the phrase there.</string>
     <string name="sync_phrase">Shared phrase</string>
+    <string name="sync_phrase_in_hardware">The phrase is kept in this device\u0027s secure element: the app cannot see it any more, and it cannot be copied out.</string>
+    <string name="sync_phrase_in_keystore">The phrase is kept in this device\u0027s keystore rather than in the app\u0027s settings.</string>
+    <string name="sync_phrase_in_prefs">The phrase is in the app\u0027s settings: the keystore would not take it.</string>
     <string name="sync_phrase_hint">The same words on both devices. Long rather than clever.</string>
     <string name="sync_phrase_set">Set the phrase</string>
     <string name="sync_phrase_clear">Clear</string>

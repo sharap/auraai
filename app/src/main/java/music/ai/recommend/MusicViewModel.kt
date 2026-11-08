@@ -74,6 +74,7 @@ import music.ai.recommend.sync.PlaylistShelf
 import music.ai.recommend.sync.DirectoryPeerFiles
 import music.ai.recommend.sync.FileSyncFolder
 import music.ai.recommend.sync.PeerClient
+import music.ai.recommend.sync.PhraseVault
 import music.ai.recommend.sync.PeerFiles
 import music.ai.recommend.sync.PeerTransport
 import music.ai.recommend.sync.SyncCoordinator
@@ -146,6 +147,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val modelRepository = ModelRepository.getInstance(application)
     private val embeddings = EmbeddingStore.getInstance(application)
     private val soundPrints = SoundPrintStore.getInstance(application)
+    private val phrases = PhraseVault(application)
     private val textEncoder by lazy { ClapTextEncoder(modelRepository) }
     private val smartAlbumBuilder by lazy { SmartAlbumBuilder(application, modelRepository, embeddings, textEncoder) }
     private val playHistory = PlayHistory.getInstance(application)
@@ -391,6 +393,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val tunnelled: Boolean = false,
         /** Whether what this device writes into the folder is sealed; see [GcmSealing]. */
         val sealed: Boolean = false,
+        /** Where the phrase that seals it is kept; see [PhraseVault]. */
+        val phraseKept: PhraseVault.Where = PhraseVault.Where.PLAIN,
         /**
          * Sealed batches met in the folder that would not open.
          *
@@ -2219,7 +2223,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * key takes two hundred thousand rounds of PBKDF2, and that must not happen twice.
      */
     private fun syncSealing(): Sealing? {
-        val phrase = prefs.getString(KEY_SYNC_PHRASE, null)?.takeIf { it.isNotEmpty() } ?: return null
+        val phrase = phrases.phrase()?.takeIf { it.isNotEmpty() } ?: return null
         sealingInUse?.let { (held, sealing) -> if (held == phrase) return sealing }
         return GcmSealing(phrase).also { sealingInUse = phrase to it }
     }
@@ -2234,7 +2238,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun setSyncPhrase(text: String) {
         val phrase = text.trim()
-        prefs.edit().putString(KEY_SYNC_PHRASE, phrase).apply()
+        if (!phrases.keep(phrase)) {
+            Log.w(TAG, "The phrase could not be put in the keystore; it is in the preferences")
+        }
         sealingInUse = null
         _syncSummary.value = _syncSummary.value.copy(sealed = phrase.isNotEmpty())
         viewModelScope.launch { syncPass(force = true, takeIn = true) }
@@ -2309,7 +2315,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (!prefs.getBoolean(KEY_SYNC_DIRECT, false)) return
         val transport = peerTransport ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            transport.setPhrase(prefs.getString(KEY_SYNC_PHRASE, null))
+            transport.setPhrase(phrases.phrase())
             if (!transport.start()) Log.w(TAG, "Could not listen for the other device")
             refreshSyncSummary()
         }
@@ -2327,7 +2333,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun peerExchange(): Boolean = withContext(Dispatchers.IO) {
         if (!prefs.getBoolean(KEY_SYNC_DIRECT, false)) return@withContext false
         val transport = peerTransport ?: return@withContext false
-        transport.setPhrase(prefs.getString(KEY_SYNC_PHRASE, null))
+        transport.setPhrase(phrases.phrase())
         if (!transport.state.listening) transport.start()
         val outcomes = runCatching { transport.exchange(prefs.getString(KEY_SYNC_PEER, null)) }
             .onFailure { Log.e(TAG, "Could not talk to the other device", it) }
@@ -2867,7 +2873,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _syncSummary.value = _syncSummary.value.withTransport().copy(
             folder = uri?.let { readableFolderName(it) },
             deviceId = if (uri == null) "" else syncDeviceId().orEmpty().take(8),
-            sealed = !prefs.getString(KEY_SYNC_PHRASE, null).isNullOrEmpty()
+            sealed = !phrases.phrase().isNullOrEmpty(),
+            phraseKept = phrases.where
         )
     }
 
@@ -2929,7 +2936,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
          * means deriving a new key from the phrase again. That trade belongs with pairing, when a
          * key is exchanged between devices instead of typed by a person.
          */
-        const val KEY_SYNC_PHRASE = "sync_phrase"
 
         /** Whether this device carries sync itself over the network; see [PeerTransport]. */
         const val KEY_SYNC_DIRECT = "sync_direct"

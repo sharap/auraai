@@ -717,6 +717,36 @@ What a socket destination therefore has in its tree is history, playlists and th
 how far its lines had been read goes with it, since a line count against a file that is gone is a
 claim about nothing. A folder destination is untouched by all of this and still gets everything.
 
+### Where the phrase is kept
+
+The phrase is the whole of the trust: the key that seals a batch is PBKDF2 of it salted with the
+writing device's id, the key that opens a conversation is PBKDF2 of it under a salt of its own, and
+a device that holds it is one of the owner's devices. So where the phrase sits is where the trust
+sits — and it sat in plain preferences on the phone and in `settings.json` on the desktop, written
+with the permissions the system gives by default, which on that machine is **644**: readable by
+every user on it.
+
+It is now kept where each platform keeps secrets.
+
+| | |
+| --- | --- |
+| phone | wrapped with an AES-256-GCM key in the Android keystore, generated once, non-exportable, in the secure element on hardware that has one. What sits beside it is a nonce and a ciphertext |
+| desktop | the Secret Service over the session bus — gnome-keyring or KWallet, the same place the browser keeps its passwords. The app already speaks D-Bus for the media keys, so this needs nothing new |
+| desktop without one | a file of its own that only the owner can read. Weaker, and **said out loud** in the settings screen rather than quietly assumed |
+
+The phrase itself is kept, and not a key derived from it, because reading what another device wrote
+needs PBKDF2 of the phrase salted with *that* device's id: a device met for the first time has to
+be readable, so what is stored has to be what all the derivations start from.
+
+**Nothing may lose a phrase.** A new place is trusted only after it has been read back and found to
+say the same thing; the plain copy goes only then. A keyring that accepts a secret and will not
+return it, and a keystore that encrypts and then cannot decrypt, both happen on real machines — and
+finding out later would mean a library that has quietly stopped being readable by the other device.
+A device that keeps the one secret badly is better than a device that has lost it.
+
+A wrapped phrase that will not open — a restore onto another phone, a secure element that was
+reset — is not guessed at. It is let go of and asked for again, once, rather than on every pass.
+
 ### What a recording is, by its own sound
 
 A track has to be named to another device, and the two descriptions it can be named by both fail in
@@ -993,7 +1023,8 @@ Three things must not drift, and each has a guard:
 | A shared decoder for ogg, opus and the rest | not started; those vectors stay at home |
 | The record format, the track key and the merge | written and tested, shared code on both sides |
 | The envelope, and sealing the payload | done on both sides: AES-256-GCM under a phrase the owner types, plain text until they do |
-| Pairing, the key in hardware, discovery | with the network transport, not before |
+| The phrase in the device's own keystore | done on both sides: the Android keystore on the phone, the Secret Service on the desktop, a file only the owner can read where there is neither |
+| Pairing by code, and discovery beyond one network | not started |
 | The device id, the writer and the reader | written and tested, the folder behind an interface |
 | Matching a key to a local track | written and tested |
 | Naming a recording by its sound | done on both sides: a slice of the sound, no decoding, 0.19 ms a file — see above |

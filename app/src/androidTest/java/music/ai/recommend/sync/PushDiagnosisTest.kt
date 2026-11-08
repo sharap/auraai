@@ -76,7 +76,7 @@ class PushDiagnosisTest {
         val coordinator = SyncCoordinator(
             deviceId = device,
             state = state,
-            store = PlayHistoryStore(PlayHistory.getInstance(context)) { library },
+            store = PlayHistoryStore(PlayHistory.getInstance(context), { library }),
             folder = { SafSyncFolder.fromDirectory(context, folder, device) },
             vectors = store
         )

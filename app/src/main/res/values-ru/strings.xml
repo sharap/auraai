@@ -234,6 +234,9 @@
     <string name="sync_not_sealed">Папка лежит открытым текстом. Её прочитает всё на телефоне, что имеет доступ к хранилищу.</string>
     <string name="sync_unopened">%1$d пачек не открылись. Скорее всего, фраза здесь не та, что там.</string>
     <string name="sync_phrase">Общая фраза</string>
+    <string name="sync_phrase_in_hardware">Фраза хранится в защищённом элементе устройства: приложение её больше не видит, и скопировать её оттуда нельзя.</string>
+    <string name="sync_phrase_in_keystore">Фраза хранится в хранилище ключей устройства, а не в настройках приложения.</string>
+    <string name="sync_phrase_in_prefs">Фраза лежит в настройках приложения: хранилище ключей устройства её не приняло.</string>
     <string name="sync_phrase_hint">Одни и те же слова на обоих устройствах. Лучше длиннее, чем хитрее.</string>
     <string name="sync_phrase_set">Задать фразу</string>
     <string name="sync_phrase_clear">Убрать</string>

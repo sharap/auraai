@@ -98,7 +98,7 @@ class PlaylistCoordinatorTest {
     ): SyncCoordinator<Long> = SyncCoordinator(
         deviceId = deviceId,
         state = SyncState.load(File(folder, "state-$deviceId.json")),
-        store = PlayHistoryStore(PlayHistory.getInstance(context)) { library },
+        store = PlayHistoryStore(PlayHistory.getInstance(context), { library }),
         folder = { SafSyncFolder.fromDirectory(context, folder, deviceId) },
         playlists = PlaylistShelf(
             songs = { library },
