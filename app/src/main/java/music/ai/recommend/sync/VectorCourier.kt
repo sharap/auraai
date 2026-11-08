@@ -25,7 +25,18 @@ import kotlinx.coroutines.runBlocking
  *
  * The desktop port carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
  */
-class VectorCourier(private val coordinator: () -> SyncCoordinator<*>?) : PeerRecords {
+class VectorCourier(
+    private val coordinator: () -> SyncCoordinator<*>?,
+    /**
+     * Where a word about not having been able to answer goes.
+     *
+     * Worth a channel of its own, because every failure here looks exactly like a truthful "I have
+     * nothing": a peer asks what this device holds, the answer is zero, and the conversation ends
+     * politely with nothing moved. That is indistinguishable from an empty library from the
+     * outside, and it cost an afternoon of looking in the wrong place.
+     */
+    private val note: (String) -> Unit = {}
+) : PeerRecords {
 
     /** What each peer and this device held at the last exchange; see [worthAsking]. */
     private val lastExchange = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -60,10 +71,14 @@ class VectorCourier(private val coordinator: () -> SyncCoordinator<*>?) : PeerRe
         "$have:$lacks:$named:${held()}:${lacking()}:${named()}"
 
     private fun <T> through(body: suspend (SyncCoordinator<*>) -> T): T? {
-        val present = coordinator() ?: return null
+        val present = coordinator() ?: run {
+            note("A peer asked about vectors before this device had read its own library")
+            return null
+        }
         return try {
             runBlocking { body(present) }
         } catch (e: Exception) {
+            note("Could not answer a peer about vectors: $e")
             null
         }
     }

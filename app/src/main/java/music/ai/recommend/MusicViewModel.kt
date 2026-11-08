@@ -452,7 +452,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * from inside somebody else's phone call is not a thing to do. Until this device has one of
      * its own, the honest answer to a peer is that there is nothing here.
      */
-    private val vectorCourier = VectorCourier { syncCoordinator }
+    private val vectorCourier = VectorCourier({ syncCoordinator }, { line -> Log.i(TAG, line) })
 
     /** The listener, the beacon and one exchange per pass; null until this device has an id. */
     private val peerTransport: PeerTransport? by lazy {
@@ -2416,10 +2416,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 delay(PEER_POLL_MS)
                 if (!prefs.getBoolean(KEY_SYNC_DIRECT, false)) continue
-                // A full pass when something arrived — reading the folder for nothing is the
-                // expensive half — or when the last pass said it had stopped short, since then
-                // what is left to read is already here and nothing else will come to fetch it.
-                if (peerExchange() || _syncSummary.value.vectorsWaiting) drainPasses()
+                // Guarded, because the loop is the only thing that makes sync happen at all.
+                // An exception thrown anywhere in a pass used to end it for the rest of the run:
+                // the app went on playing music, the port went on listening, and nothing was ever
+                // carried again until somebody restarted it — which is exactly what was being
+                // restarted, several times, before this was understood. A failure is worth one
+                // tick, not the loop.
+                try {
+                    // A full pass when something arrived — reading the folder for nothing is the
+                    // expensive half — or when the last pass said it had stopped short, since then
+                    // what is left to read is already here and nothing else will come to fetch it.
+                    if (peerExchange() || _syncSummary.value.vectorsWaiting) drainPasses()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "The pass between passes failed", e)
+                }
             }
         }
     }
@@ -2535,7 +2547,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             foreground.collectLatest { inFront ->
                 while (inFront) {
                     delay(FOREGROUND_POLL_MS)
-                    drainPasses()
+                    try {
+                        drainPasses()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // See the loop between passes: a failure costs a tick, not the loop.
+                        Log.e(TAG, "A pass while the app is in front failed", e)
+                    }
                 }
             }
         }
@@ -2723,6 +2742,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // back, the card sat at the count from the moment the window was opened — 491 of
                 // them — which read as "it will not take any more".
                 refreshVectorHousekeeping()
+            }
+            // A vector that arrived may be the answer for another copy of the same sound, and
+            // this is the only moment that can be known: the pass that takes vectors in is not the
+            // pass that read the library. Without it the copies waited for a restart — measured
+            // here, a machine restored 4351 of 4548 and stopped, and the 197 left were almost
+            // exactly its own duplicate copies.
+            if (fillTwinVectors() > 0) {
+                refreshScannedIds()
+                refreshVectorHousekeeping()
+                refreshSmartAlbums()
+                refreshDailyMix()
             }
             // True when a reader stopped short of the end: it takes in only so much at a time
             // and says so. Whoever drives the passes can then come straight back instead of

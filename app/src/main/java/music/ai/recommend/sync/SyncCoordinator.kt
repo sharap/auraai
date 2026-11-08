@@ -534,9 +534,17 @@ class SyncCoordinator<Track>(
     suspend fun serveVectors(keys: List<String>): List<String> {
         val vectors = vectors ?: return emptyList()
         if (keys.isEmpty()) return emptyList()
-        val terms = vectors.terms() ?: return emptyList()
+        // Said out loud, because from the asking side these two look exactly like "I hold nothing
+        // of yours" — a conversation that ends politely having moved nothing at all.
+        val terms = vectors.terms() ?: run {
+            note("Asked for ${keys.size} vectors before this device can say what it analyses on")
+            return emptyList()
+        }
         val library = library()
-        if (library.isEmpty()) return emptyList()
+        if (library.isEmpty()) {
+            note("Asked for ${keys.size} vectors before this device has read its library")
+            return emptyList()
+        }
         val matcher = TrackMatcher(library.map { (track, key) -> TrackMatcher.Entry(track, key) })
         val analysed = vectors.analysed()
         val asked = ArrayList<Track>()
@@ -580,9 +588,15 @@ class SyncCoordinator<Track>(
     suspend fun takeInVectors(records: List<String>): Int {
         val vectors = vectors ?: return 0
         if (records.isEmpty()) return 0
-        val terms = vectors.terms() ?: return 0
+        val terms = vectors.terms() ?: run {
+            note("${records.size} vectors offered before this device can say what it analyses on")
+            return 0
+        }
         val library = library()
-        if (library.isEmpty()) return 0
+        if (library.isEmpty()) {
+            note("${records.size} vectors offered before this device has read its library")
+            return 0
+        }
         val matcher = TrackMatcher(library.map { (track, key) -> TrackMatcher.Entry(track, key) })
         state.aliases.forEach { (hash, text) ->
             store.fromText(text)?.let { matcher.remember(hash, it) }
