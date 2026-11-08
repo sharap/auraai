@@ -717,6 +717,29 @@ What a socket destination therefore has in its tree is history, playlists and th
 how far its lines had been read goes with it, since a line count against a file that is gone is a
 claim about nothing. A folder destination is untouched by all of this and still gets everything.
 
+### A VPN, which takes the room next door with it
+
+A VPN takes the whole routing table, the address of the machine in the next room included. A phone
+with one running dials the desktop, the tunnel accepts the connection locally — so `connect`
+succeeds and nothing looks wrong from the inside — and then has nowhere to deliver it, because the
+other end of the tunnel is in another country and knows nothing about this living room. Measured
+exactly that way: every dial from the phone came back as "the conversation would not open", the
+desktop never saw a connection at all, and a probe from the desktop to its own port answered
+instantly. The route said it plainly: `10.220.68.119 dev tun0`.
+
+This is not an exotic case to leave for later. Where an offline music player is wanted most, a VPN
+is ordinary, so "sync works unless you have a VPN" is not a limit this feature can have.
+
+The way round it is per-socket rather than global, so that nothing else in the app leaves the tunnel
+the owner put it in: the platform says which network the local devices are on, and each dialled
+socket and each beacon is put on that one. On Android that is `Network.bindSocket`, which has to
+happen **before** the socket is connected — the one ordering mistake that would silently do nothing
+at all — and which the system refuses outright for a VPN set to block connections without it. Then
+there is nothing to be done and the owner gets the answer they already get: nobody could be reached.
+
+A desktop needs none of this: a VPN there leaves the routes of its own subnet alone, so a socket to
+the phone next door goes out of the right interface by itself.
+
 ### Being reachable, which is often one-way
 
 A desktop's firewall is the ordinary case, not the exception. Measured on this machine — Fedora,
@@ -925,6 +948,7 @@ Three things must not drift, and each has a guard:
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
 | Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
 | The socket itself | done on both sides: sealed frames, five questions about files, byte offsets, tested end to end over a loopback socket |
+| Working with a VPN running | done on the phone: each dialled socket and each beacon is put on the local network, so a tunnel does not take the room next door with it |
 | Finding each other on a network | done: a sealed broadcast every pass, with an address to type where broadcasts do not arrive |
 | Sync without a shared folder on Android | done: the files live in the app's own storage, and nothing runs in the background |
 | Everything else here | designed, not written |

@@ -58,7 +58,9 @@ class PeerTransportTest {
      */
     private class Desk(
         held: Map<String, String> = emptyMap(),
-        missing: List<String> = emptyList()
+        missing: List<String> = emptyList(),
+        /** Keys this device will not take: what a duplicate in its own library makes it refuse. */
+        private val refusing: Set<String> = emptySet()
     ) : PeerRecords {
         val holds = LinkedHashMap(held)
         val gaps = ArrayList(missing)
@@ -79,12 +81,15 @@ class PeerTransportTest {
         }
 
         override fun take(records: List<String>): Int {
+            var stored = 0
             for (record in records) {
                 val key = record.substringBefore(':')
+                if (key in refusing) continue
                 holds[key] = record
                 gaps.remove(key)
+                stored++
             }
-            return records.size
+            return stored
         }
 
         override fun worthAsking(peerDeviceId: String, have: Int, lacks: Int): Boolean =
@@ -354,6 +359,68 @@ class PeerTransportTest {
         assertArrayEquals(bytes, back!!.bytes)
     }
 
+    /** A platform that can say where the local devices are; see [LocalNetwork]. */
+    private class Routes : LocalNetwork {
+        var sockets = 0
+        var datagrams = 0
+        var askedTooLate = false
+
+        override fun route(socket: java.net.Socket): Boolean {
+            sockets++
+            // The one mistake that would do nothing at all and look like success.
+            if (socket.isConnected) askedTooLate = true
+            return true
+        }
+
+        override fun route(socket: java.net.DatagramSocket): Boolean {
+            datagrams++
+            return true
+        }
+    }
+
+    @Test
+    fun `a dialled socket goes on the local network before it is connected`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            write(hers, alice, "history/2026-11-08.jsonl", "a-one\n")
+            val routes = Routes()
+            val server = serverFor(hers, alice, key)
+            assertTrue(server.start())
+            try {
+                val outcome = PeerClient.sync(
+                    host = "127.0.0.1",
+                    port = server.boundPort,
+                    deviceId = bob,
+                    files = DirectoryPeerFiles(his, bob),
+                    key = key,
+                    network = routes
+                )
+
+                assertNull(outcome.trouble)
+                assertEquals(1, routes.sockets)
+                assertTrue("сокет уже был подключён — привязка ничего не делает", !routes.askedTooLate)
+                // And the pass still did its work, which is what says the binding did not get in
+                // the way of anything.
+                assertEquals("a-one\n", read(his, alice, "history/2026-11-08.jsonl"))
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a beacon is announced over the local network too`() {
+        val routes = Routes()
+        // Whether a datagram reaches anybody depends on the machine this runs on; what is being
+        // proved is that it is sent from the local network and not down a tunnel.
+        Beacon(alice, 54_333, { key }, routes).announce()
+        assertEquals(1, routes.datagrams)
+    }
+
     @Test
     fun `every message survives the round trip and nothing else is accepted`() {
         val requests = listOf(
@@ -558,6 +625,36 @@ class PeerTransportTest {
                 // nothing at all, which is what it did against a real phone.
                 assertEquals(10, outcome.vectorsGiven)
                 assertEquals(missing.take(50), alices.gaps)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a record the peer turns away is not offered twice in one conversation`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            // Alice is missing three and will not take the first — a duplicate in her own library
+            // makes her refuse what is served for it, which is the one case that kept this loop
+            // going round.
+            val alices = Desk(missing = listOf("A", "B", "C"), refusing = setOf("A"))
+            val bobs = Desk(held = mapOf("A" to "A:one", "B" to "B:two", "C" to "C:three"))
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                assertEquals(2, outcome.vectorsGiven)
+                // Asked once. Her next answer still names the one she refused — she is still
+                // missing it — and answering that again is what cost four thousand records.
+                assertEquals(listOf(listOf("A", "B", "C")), bobs.asked)
+                assertEquals(listOf("A"), alices.gaps)
             } finally {
                 server.stop()
             }

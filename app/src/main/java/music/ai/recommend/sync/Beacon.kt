@@ -46,6 +46,8 @@ class Beacon(
     private val port: Int,
     /** The transport key, or null while the owner has set no phrase — then nothing is announced. */
     private val key: () -> ByteArray?,
+    /** Where the local devices are; see [LocalNetwork]. A beacon down a tunnel reaches nobody. */
+    private val network: LocalNetwork? = null,
     private val onSeen: (Peer) -> Unit = {}
 ) {
 
@@ -110,6 +112,7 @@ class Beacon(
         try {
             DatagramSocket().use { out ->
                 out.broadcast = true
+                network?.route(out)
                 for (address in broadcastAddresses()) {
                     runCatching {
                         out.send(DatagramPacket(payload, payload.size, address, BEACON_PORT))

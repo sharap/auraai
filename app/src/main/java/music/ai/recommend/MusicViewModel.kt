@@ -79,6 +79,7 @@ import music.ai.recommend.sync.SyncFolder
 import music.ai.recommend.sync.SyncIdentity
 import music.ai.recommend.sync.SyncState
 import music.ai.recommend.sync.VectorCourier
+import music.ai.recommend.sync.WifiNetwork
 import music.ai.recommend.sync.VectorWriter
 import music.ai.recommend.model.Folder
 import music.ai.recommend.model.Song
@@ -381,6 +382,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** Playlists of the day offered to the other devices, and taken from them. */
         val mixSent: Int = 0,
         val mixTakenIn: Int = 0,
+        /**
+         * True when a tunnel took this device's outgoing calls; see [PeerTransport.State.tunnelled].
+         */
+        val tunnelled: Boolean = false,
         /** Whether what this device writes into the folder is sealed; see [GcmSealing]. */
         val sealed: Boolean = false,
         /**
@@ -453,6 +458,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 deviceId = id,
                 files = { peerFiles() },
                 records = { vectorCourier },
+                // A VPN takes the route to the machine in the next room along with everything
+                // else, and in the places this app is most wanted a VPN is ordinary.
+                network = WifiNetwork(getApplication()),
                 note = { line -> Log.i(TAG, line) }
             )
         }
@@ -2263,7 +2271,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             .getOrDefault(emptyList())
         noticeVectorsTraded(outcomes)
         refreshSyncSummary()
-        outcomes.any { it.moved }
+        // True when this exchange *brought something in*, which is the thing worth coming straight
+        // back for. Not "moved something": what this device handed over is no reason to look again,
+        // and counting it would have two devices politely passing their own output back and forth.
+        outcomes.any { it.bytesTaken > 0L || it.vectorsTaken > 0 }
     }
 
     /**
@@ -2493,7 +2504,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val coordinator = coordinator() ?: return@withContext false
         syncGate.withLock {
             // Before the readers: bring in whatever the other device has written since.
-            if (takeIn) peerExchange()
+            // Kept, because an exchange that brought vectors in is the clearest sign there are
+            // more behind them. Vectors no longer arrive inside a batch, so the reader's own "more
+            // waiting" says nothing about them, and without this the next conversation waited for
+            // the timer between passes — a library came over in batches with half-minute silences
+            // in between, and whoever was watching restarted the app to hurry it along.
+            var broughtIn = if (takeIn) peerExchange() else false
             val now = System.currentTimeMillis()
             val sent = runCatching { coordinator.push(now, force).written }
                 .getOrElse { Log.e(TAG, "Could not write the history out", it); 0 }
@@ -2610,7 +2626,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
             // After the writers: hand over what this pass produced, rather than leaving it here
             // until the next one. Nothing to do when the folder transport is in use.
-            peerExchange()
+            broughtIn = peerExchange() || broughtIn
 
             _syncSummary.value = _syncSummary.value.let {
                 it.copy(
@@ -2651,7 +2667,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             //
             // It has to have got through something as well. A pass that reports more and sees
             // nothing must not become a loop.
-            tookVectors?.let { it.more && it.takenIn + it.alreadyHeld + it.unmatched > 0 } == true
+            tookVectors?.let { it.more && it.takenIn + it.alreadyHeld + it.unmatched > 0 } == true ||
+                broughtIn
         }
     }
 
@@ -2747,7 +2764,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             },
             peerTrouble = if (!direct) null else state?.trouble ?: state?.last?.trouble,
             peerAddressInUse = if (direct) prefs.getString(KEY_SYNC_PEER, null).orEmpty() else "",
-            served = state?.served ?: 0
+            served = state?.served ?: 0,
+            tunnelled = direct && state?.tunnelled == true
         )
     }
 

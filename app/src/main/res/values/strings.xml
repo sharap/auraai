@@ -266,5 +266,6 @@
     <string name="sync_peer_address_hint">Only needed where the network does not carry broadcasts. Host, or host:port.</string>
     <string name="sync_peer_address_set">Save address</string>
     <string name="sync_peer_address_in_use">Dialling %1$s as well as whoever answers</string>
+    <string name="sync_tunnelled">A VPN is taking the outgoing calls, so this device cannot dial out. Sync still works the other way round: let the other device dial, and type the address of this one, shown above, in its settings.</string>
     <string name="sync_nobody_reached_us">Nothing has reached this device yet. If the other one is a computer with a firewall, it hears neither the beacon nor a connection — type the address of this device, shown above, in its settings instead.</string>
 </resources>

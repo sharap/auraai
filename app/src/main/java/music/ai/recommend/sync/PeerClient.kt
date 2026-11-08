@@ -37,6 +37,15 @@ object PeerClient {
         val vectorsTaken: Int = 0,
         /** Vectors handed over because the peer said it lacked them. */
         val vectorsGiven: Int = 0,
+        /**
+         * Whether this device's own socket could be put on the local network.
+         *
+         * Null when the platform has no opinion, false when it has one and was refused — which a
+         * VPN that did not ask to be bypassable makes the system do. Together with [trouble] that
+         * is the difference between "the other device is not there" and "we cannot get out of the
+         * tunnel to reach it", and the owner can act on exactly one of those.
+         */
+        val routed: Boolean? = null,
         /** Null when the pass ran to the end. A word for the log and for the settings screen. */
         val trouble: String? = null
     ) {
@@ -58,11 +67,18 @@ object PeerClient {
         key: ByteArray,
         /** This device's vectors, or null for a build that carries none. */
         records: PeerRecords? = null,
+        /** Where the local devices are, for a platform whose routing table says otherwise. */
+        network: LocalNetwork? = null,
         connectTimeoutMs: Int = CONNECT_TIMEOUT_MS
     ): Outcome {
         var outcome = Outcome()
         val socket = Socket()
         try {
+            // Before it is connected, which is the only moment this can be done at all. With a
+            // VPN up and this line missing, the tunnel accepts the connection itself and the
+            // handshake then waits for a device that is never told anybody called; see
+            // [LocalNetwork].
+            network?.route(socket)?.let { outcome = outcome.copy(routed = it) }
             socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
             socket.soTimeout = PeerServer.TIMEOUT_MS
             socket.tcpNoDelay = true
@@ -232,7 +248,14 @@ object PeerClient {
         }
 
         var rounds = 0
-        var asked: List<String>? = null
+        // Every key this conversation has already answered. A record the peer turned away stays in
+        // the gap it names, so the next round would name it again — and the round after that. The
+        // loop does not end on that, because the peer *is* making progress with the rest: it took
+        // a few, so the list changed, so there must be more to do. Measured before this set was
+        // here: twenty-five rounds, four thousand records, 14 676 582 bytes handed to a phone that
+        // was missing two hundred and forty, and the same hundred and fifty refused every round.
+        // The passes behind it waited minutes, which is how a favourite stopped travelling.
+        val answered = HashSet<String>()
         while (theirs.lacks > 0 && rounds++ < MAX_ROUNDS) {
             if (!link.send(PeerProtocol.write(PeerProtocol.Request.Wanted(PeerProtocol.MAX_KEYS)))) {
                 return outcome.copy(trouble = "could not ask what they lack")
@@ -243,18 +266,16 @@ object PeerClient {
                 else -> return outcome.copy(trouble = "not an answer about keys")
             }
             if (keys.isEmpty()) break
-            // The same list as last round: nothing there changed, so asking again asks the same
-            // question. This is the guard, and not "they stored none of that message", which is
-            // what stood here first and was wrong — a device re-analysing its own library stores
-            // none of the fifty records it has just computed for itself, while the thousands
-            // behind them are exactly what it is missing. Measured against a phone doing that.
-            if (keys == asked) break
-            asked = keys
+            val fresh = keys.filterNot { it in answered }
+            // Everything they name has been answered once already. Whatever they are still missing
+            // after that, this device has not got or they would not take.
+            if (fresh.isEmpty()) break
+            answered.addAll(fresh)
             // Served and handed over a message at a time rather than all at once: naming the
             // excerpt of a thousand tracks means opening a thousand files, and the device waiting
             // for the next message has a timeout.
             var gave = 0
-            for (slice in keys.chunked(PeerProtocol.MAX_RECORDS)) {
+            for (slice in fresh.chunked(PeerProtocol.MAX_RECORDS)) {
                 val holding = records.serve(slice)
                 if (holding.isEmpty()) continue
                 if (!link.send(PeerProtocol.write(PeerProtocol.Request.Give(holding)))) {
@@ -269,7 +290,7 @@ object PeerClient {
                     else -> return outcome.copy(trouble = "not an answer about storing")
                 }
             }
-            // Nothing of the whole list is held here, so there is nothing this device can do for
+            // Nothing of what is left is held here, so there is nothing this device can do for
             // them however many times it asks.
             if (gave == 0) break
         }

@@ -32,6 +32,8 @@ class PeerTransport(
      * been read, and one that had been handed a null once would answer "nothing here" for ever.
      */
     private val records: () -> PeerRecords? = { null },
+    /** Where the local devices are, for a platform that can say; see [LocalNetwork]. */
+    private val network: LocalNetwork? = null,
     private val note: (String) -> Unit = {}
 ) {
 
@@ -54,7 +56,13 @@ class PeerTransport(
          */
         val served: Int = 0,
         /** Why the listener is not up, when it is not. */
-        val trouble: String? = null
+        val trouble: String? = null,
+        /**
+         * True when every dial this pass failed *and* the socket could not be put on the local
+         * network: a tunnel took the calls. Nothing in the app can undo that, but the owner can —
+         * the other device dials instead, and it only needs this device's address.
+         */
+        val tunnelled: Boolean = false
     )
 
     @Volatile
@@ -75,6 +83,12 @@ class PeerTransport(
     @Volatile
     private var trouble: String? = null
 
+    @Volatile
+    private var tunnelled: Boolean = false
+
+    /** Whether a conversation is going on right now; see [exchange]. */
+    private val talking = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private val served = java.util.concurrent.atomic.AtomicInteger(0)
 
     val state: State
@@ -85,7 +99,8 @@ class PeerTransport(
             peers = synchronized(seen) { seen.values.sortedByDescending { it.seenAt } },
             last = lastOutcome,
             served = served.get(),
-            trouble = trouble
+            trouble = trouble,
+            tunnelled = tunnelled
         )
 
     /**
@@ -151,6 +166,7 @@ class PeerTransport(
             deviceId = deviceId,
             port = listener.boundPort,
             key = ::key,
+            network = network,
             onSeen = { peer -> synchronized(seen) { seen[peer.deviceId] = peer } }
         ).also { beacon = it }
         announcer.listen()
@@ -177,6 +193,20 @@ class PeerTransport(
      * @return what each conversation moved, newest first; empty when there was nobody to talk to.
      */
     fun exchange(typedAddress: String? = null): List<PeerClient.Outcome> {
+        // One conversation at a time, and the rest wait for nothing — they simply do not happen.
+        // A pass calls this twice, and the timer that dials between passes calls it too; while an
+        // exchange was a few round trips over byte offsets, two of them overlapping cost nothing.
+        // Now one can carry a library, and two at once carried it twice: the same fourteen
+        // megabytes to the same phone, from two threads, a millisecond apart.
+        if (!talking.compareAndSet(false, true)) return emptyList()
+        return try {
+            talk(typedAddress)
+        } finally {
+            talking.set(false)
+        }
+    }
+
+    private fun talk(typedAddress: String?): List<PeerClient.Outcome> {
         val key = key() ?: return emptyList()
         val own = files() ?: return emptyList()
         beacon?.announce()
@@ -195,6 +225,7 @@ class PeerTransport(
         if (targets.isEmpty()) return emptyList()
 
         val outcomes = ArrayList<PeerClient.Outcome>(targets.size)
+
         for ((host, port) in targets) {
             val outcome = PeerClient.sync(
                 host = host,
@@ -202,7 +233,8 @@ class PeerTransport(
                 deviceId = deviceId,
                 files = own,
                 key = key,
-                records = records()
+                records = records(),
+                network = network
             )
             outcomes.add(outcome)
             lastOutcome = outcome
@@ -217,6 +249,11 @@ class PeerTransport(
                 )
             }
         }
+        // Said of the pass and not of one conversation: every dial failed, and at least one of
+        // them failed with the socket still in the tunnel. One conversation getting through is
+        // enough to stop talking about it, which is also what happens when the owner takes the
+        // tunnel down.
+        tunnelled = outcomes.none { it.trouble == null } && outcomes.any { it.routed == false }
         return outcomes
     }
 

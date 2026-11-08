@@ -495,6 +495,16 @@ private fun SyncCard(viewModel: MusicViewModel, pickFolder: () -> Unit) {
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+                // A tunnel that took the outgoing calls. Said before the firewall line, because
+                // it is the one of the two the owner can act on immediately, and because from here
+                // the two look identical: nothing gets through either way.
+                if (summary.tunnelled) {
+                    Text(
+                        text = stringResource(id = R.string.sync_tunnelled),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
                 // Listening and never once reached is what a firewall on the other device looks
                 // like from here, and from here it looks exactly like everything working.
                 if (summary.listening && summary.served == 0) {
