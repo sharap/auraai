@@ -597,7 +597,7 @@ class SyncCoordinator<Track>(
             taking.add(VectorStore.Held(track, record.vector))
         }
         if (refused.isNotEmpty() || unmatched > 0) {
-            note("Vectors asked for: ${taking.size} usable, $unmatched for tracks we lack, refused $refused")
+            note("Vectors by name: ${taking.size} usable, $unmatched for tracks we lack, refused $refused")
         }
         if (taking.isEmpty()) return 0
         return vectors.takeIn(taking)

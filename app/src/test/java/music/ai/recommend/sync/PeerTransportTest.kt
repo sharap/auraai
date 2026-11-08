@@ -539,6 +539,35 @@ class PeerTransportTest {
     }
 
     @Test
+    fun `a dead end at the head of the peer's list does not hide the rest`() {
+        val hers = temporary()
+        val his = temporary()
+        try {
+            // Alice is missing sixty tracks. The first fifty are ones nobody has analysed — she is
+            // working through them herself — and the ten behind them are exactly what Bob holds.
+            val missing = (1..60).map { "k$it" }
+            val alices = Desk(missing = missing)
+            val bobs = Desk(held = (51..60).associate { "k$it" to "k$it:v$it" })
+            val server = serverFor(hers, alice, key, alices)
+            assertTrue(server.start())
+            try {
+                val outcome = trade(server, bob, his, bobs)
+
+                assertNull(outcome.trouble)
+                // Asking her fifty at a time would have ended on the dead end and handed over
+                // nothing at all, which is what it did against a real phone.
+                assertEquals(10, outcome.vectorsGiven)
+                assertEquals(missing.take(50), alices.gaps)
+            } finally {
+                server.stop()
+            }
+        } finally {
+            hers.deleteRecursively()
+            his.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `a peer that carries no vectors at all is not a failure`() {
         val hers = temporary()
         val his = temporary()

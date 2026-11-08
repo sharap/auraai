@@ -49,14 +49,26 @@ object PeerProtocol {
     const val MAX_FILES = 10_000
 
     /**
-     * The most records or keys in one message.
+     * The most records in one message, and therefore the most keys in a message whose *answer* is
+     * records.
      *
-     * Fifty records is about 185 KB of text, which fits a frame with room to spare after base64,
-     * and fifty keys is the same question asked in five kilobytes. The asking side chops its own
-     * list into messages this size, so a library's worth is a few dozen round trips down one
-     * connection rather than one message nobody can send.
+     * Fifty records is about 185 KB of text, which fits a frame with room to spare after base64.
+     * The asking side chops its own list into messages this size, so a library's worth is a few
+     * dozen round trips down one connection rather than one message nobody could send.
      */
     const val MAX_RECORDS = 50
+
+    /**
+     * The most keys in a message that answers with keys.
+     *
+     * Twenty times [MAX_RECORDS], because a key is a name and not a vector — a thousand of them is
+     * a hundred kilobytes — and because the one place this number matters is a device describing a
+     * gap of thousands. Asking it fifty at a time means the first fifty decide everything: if the
+     * other side holds none of them the round ends, and the thousands behind them are never
+     * reached. Found exactly that way, against a phone re-analysing its own library while the
+     * desktop had the rest of it in hand.
+     */
+    const val MAX_KEYS = 1_000
 
     /** The most characters one record or key may be; a vector of 512 floats is about 3.6 KB. */
     const val MAX_TEXT = 64 * 1024
@@ -213,7 +225,7 @@ object PeerProtocol {
                 if (max <= 0) return null
                 // Their number, kept within ours: a peer asking for a hundred thousand keys gets
                 // as many as this version is willing to put in one message.
-                Request.Wanted(minOf(max, MAX_RECORDS))
+                Request.Wanted(minOf(max, MAX_KEYS))
             }
             "give" -> texts(json, "v")?.let { Request.Give(it) }
             "bye" -> Request.Bye
@@ -260,7 +272,7 @@ object PeerProtocol {
             }
             is Reply.Keys -> {
                 addProperty("r", "keys")
-                add("k", texts(reply.keys))
+                add("k", texts(reply.keys, MAX_KEYS))
             }
             is Reply.Took -> {
                 addProperty("r", "took")
@@ -299,7 +311,7 @@ object PeerProtocol {
                 Reply.Vectors(have, lacks)
             }
             "records" -> texts(json, "v")?.let { Reply.Records(it) }
-            "keys" -> texts(json, "k")?.let { Reply.Keys(it) }
+            "keys" -> texts(json, "k", MAX_KEYS)?.let { Reply.Keys(it) }
             "took" -> {
                 val stored = json.get("n")?.asInt ?: return null
                 if (stored < 0) return null
@@ -336,9 +348,10 @@ object PeerProtocol {
         return out
     }
 
-    private fun texts(values: kotlin.collections.List<String>) = com.google.gson.JsonArray().apply {
-        for (text in values.take(MAX_RECORDS)) add(text)
-    }
+    private fun texts(values: kotlin.collections.List<String>, most: Int = MAX_RECORDS) =
+        com.google.gson.JsonArray().apply {
+            for (text in values.take(most)) add(text)
+        }
 
     /**
      * Keys or records as they arrived: a list of strings, each of a size this version is willing to
@@ -348,9 +361,13 @@ object PeerProtocol {
      * where every other key and record is judged — by the reader and the terms — and a protocol
      * that also had an opinion about them would be a second place for that opinion to be wrong.
      */
-    private fun texts(json: JsonObject, name: String): kotlin.collections.List<String>? {
+    private fun texts(
+        json: JsonObject,
+        name: String,
+        most: Int = MAX_RECORDS
+    ): kotlin.collections.List<String>? {
         val array = json.getAsJsonArray(name) ?: return null
-        if (array.size() > MAX_RECORDS) return null
+        if (array.size() > most) return null
         val out = ArrayList<String>(array.size())
         for (element in array) {
             val primitive = element as? com.google.gson.JsonPrimitive ?: return null

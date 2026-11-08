@@ -688,13 +688,18 @@ nothing and is sent nothing; and the first exchange after a wipe is a library's 
 conversation, fifty records to a message.
 
 Both halves of it are needed because reachability is usually one-sided. **Asking** covers the
-caller, and is the half that guarantees the ground is covered — whichever device can dial asks for
-its own gaps directly. **Giving** covers a peer that may be unable to dial anybody and would
-otherwise never receive what was analysed on the other side: the caller asks what the peer lacks
-and hands over what it holds of it. The giving half is bounded and best-effort — the peer answers
-with the first few dozen keys it is missing, and if the caller holds none of them the round stops
-rather than asking again for the same list, because tracks neither side has analysed sit at the head
-of that list for ever.
+caller: it says what it is missing and takes what comes back. **Giving** covers a peer that may be
+unable to dial anybody and would otherwise never receive what was analysed on the other side: the
+caller asks what the peer lacks and hands over what it holds of it.
+
+The two limits are different on purpose, because a key is a name and a record is a vector. A message
+whose answer is records carries at most **50** of either; a message that answers with keys carries up
+to **1000**. The giving half needs the larger one: the head of a peer's gap is often a dead end —
+tracks neither side has analysed sit there for ever — so asking fifty at a time would let those fifty
+decide everything and the thousands behind them would never be reached. Measured exactly that way,
+against a phone re-analysing its own library while the desktop had the rest of it in hand: the round
+ended on the first fifty and handed over nothing. The round now ends when the peer's list stops
+changing, or when the caller holds nothing in it.
 
 The cheap question comes first. `vectors` is two numbers, and if neither side has gained or lost
 anything since the last exchange with this peer, the last answer still stands and no keys are

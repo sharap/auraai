@@ -187,12 +187,11 @@ object PeerClient {
      * which may be unable to dial anybody and would otherwise never receive what was analysed
      * here — it asks what the peer lacks and hands over what this device holds of it.
      *
-     * The giving half is bounded and best-effort: the peer answers with the first few dozen keys it
-     * is missing, and if this device holds none of them the round stops rather than asking again
-     * for the same list. Tracks that neither side has analysed sit at the head of that list and
-     * would otherwise block it for ever. Nothing is lost by stopping — whichever device can dial
-     * asks for its own gaps directly, and that half is the one that guarantees the ground is
-     * covered.
+     * The giving half is bounded: the peer names up to a thousand of the tracks it is missing, this
+     * device hands over what it holds of them a message at a time, and the round ends when the list
+     * stops changing or holds nothing this device has. A thousand rather than fifty because the
+     * head of that list is often a dead end — tracks neither side has analysed sit there for ever —
+     * and asking fifty at a time would let those decide everything.
      */
     private fun trade(
         link: PeerLink,
@@ -233,8 +232,9 @@ object PeerClient {
         }
 
         var rounds = 0
+        var asked: List<String>? = null
         while (theirs.lacks > 0 && rounds++ < MAX_ROUNDS) {
-            if (!link.send(PeerProtocol.write(PeerProtocol.Request.Wanted(PeerProtocol.MAX_RECORDS)))) {
+            if (!link.send(PeerProtocol.write(PeerProtocol.Request.Wanted(PeerProtocol.MAX_KEYS)))) {
                 return outcome.copy(trouble = "could not ask what they lack")
             }
             val keys = when (val reply = link.receive()?.let(PeerProtocol::readReply)) {
@@ -243,21 +243,35 @@ object PeerClient {
                 else -> return outcome.copy(trouble = "not an answer about keys")
             }
             if (keys.isEmpty()) break
-            val holding = records.serve(keys)
-            if (holding.isEmpty()) break
-            if (!link.send(PeerProtocol.write(PeerProtocol.Request.Give(holding)))) {
-                return outcome.copy(trouble = "could not hand vectors over")
-            }
-            when (val reply = link.receive()?.let(PeerProtocol::readReply)) {
-                is PeerProtocol.Reply.Took -> {
-                    outcome = outcome.copy(vectorsGiven = outcome.vectorsGiven + reply.stored)
-                    // They stored none of what they said they wanted. Going round again would
-                    // hand over the same records to the same silence.
-                    if (reply.stored == 0) break
+            // The same list as last round: nothing there changed, so asking again asks the same
+            // question. This is the guard, and not "they stored none of that message", which is
+            // what stood here first and was wrong — a device re-analysing its own library stores
+            // none of the fifty records it has just computed for itself, while the thousands
+            // behind them are exactly what it is missing. Measured against a phone doing that.
+            if (keys == asked) break
+            asked = keys
+            // Served and handed over a message at a time rather than all at once: naming the
+            // excerpt of a thousand tracks means opening a thousand files, and the device waiting
+            // for the next message has a timeout.
+            var gave = 0
+            for (slice in keys.chunked(PeerProtocol.MAX_RECORDS)) {
+                val holding = records.serve(slice)
+                if (holding.isEmpty()) continue
+                if (!link.send(PeerProtocol.write(PeerProtocol.Request.Give(holding)))) {
+                    return outcome.copy(trouble = "could not hand vectors over")
                 }
-                is PeerProtocol.Reply.No -> break
-                else -> return outcome.copy(trouble = "not an answer about storing")
+                when (val reply = link.receive()?.let(PeerProtocol::readReply)) {
+                    is PeerProtocol.Reply.Took -> {
+                        gave += holding.size
+                        outcome = outcome.copy(vectorsGiven = outcome.vectorsGiven + reply.stored)
+                    }
+                    is PeerProtocol.Reply.No -> break
+                    else -> return outcome.copy(trouble = "not an answer about storing")
+                }
             }
+            // Nothing of the whole list is held here, so there is nothing this device can do for
+            // them however many times it asks.
+            if (gave == 0) break
         }
         records.remember(peer, theirs.have, theirs.lacks)
         return outcome
