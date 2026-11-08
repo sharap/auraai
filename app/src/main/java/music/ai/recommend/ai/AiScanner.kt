@@ -116,7 +116,17 @@ class AiScanner(
         if (!loadModel(onStage)) return@withContext
 
         val scannedIds = embeddings.ids()
-        val songsToProcess = songs.filter { it.id !in scannedIds }
+        // Files refused earlier are left alone unless the file itself has changed since; see
+        // [AnalysisBacklog]. Without this a library's broken files — a download that stopped at
+        // its ID3 tag, a playlist named .mp3 — would be decoded again on every scan for ever.
+        val pathsById = songs.associate { it.id to it.path }
+        val pending = AnalysisBacklog.pending(
+            tracks = songs.map { it.id },
+            analysed = scannedIds,
+            refusals = embeddings.refusals(),
+            stampOf = { id -> stampOf(pathsById[id]) }
+        ).toHashSet()
+        val songsToProcess = songs.filter { it.id in pending }
         val total = songsToProcess.size
 
         if (total == 0) {
@@ -154,11 +164,17 @@ class AiScanner(
                     )
 
                     try {
-                        // A track that would not decode is still stored, as a zero vector, so the
-                        // next scan does not keep retrying it. Cosine similarity against it is
-                        // zero, so it never surfaces as a recommendation.
-                        val embedding = item.features?.let { runInference(it) } ?: FloatArray(EMBEDDING_SIZE)
-                        embeddings.put(item.song.id, embedding)
+                        // A track that would not decode is remembered as a refusal, so the next
+                        // scan does not keep retrying it — but as a refusal and not as a vector of
+                        // zeros, so that it stays out of the similarity space, is never offered to
+                        // another device as though it had been analysed, and is reconsidered if the
+                        // file is ever replaced by a whole one.
+                        val features = item.features
+                        if (features == null) {
+                            embeddings.refuse(item.song.id, stampOf(item.song.path))
+                        } else {
+                            embeddings.put(item.song.id, runInference(features))
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -176,6 +192,22 @@ class AiScanner(
         } finally {
             // Also runs when the user stops the scan, so the ~280 MB session is not left resident.
             release()
+        }
+    }
+
+    /**
+     * What the file looks like now, for remembering or expiring a refusal.
+     *
+     * A length of zero — a file that has gone, or that this process may not read — gives an empty
+     * stamp, which [AnalysisBacklog] reads as "do not reconsider on this evidence".
+     */
+    private fun stampOf(path: String?): String {
+        if (path.isNullOrEmpty()) return ""
+        return try {
+            val file = File(path)
+            AnalysisBacklog.stamp(file.length(), file.lastModified())
+        } catch (e: SecurityException) {
+            ""
         }
     }
 

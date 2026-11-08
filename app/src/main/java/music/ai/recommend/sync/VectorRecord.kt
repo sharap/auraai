@@ -83,6 +83,13 @@ class VectorRecord(
                 if (decoder.isEmpty() || model.isEmpty()) return null
                 val floats = decodeFloats(json.get("f")?.asString ?: return null) ?: return null
                 if (floats.isEmpty()) return null
+                // Nothing but zeros is not a vector. Until the refusal of an unreadable file was
+                // given a record of its own, a device that could not decode a track stored 512
+                // zeros for it and offered them round like any other vector; a device that could
+                // read the file would have taken that for an analysis and never looked at the
+                // track again. The lines are still out there in the folder, so they are turned
+                // away here rather than only at the far end of the writing side.
+                if (floats.all { it == 0f }) return null
                 VectorRecord(
                     track = track,
                     excerptStartMs = json.get("s")?.asLong ?: return null,

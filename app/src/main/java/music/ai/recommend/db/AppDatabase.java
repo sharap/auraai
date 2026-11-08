@@ -9,7 +9,7 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 7, exportSchema = false)
+@Database(entities = {EmbeddingEntity.class, PlayEventEntity.class}, version = 8, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract EmbeddingDao embeddingDao();
 
@@ -103,13 +103,49 @@ public abstract class AppDatabase extends RoomDatabase {
         }
     };
 
+    /**
+     * Version 8 tells a vector apart from a refusal, and recovers the refusals already stored.
+     *
+     * Until now a file that would not decode was stored as 512 zeros, which kept the scan from
+     * retrying it for ever but made it indistinguishable from an analysed track: it counted as
+     * analysed, it went out to the other devices as though it were a vector, and nothing could
+     * ever reconsider it — so a download that stopped halfway would stay unanalysed even after the
+     * owner finished it.
+     *
+     * <p>The UPDATE finds those rows by their contents rather than by a list, because that is the
+     * only record of them there is: a blob of nothing but zero bytes, whatever its length, is one.
+     * They are given an empty stamp, which no present file can equal, so each gets exactly one
+     * more attempt and then a stamp of its own — and the zeros themselves go, since a refusal has
+     * no vector and 2 KB of nothing per broken file is 2 KB too many.
+     */
+    static final Migration MIGRATION_7_8 = new Migration(7, 8) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE embeddings ADD COLUMN refusedStamp TEXT");
+            db.execSQL("UPDATE embeddings SET refusedStamp = '', vector = NULL"
+                    + " WHERE vector IS NOT NULL AND length(vector) > 0"
+                    + " AND vector = zeroblob(length(vector))");
+        }
+    };
+
+    /**
+     * Every migration this build knows, in the order they apply.
+     *
+     * Visible beyond this class so that a test can open an older file through exactly the path the
+     * app uses. A test that registered a list of its own would be testing its own list.
+     */
+    public static final Migration[] MIGRATIONS = {
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8
+    };
+
     public static AppDatabase getDatabase(final Context context) {
         if (INSTANCE == null) {
             synchronized (AppDatabase.class) {
                 if (INSTANCE == null) {
                     INSTANCE = Room.databaseBuilder(context.getApplicationContext(),
                                     AppDatabase.class, "music_database")
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                            .addMigrations(MIGRATIONS)
                             .build();
                 }
             }

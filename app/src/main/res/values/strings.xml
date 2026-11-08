@@ -244,4 +244,12 @@
     <string name="sync_change">Change folder</string>
     <string name="sync_now">Sync now</string>
     <string name="sync_forget">Forget</string>
+
+    <!-- Vectors the owner may want to tidy: files that would not read, and vectors whose track is gone. -->
+    <string name="unreadable_files">Could not be read: %1$d</string>
+    <string name="unreadable_files_hint">Usually a broken file — a download that stopped, or a playlist saved as .mp3. Replace the file and the next scan will pick it up.</string>
+    <string name="orphaned_vectors">Vectors with no track: %1$d</string>
+    <string name="orphaned_vectors_kept">%1$d of them are still in your listening history, and those are kept.</string>
+    <string name="clear_orphaned_vectors">Remove %1$d</string>
+    <string name="orphaned_vectors_cleared">Removed %1$d vectors with no track</string>
 </resources>

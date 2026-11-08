@@ -136,6 +136,22 @@ class PlayHistory private constructor(context: Context) {
         }
     }
 
+    /**
+     * Every track the history mentions; see [music.ai.recommend.db.PlayEventDao.songIdsMentioned].
+     *
+     * @return null when the history could not be read. Null rather than an empty set, because the
+     *   caller is about to delete vectors that nothing mentions, and an empty set from a failed
+     *   read would tell it that nothing is mentioned at all.
+     */
+    suspend fun tracksMentioned(): Set<Long>? = withContext(Dispatchers.IO) {
+        try {
+            dao.songIdsMentioned().toSet()
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not read which tracks the history mentions", e)
+            null
+        }
+    }
+
     /** Drops events older than [KEEP_DAYS]; they no longer carry weight in the profile. */
     suspend fun prune(now: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
         try {

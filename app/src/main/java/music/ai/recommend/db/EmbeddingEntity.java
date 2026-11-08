@@ -30,6 +30,20 @@ public class EmbeddingEntity {
      */
     public long publishedAt;
 
+    /**
+     * Set only on a row that is not a vector but a refusal: this device tried to read the file and
+     * could not, and this is what the file looked like at the time — see
+     * {@link music.ai.recommend.ai.AnalysisBacklog#stamp}. Null on every real vector.
+     *
+     * <p>A refusal lives in this table rather than in one of its own because it is the answer to
+     * the same question a vector answers — "has the analysis dealt with this track?" — and because
+     * it must be thrown away with the vectors when the analysis version changes, for the same
+     * reason they are: a file the old decoders could not read is not a file the new ones cannot.
+     * The {@code vector} of such a row is null, since there is no vector; readers that want one
+     * skip it, and nothing that computes a similarity ever sees it.
+     */
+    public String refusedStamp;
+
     public EmbeddingEntity(long songId, byte[] vector) {
         this.songId = songId;
         this.vector = vector;

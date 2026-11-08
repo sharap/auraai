@@ -245,6 +245,37 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _analysisReset = MutableStateFlow(false)
     val analysisReset: StateFlow<Boolean> = _analysisReset.asStateFlow()
 
+    /**
+     * The two things about the stored vectors that only the owner can decide about.
+     *
+     * @param analysed tracks of the library that hold a vector. Counted against the library and
+     *   not simply as rows held, because the rows outlive the library: this phone holds 392 for
+     *   ids MediaStore no longer issues, and a count of them would say the library was analysed
+     *   four hundred tracks past its own size.
+     * @param unreadable files **of the library** the analysis tried and could not read. Shown
+     *   because the answer is almost always a broken file — a download that stopped, a playlist
+     *   saved as `.mp3` — and knowing how many there are is what lets them be fixed. Refusals for
+     *   tracks that are gone are not among them: there is no file left to fix, and they are
+     *   counted with the rest of the orphans below.
+     * @param orphaned rows whose track is no longer in the library, vectors and refusals alike.
+     * @param orphanedInHistory how many of those the listening history still mentions. They are
+     *   the reason this is a button and not something done quietly on startup: a vector for a
+     *   deleted track is what the taste model remembers of it, and with a long history that may be
+     *   worth more than the space it takes.
+     */
+    data class VectorHousekeeping(
+        val analysed: Int = 0,
+        val unreadable: Int = 0,
+        val orphaned: Int = 0,
+        val orphanedInHistory: Int = 0
+    ) {
+        /** How many would go if the owner pressed the button. */
+        val removable: Int get() = (orphaned - orphanedInHistory).coerceAtLeast(0)
+    }
+
+    private val _vectorHousekeeping = MutableStateFlow(VectorHousekeeping())
+    val vectorHousekeeping: StateFlow<VectorHousekeeping> = _vectorHousekeeping.asStateFlow()
+
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
 
@@ -499,6 +530,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 rebuildPlaylists() // Favorites is derived from allSongs, which just changed.
                 refreshSmartAlbums()
                 refreshDailyMix()
+                refreshVectorHousekeeping()
                 // The earliest moment anything from the other device can be placed: before the
                 // scan there is nothing to match a listen against. A device coming back after
                 // being away catches up here, without being asked.
@@ -1356,6 +1388,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     refreshModelStatus()
                     refreshSmartAlbums()
                     refreshDailyMix()
+                    refreshVectorHousekeeping()
                 }
             }
         }
@@ -1419,6 +1452,73 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _analysisReset.value = embeddings.analysisWasReset
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh scanned IDs", e)
+            }
+        }
+    }
+
+    /**
+     * Counts the unreadable files and the vectors with no track.
+     *
+     * Not called while a scan is running: it reads the whole history for the tracks it mentions,
+     * and the answer cannot change under a scan in any way worth showing a second sooner.
+     */
+    private fun refreshVectorHousekeeping() {
+        viewModelScope.launch {
+            try {
+                val library = allSongsById.keys
+                // Before the library has been read, everything would look orphaned. Say nothing
+                // rather than something alarming and wrong.
+                if (library.isEmpty()) {
+                    _vectorHousekeeping.value = VectorHousekeeping()
+                    return@launch
+                }
+                val refusals = embeddings.refusals()
+                val analysed = embeddings.ids()
+                val held = analysed + refusals.keys
+                val orphaned = held.filterTo(HashSet()) { it !in library }
+                val mentioned = playHistory.tracksMentioned()
+                _vectorHousekeeping.value = VectorHousekeeping(
+                    analysed = analysed.count { it in library },
+                    unreadable = refusals.keys.count { it in library },
+                    orphaned = orphaned.size,
+                    // A history that could not be read counts as mentioning all of them, so the
+                    // button offers nothing rather than offering to delete what it cannot check.
+                    orphanedInHistory = if (mentioned == null) orphaned.size
+                    else orphaned.count { it in mentioned }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not count the vectors with no track", e)
+            }
+        }
+    }
+
+    /**
+     * Drops the vectors whose track is gone *and* which the history does not mention.
+     *
+     * The history is the whole reason this is not simply "delete what has no track". A listen to a
+     * track that was deleted still shapes the taste profile and the daily playlist, and its vector
+     * is the only record of what it sounded like; the wave would be reading a row it cannot place
+     * without it. So those stay, however many there are, and what goes is the rest: ids MediaStore
+     * no longer issues, which nothing can ever ask about again.
+     */
+    fun clearOrphanedVectors() {
+        viewModelScope.launch {
+            try {
+                val library = allSongsById.keys
+                if (library.isEmpty()) return@launch
+                val mentioned = playHistory.tracksMentioned() ?: return@launch
+                val refusals = embeddings.refusals()
+                val held = embeddings.ids() + refusals.keys
+                val gone = held.filter { it !in library && it !in mentioned }
+                if (gone.isEmpty()) return@launch
+                embeddings.remove(gone)
+                Log.i(TAG, "Dropped ${gone.size} vectors whose track is gone")
+                refreshScannedIds()
+                refreshVectorHousekeeping()
+                _aiScanStatus.value = getApplication<Application>()
+                    .getString(R.string.orphaned_vectors_cleared, gone.size)
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not drop the vectors with no track", e)
             }
         }
     }
@@ -1825,6 +1925,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             embeddings.clear()
             modelRepository.forgetEmbeddingsVariant()
             refreshScannedIds()
+            refreshVectorHousekeeping()
             _aiScanStatus.value = getApplication<Application>().getString(R.string.ai_data_cleared)
         }
     }

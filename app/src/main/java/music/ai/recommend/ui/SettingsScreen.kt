@@ -839,6 +839,7 @@ private fun AiScanCard(viewModel: MusicViewModel) {
     val aiScanStatus by viewModel.aiScanStatus.collectAsState()
     val scannedSongIds by viewModel.scannedSongIds.collectAsState()
     val analysisReset by viewModel.analysisReset.collectAsState()
+    val housekeeping by viewModel.vectorHousekeeping.collectAsState()
 
     SettingsCard {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -851,7 +852,12 @@ private fun AiScanCard(viewModel: MusicViewModel) {
                 Spacer(modifier = Modifier.height(8.dp))
             }
             Text(
-                text = stringResource(id = R.string.analyzed_songs, scannedSongIds.size),
+                // The library's own tracks, not the rows held: those outlive the library, and a
+                // count of them reads as a library analysed past its own size.
+                text = stringResource(
+                    id = R.string.analyzed_songs,
+                    if (housekeeping.analysed > 0) housekeeping.analysed else scannedSongIds.size
+                ),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.secondary
             )
@@ -887,6 +893,54 @@ private fun AiScanCard(viewModel: MusicViewModel) {
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text(stringResource(id = R.string.start_ai_scan))
+                }
+            }
+
+            // Files that would not read, and vectors whose track is gone. Both are shown only
+            // when there are any: a library with neither should not be told about either.
+            if (housekeeping.unreadable > 0) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(id = R.string.unreadable_files, housekeeping.unreadable),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stringResource(id = R.string.unreadable_files_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (housekeeping.orphaned > 0) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(id = R.string.orphaned_vectors, housekeeping.orphaned),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (housekeeping.orphanedInHistory > 0) {
+                    Text(
+                        text = stringResource(
+                            id = R.string.orphaned_vectors_kept,
+                            housekeeping.orphanedInHistory
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (housekeeping.removable > 0) {
+                    TextButton(
+                        onClick = { viewModel.clearOrphanedVectors() },
+                        modifier = Modifier.align(Alignment.Start)
+                    ) {
+                        Text(
+                            text = stringResource(
+                                id = R.string.clear_orphaned_vectors,
+                                housekeeping.removable
+                            )
+                        )
+                    }
                 }
             }
 

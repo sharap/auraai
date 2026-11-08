@@ -97,6 +97,31 @@ class VectorRecordTest {
     }
 
     @Test
+    fun aVectorOfNothingButZerosIsNotAVector() {
+        // One device storing 512 zeros for a file it could not read used to be how a refusal was
+        // remembered, and those lines are in the folder to this day. Taken in, they would mark the
+        // track analysed on a device that can read the file perfectly well, and it would never
+        // look at it again.
+        val zeros = VectorRecord(
+            track = key(),
+            excerptStartMs = 100_000L,
+            decoder = Mp3Excerpt.DECODER,
+            model = model,
+            analysisVersion = 3,
+            vector = FloatArray(512)
+        )
+        val line = JsonParser.parseString(zeros.toJson().toString()).asJsonObject
+        assertNull(VectorRecord.fromJson(line))
+
+        // One number away from nothing is a vector again: the rule must not reach any further
+        // than it was meant to.
+        val nearlyZero = FloatArray(512).also { it[511] = Float.MIN_VALUE }
+        assertNotNull(VectorRecord.fromJson(
+            JsonParser.parseString(record(nearlyZero).toJson().toString()).asJsonObject
+        ))
+    }
+
+    @Test
     fun aLineFromSomewhereElseIsDroppedRatherThanGuessedAt() {
         for (broken in listOf(
             """{"s":100000,"dec":"jlayer-1.0.1","m":"m","av":3,"f":"AAAAAA=="}""",            // no key

@@ -244,4 +244,12 @@
     <string name="sync_change">Сменить папку</string>
     <string name="sync_now">Синхронизировать</string>
     <string name="sync_forget">Забыть</string>
+
+    <!-- Vectors the owner may want to tidy: files that would not read, and vectors whose track is gone. -->
+    <string name="unreadable_files">Не читаются: %1$d</string>
+    <string name="unreadable_files_hint">Обычно это битый файл — сорванная загрузка или плейлист, сохранённый как .mp3. Замените файл, и следующее сканирование его подхватит.</string>
+    <string name="orphaned_vectors">Векторы без трека: %1$d</string>
+    <string name="orphaned_vectors_kept">%1$d из них ещё есть в истории прослушиваний — они остаются.</string>
+    <string name="clear_orphaned_vectors">Убрать %1$d</string>
+    <string name="orphaned_vectors_cleared">Убрано векторов без трека: %1$d</string>
 </resources>

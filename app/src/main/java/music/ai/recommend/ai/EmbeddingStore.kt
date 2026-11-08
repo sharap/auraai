@@ -78,10 +78,29 @@ class EmbeddingStore private constructor(context: Context) {
     @Volatile
     private var cache: ConcurrentHashMap<Long, FloatArray>? = null
 
+    /**
+     * Tracks that could not be read, with the stamp of the file each was refused for.
+     *
+     * Filled together with [cache], since loading it reads every row anyway. Null means not yet
+     * read, which is not the same as empty — a scan must not mistake "we have not looked" for
+     * "nothing was refused" and re-decode five broken files on every pass.
+     */
+    @Volatile
+    private var refused: ConcurrentHashMap<Long, String>? = null
+
     @Volatile
     private var migrated = false
 
-    /** Every stored embedding, keyed by song id. The returned map must not be mutated. */
+    /**
+     * Every stored embedding, keyed by song id. The returned map must not be mutated.
+     *
+     * Refusals are not in it, and that is the whole point of their being apart: everything that
+     * computes a similarity reads this map, and a zero vector in it would be a track at distance
+     * 1 from the entire library — which DBSCAN would have to treat as a point ([SmartAlbumClustering]
+     * says as much in its contract), and which the wave would score 0 on every term and so rank
+     * above anything the listener is moving away from. A file that cannot be read must be absent
+     * from the similarity space, not sitting at its origin.
+     */
     suspend fun all(): Map<Long, FloatArray> = withContext(Dispatchers.IO) {
         cache ?: mutex.withLock {
             cache ?: run {
@@ -93,8 +112,9 @@ class EmbeddingStore private constructor(context: Context) {
     }
 
     /**
-     * Ids of analysed songs. Reads only the id column when the vectors are not already cached,
-     * which is what the UI badges and the scan counter actually need.
+     * Ids of analysed songs — tracks that hold a vector, which is what the UI badges, the scan
+     * counter and sync all mean by the word. Reads only the id column when the vectors are not
+     * already cached. Refused tracks are not analysed; see [refusals].
      */
     suspend fun ids(): Set<Long> = withContext(Dispatchers.IO) {
         cache?.keys?.toSet() ?: mutex.withLock {
@@ -113,10 +133,47 @@ class EmbeddingStore private constructor(context: Context) {
         }
     }
 
+    /** Stores a vector, and with it the news that the track is no longer refused. */
     suspend fun put(songId: Long, vector: FloatArray) = withContext(Dispatchers.IO) {
+        // A row carrying a vector has no stamp, and the insert replaces the whole row, so a
+        // refusal recorded earlier goes with it.
         dao.insert(EmbeddingEntity(songId, vector.toBlob()))
         cache?.put(songId, vector)
+        refused?.remove(songId)
         Unit
+    }
+
+    /**
+     * Records that this file could not be read, so the scan stops offering it on every pass.
+     *
+     * @param stamp what the file looked like, from [AnalysisBacklog.stamp]. It is what lets the
+     *   refusal expire: a file of a different length, or written since, is a different file and
+     *   goes back into the backlog.
+     */
+    suspend fun refuse(songId: Long, stamp: String) = withContext(Dispatchers.IO) {
+        try {
+            dao.insert(EmbeddingEntity(songId, null).also { it.refusedStamp = stamp })
+            cache?.remove(songId)
+            refused?.put(songId, stamp)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to record that song $songId could not be read", e)
+        }
+        Unit
+    }
+
+    /**
+     * Tracks that were tried and could not be read, each with the stamp of the file refused.
+     *
+     * @see AnalysisBacklog.pending
+     */
+    suspend fun refusals(): Map<Long, String> = withContext(Dispatchers.IO) {
+        refused?.let { return@withContext it.toMap() }
+        try {
+            dao.getRefusals().associate { it.songId to (it.stamp ?: "") }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read which files could not be read", e)
+            emptyMap()
+        }
     }
 
     /**
@@ -130,6 +187,8 @@ class EmbeddingStore private constructor(context: Context) {
         try {
             dao.insertAll(vectors.map { (songId, vector) -> EmbeddingEntity(songId, vector.toBlob()) })
             cache?.putAll(vectors)
+            // A vector from a device that could read the file settles what this one could not.
+            refused?.let { held -> vectors.keys.forEach { held.remove(it) } }
             vectors.size
         } catch (e: Exception) {
             Log.e(TAG, "Failed to store ${vectors.size} embeddings from elsewhere", e)
@@ -149,6 +208,7 @@ class EmbeddingStore private constructor(context: Context) {
         try {
             dao.delete(songIds)
             cache?.let { held -> songIds.forEach { held.remove(it) } }
+            refused?.let { held -> songIds.forEach { held.remove(it) } }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to drop ${songIds.size} embeddings", e)
         }
@@ -177,6 +237,7 @@ class EmbeddingStore private constructor(context: Context) {
         mutex.withLock {
             dao.deleteAll()
             cache = null
+            refused = null
             analysisWasReset = false
             prefs.edit().putInt(KEY_ANALYSIS_VERSION, ANALYSIS_VERSION).apply()
         }
@@ -207,10 +268,19 @@ class EmbeddingStore private constructor(context: Context) {
     private fun load(): ConcurrentHashMap<Long, FloatArray> {
         val rows = dao.getAll()
         val result = ConcurrentHashMap<Long, FloatArray>(rows.size * 2)
+        val stamps = ConcurrentHashMap<Long, String>()
         for (row in rows) {
+            val stamp = row.refusedStamp
+            if (stamp != null) {
+                stamps[row.songId] = stamp
+                continue
+            }
             val blob = row.vector ?: continue
             result[row.songId] = blob.toFloatArray()
         }
+        // Set here rather than by the caller: the rows have just been read, and reading them again
+        // for the refusals would be the whole table twice.
+        refused = stamps
         return result
     }
 

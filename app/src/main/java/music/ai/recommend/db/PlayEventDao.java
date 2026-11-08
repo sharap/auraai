@@ -55,6 +55,16 @@ public interface PlayEventDao {
     @Query("SELECT COUNT(*) FROM play_events")
     int count();
 
+    /**
+     * Every track the history mentions, including ones whose file is long gone.
+     *
+     * Asked before vectors with no track are thrown away: a listen to a track that was deleted is
+     * still a listen, and its vector is the only thing that says what it sounded like. Throw the
+     * vector away and the history keeps a row that nothing can place in the similarity space.
+     */
+    @Query("SELECT DISTINCT songId FROM play_events")
+    List<Long> songIdsMentioned();
+
     @Query("DELETE FROM play_events")
     void deleteAll();
 }

@@ -356,6 +356,51 @@ whose library had three tracks in it. Such vectors are stepped over instead, and
 grows by as many as have been met, so they cannot sit at the head of the queue and block the rest.
 When the analysis version changes every vector is thrown away and the marks go with them.
 
+### A refusal is local, and does not travel
+
+Every library has a few files that are not music: a download that stopped at its ID3 tag, a
+playlist saved under the name `.mp3`. This collection has five, and both devices refuse all five.
+
+A refusal used to be stored as a vector of 512 zeros. That kept the scan from decoding the file
+again on every pass, and it was wrong in three ways at once. It counted as an analysed track, so the
+library's own count of what it knows was five too high. It was **offered to the other device like
+any other vector**, which is the part that matters: "my decoders could not read this file" is a
+verdict about one device's decoders, and a device that *can* read the format would have taken those
+zeros for an analysis and never looked at the track again. And it could never be reconsidered — the
+day the owner finishes that download, the file would stay unanalysed with nothing to say why.
+
+So a refusal is now a record of its own, in the row where the vector would have been, carrying what
+the file looked like when it was refused: its length and the time it was last written
+(`ai/AnalysisBacklog.kt`, shared by both sides). Three rules follow from that one change.
+
+- A refusal is **never written to the folder**. It is not news another device can use.
+- A line carrying a vector of nothing but zeros is **turned away on reading**, because the folder
+  already holds such lines from before this was understood, and will for as long as the day files
+  they are in are kept.
+- A refusal **expires with the file**. The same length and the same write time mean the same file
+  and the same answer; anything else means this is no longer the file that was refused, and it goes
+  back into the backlog. A row recovered from the old zero-vector form carries no stamp at all,
+  which no present file can equal, so each gets exactly one more attempt and then a stamp of its
+  own.
+
+A refused track is not an analysed one: the badge does not claim it, the count does not include it,
+and a vector arriving for it from the other device is news rather than a duplicate. What it is, is
+*dealt with*, which is a different question and the only one the scan asks. The owner is told how
+many there are — *Could not be read: N* — because the answer is nearly always a file worth
+replacing, and nothing else in either app would ever mention it.
+
+### Vectors whose track is gone are the owner's to keep
+
+A vector outlives its file. The library loses a track, the listening history does not: it still
+holds the listens, they still shape the taste profile and the playlist of the day, and the vector is
+the only record of what that track sounded like. Delete it and the history keeps rows that nothing
+can place in the similarity space.
+
+So neither device throws those away by itself — the desktop's scan used to, on every run, which was
+quietly deciding this for the owner. They are counted and shown instead, and a button removes the
+ones **the history does not mention**, which on this phone is 392 vectors against `MediaStore` ids
+that will never be issued again. The ones history still mentions stay, however many there are.
+
 ### The excerpt start comes from the decoder, not from the platform
 
 The window has to be the one the vector was actually made from, and for a shared decoder that is
@@ -614,7 +659,7 @@ every half hour regardless. The sweep is there because a file observer over a st
 framework tree is not reliable on every Android version, and a periodic look costs less than
 finding out which versions.
 
-Three kinds of line a reader cannot use, and they are not treated alike:
+Four kinds of line a reader cannot use, and they are not treated alike:
 
 - **A half-written last line.** Left unconsumed, met again next time: the rest of it is on its way.
 - **A line that will not parse in the middle of a file.** Stepped over. In a file that is only ever
@@ -625,13 +670,21 @@ Three kinds of line a reader cannot use, and they are not treated alike:
   other sealed with, and that does improve by waiting, because somebody fixes it. The count is put
   in front of the owner — *N batches would not open* — because it is the one way sealing fails, and
   nothing else would ever mention it.
+- **A vector of nothing but zeros.** Dropped, like a line that will not parse, and for a reason
+  worth stating: it is not a vector but one device's refusal to read a file, written before a
+  refusal had a record of its own. Taking it in would mark the track analysed on a device that can
+  read the file perfectly well. See *A refusal is local, and does not travel*.
 
 ## Keeping the two implementations honest
 
 Three things must not drift, and each has a guard:
 
 - `ai/Excerpt.kt` and `ai/Mp3Excerpt.kt` exist in both repositories and must be identical apart from
-  the line naming which side it is on. Diff them.
+  the line naming which side it is on. Diff them. So do the other decoders beside them —
+  `FlacExcerpt`, `WavExcerpt`, `M4aExcerpt`, `SharedDecoder` — and `ai/AnalysisBacklog.kt`, which
+  decides what a scan looks at and when a refusal expires. Forty-one files in all claim a copy, and
+  every one of them says so in its own first lines, so the rule a diff checks is "same name, must
+  be identical".
 - The mp3 decoder has a golden test, `Mp3ExcerptTest`, which decodes a committed 25-second fixture
   and checks the sha256 of the result. It runs on the Android side, where the tests run, and it
   pins the behaviour of the canonical copy: if it fails after a change, every embedding made from
@@ -690,6 +743,8 @@ Three things must not drift, and each has a guard:
 | Attaching all of it to a real folder, and to the two apps | done: the phone writes through a tree the owner picks, the desktop through a folder it picks, both verified end to end |
 | The listening history knowing which device heard it | done on both sides, with the older store converted in place |
 | Carrying vectors | done on both sides for mp3, with the terms checked rather than assumed |
+| A file that will not decode | remembered as a refusal, not as a vector of zeros: local to the device, expiring with the file, and turned away on reading |
+| Vectors whose track is gone | kept, counted and shown; removed only when the owner asks, and never the ones the history still mentions |
 | Carrying favourites and playlists | done on both sides, including the order tracks are in |
 | Carrying the playlist of the day | done on both sides: one list, agreed on by attempt then device |
 | The socket itself | not started |
