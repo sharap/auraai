@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="FlacAgainstFfmpegTest[desktop]" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:10:07.355Z" hostname="fedora" time="50.45">
+  <properties/>
+  <testcase name="theSharedDecoderAgreesWithFfmpegSampleForSample[desktop]" classname="music.ai.recommend.ai.FlacAgainstFfmpegTest" time="50.45"/>
+  <system-out><![CDATA[FlacAgainstFfmpeg: 40 of 40 files identical sample for sample
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="SyncRoundTripTest[desktop]" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:12:16.141Z" hostname="fedora" time="0.015">
+  <properties/>
+  <testcase name="readingTheSameFolderTwiceTakesNothingTwice[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.003"/>
+  <testcase name="aListenAboutAFileThatIsGoneDoesNotStopTheOutbox[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.002"/>
+  <testcase name="nothingHappensWithoutAFolder[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.001"/>
+  <testcase name="whatOneDeviceHeardTheOtherEndsUpHolding[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.002"/>
+  <testcase name="theOutboxCarriesOnWhereItLeftOff[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.001"/>
+  <testcase name="aListenAboutATrackThatHasNotArrivedIsKeptAndMatchedLater[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.002"/>
+  <testcase name="whatCameFromElsewhereNeverGoesBackOut[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.002"/>
+  <testcase name="aPassWithoutALibraryTakesNothingAndMarksNothingRead[desktop]" classname="music.ai.recommend.sync.SyncRoundTripTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

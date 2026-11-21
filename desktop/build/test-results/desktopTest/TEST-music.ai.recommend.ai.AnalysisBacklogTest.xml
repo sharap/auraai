@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="AnalysisBacklogTest[desktop]" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:10:07.150Z" hostname="fedora" time="0.068">
+  <properties/>
+  <testcase name="a track with no vector is pending[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.041"/>
+  <testcase name="a file of no length has no stamp[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.005"/>
+  <testcase name="an analysed track is not[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.0"/>
+  <testcase name="a refusal expires when the file is written again at the same length[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.001"/>
+  <testcase name="only refused tracks cost a look at the file[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.005"/>
+  <testcase name="a refusal outranks being counted as analysed[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.001"/>
+  <testcase name="a refusal for the file as it still is holds[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.001"/>
+  <testcase name="a refused file that cannot be read at all is left alone[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.0"/>
+  <testcase name="the library's order is kept[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.0"/>
+  <testcase name="a refusal expires when the file grows[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.0"/>
+  <testcase name="a refusal with no stamp gets one more chance[desktop]" classname="music.ai.recommend.ai.AnalysisBacklogTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

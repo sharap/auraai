@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="M4aAgainstFfmpegTest[desktop]" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:10:58.168Z" hostname="fedora" time="70.372">
+  <properties/>
+  <testcase name="theSharedDecoderHearsTheSameMusicAsFfmpeg[desktop]" classname="music.ai.recommend.ai.M4aAgainstFfmpegTest" time="70.372"/>
+  <system-out><![CDATA[M4aAgainstFfmpeg: 133 files, mean cosine 0.9998395627112633, worst 0.998192859490011 on 06 - In Our Tears.m4a, 52 below 0.9999
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

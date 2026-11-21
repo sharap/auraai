@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="SealedRoundTripTest[desktop]" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:12:15.713Z" hostname="fedora" time="0.426">
+  <properties/>
+  <testcase name="aDeviceWithAnotherPhraseGetsNothingRatherThanSomethingWrong[desktop]" classname="music.ai.recommend.sync.SealedRoundTripTest" time="0.123"/>
+  <testcase name="aBatchNumberIsNotSpentOnABatchThatCouldNotBeSealed[desktop]" classname="music.ai.recommend.sync.SealedRoundTripTest" time="0.075"/>
+  <testcase name="settingThePhraseAfterwardsGoesBackForWhatWasSkipped[desktop]" classname="music.ai.recommend.sync.SealedRoundTripTest" time="0.077"/>
+  <testcase name="aFolderWrittenBeforeThePhraseStaysReadable[desktop]" classname="music.ai.recommend.sync.SealedRoundTripTest" time="0.075"/>
+  <testcase name="whatOneDeviceSealsTheOtherOpensAndTheFolderSaysNothing[desktop]" classname="music.ai.recommend.sync.SealedRoundTripTest" time="0.076"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
