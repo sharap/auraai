@@ -35,10 +35,18 @@ actual class ClapTextEncoder actual constructor() {
             val modelFile = ModelRepository.instance.localFile(ModelAsset.TEXT_MODEL)
             if (!modelFile.isFile) return
 
-            val vocabContent = readResourceText(vocabFileName) ?: return
-            val mergesContent = readResourceText(mergesFileName) ?: return
+            // Checked for presence and then handed over as suppliers, not as text. The tokenizer
+            // opens them when something first asks it to encode, which is 1.25 MB of parsing this
+            // method no longer does before returning. The check stays because of what it buys: a
+            // caller that has not made sure of the resources gets no encoder rather than one that
+            // throws on first use.
+            if (openResource(vocabFileName)?.use { } == null) return
+            if (openResource(mergesFileName)?.use { } == null) return
 
-            tokenizer = BpeTokenizer(vocabContent, mergesContent)
+            tokenizer = BpeTokenizer(
+                { checkNotNull(openResource(vocabFileName)) { "$vocabFileName is missing" } },
+                { checkNotNull(openResource(mergesFileName)) { "$mergesFileName is missing" } }
+            )
 
             val env = OrtEnvironment.getEnvironment()
             val options = OrtSession.SessionOptions()
@@ -50,7 +58,7 @@ actual class ClapTextEncoder actual constructor() {
         }
     }
 
-    private fun readResourceText(name: String): String? {
+    private fun openResource(name: String): java.io.InputStream? {
         val paths = listOf(
             // Compose Resources lays files out under this package, which the build pins in
             // `compose.resources.packageOfResClass` precisely so that this string does not depend
@@ -62,10 +70,9 @@ actual class ClapTextEncoder actual constructor() {
             name
         )
         for (path in paths) {
-            val stream = javaClass.classLoader.getResourceAsStream(path) ?: javaClass.getResourceAsStream("/$path")
-            if (stream != null) {
-                return stream.bufferedReader().use { it.readText() }
-            }
+            val stream = javaClass.classLoader.getResourceAsStream(path)
+                ?: javaClass.getResourceAsStream("/$path")
+            if (stream != null) return stream
         }
         return null
     }

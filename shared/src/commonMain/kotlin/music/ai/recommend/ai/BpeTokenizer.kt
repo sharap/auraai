@@ -2,6 +2,8 @@ package music.ai.recommend.ai
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.io.InputStream
+import java.io.InputStreamReader
 
 /**
  * Byte-level BPE tokenizer for the CLAP text encoder.
@@ -11,39 +13,49 @@ import com.google.gson.reflect.TypeToken
  * follows the GPT-2/RoBERTa scheme: no lowercasing, no end-of-word suffix, and a leading space
  * folded into the token as `Ġ`.
  *
- * What this replaces was written against CLIP's tokenizer and produced nonsense against a RoBERTa
- * vocabulary: `<|startoftext|>` is not in it, so bos fell back to the literal id 49406 (the token
- * `ãĢĮ`); eos resolved to 50260 rather than 2; the output was padded to 77 with a hard-coded 49407,
- * which is `Ġbehav`, so a two-word query reached the model as 72 repeats of "behav". On top of that
- * it lowercased the text, split on whitespace only — no `Ġ` prefix, so most words missed the vocab
- * and were dropped silently rather than mapped to `<unk>` — and took `Char.code.toByte()` as the
- * byte encoding, which truncates any non-Latin code point (Cyrillic all collapsed onto `?`).
- *
  * Merges are held in a rank map, so choosing the next merge costs a few hash lookups over the pairs
  * present in the word rather than a scan of the full 50 000-entry merge list per BPE iteration.
+ *
+ * The two files arrive as streams that are opened only when they are first needed, and each port
+ * answers in its own way: the phone out of its APK assets or its downloaded copy, the desktop out
+ * of the jar. Neither version had this shape before the merge, and neither version was the one to
+ * keep. The phone's took a `ModelRepository`, which cannot come in here. The desktop's took the two
+ * files as `String`, which meant 1.25 MB of text read and parsed before the constructor returned —
+ * and the phone's own comment says what that costs: eager parsing "stalled whichever thread first
+ * touched the encoder". Suppliers of streams keep the laziness the phone had and give it to the
+ * desktop, which did not have it.
  */
-class BpeTokenizer(vocabJson: String, mergesText: String) {
+class BpeTokenizer(
+    private val vocabStream: () -> InputStream,
+    private val mergesStream: () -> InputStream
+) {
 
     private val byteEncoder = bytesToUnicode()
     private val bpeCache = HashMap<String, List<String>>()
 
-    private val vocab: Map<String, Int> = run {
-        val type = object : TypeToken<Map<String, Int>>() {}.type
-        Gson().fromJson<Map<String, Int>>(vocabJson, type) ?: emptyMap()
+    // vocab.json is ~800 KB and merges.txt ~450 KB; parsing them eagerly in the constructor stalled
+    // whichever thread first touched the encoder.
+    private val vocab: Map<String, Int> by lazy {
+        vocabStream().use { input ->
+            val type = object : TypeToken<Map<String, Int>>() {}.type
+            Gson().fromJson<Map<String, Int>>(InputStreamReader(input), type)
+        }
     }
 
     /** Pair of sub-tokens to its position in merges.txt; lower wins. */
-    private val mergeRanks: Map<String, Int> = run {
+    private val mergeRanks: Map<String, Int> by lazy {
         val ranks = HashMap<String, Int>(BIG_ENOUGH)
-        var rank = 0
-        for (line in mergesText.lineSequence()) {
-            // Only the "#version:" header is a comment. Filtering every line that starts with
-            // '#' dropped eight real merges ("# #", "## ##", "# $", ...) and silently changed
-            // how any text containing those characters was segmented.
-            if (line.isBlank() || line.startsWith("#version")) continue
-            val space = line.indexOf(' ')
-            if (space <= 0) continue
-            ranks[line.trimEnd()] = rank++
+        mergesStream().bufferedReader().use { reader ->
+            var rank = 0
+            reader.forEachLine { line ->
+                // Only the "#version:" header is a comment. Filtering every line that starts with
+                // '#' dropped eight real merges ("# #", "## ##", "# $", ...) and silently changed
+                // how any text containing those characters was segmented.
+                if (line.isBlank() || line.startsWith("#version")) return@forEachLine
+                val space = line.indexOf(' ')
+                if (space <= 0) return@forEachLine
+                ranks[line] = rank++
+            }
         }
         ranks
     }
@@ -53,17 +65,17 @@ class BpeTokenizer(vocabJson: String, mergesText: String) {
      *
      * Deliberately an instance `lazy` rather than a companion constant: a bad pattern in a static
      * initializer surfaces as an ExceptionInInitializerError, which is an Error and so sails past
-     * the `catch (e: Exception)` in the encoder and kills the process. Built here, the same failure
-     * is a PatternSyntaxException that the encoder catches, and AI search degrades to plain text
-     * search.
+     * the `catch (e: Exception)` in [ClapTextEncoder.encode] and kills the process. Built here, the
+     * same failure is a PatternSyntaxException that the encoder catches, and AI search degrades to
+     * plain text search.
      */
     private val splitPattern: Regex by lazy {
         Regex("""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^$WS\p{L}\p{N}]+|[$WS]+(?![^$WS])|[$WS]+""")
     }
 
-    private val bosToken: Long = (vocab["<s>"] ?: 0).toLong()
-    private val eosToken: Long = (vocab["</s>"] ?: 2).toLong()
-    private val unkToken: Int = vocab["<unk>"] ?: 3
+    private val bosToken: Long by lazy { (vocab["<s>"] ?: 0).toLong() }
+    private val eosToken: Long by lazy { (vocab["</s>"] ?: 2).toLong() }
+    private val unkToken: Int by lazy { vocab["<unk>"] ?: 3 }
 
     /**
      * @return `<s> … </s>` token ids, at most [maxLength] of them.
@@ -163,9 +175,11 @@ class BpeTokenizer(vocabJson: String, mergesText: String) {
         /**
          * Whitespace, spelled out.
          *
-         * The reference tokenizer treats `\s` as Unicode, which Java's regex engine only does under
-         * the `(?U)` flag. Listing the separators keeps the two in agreement without relying on a
-         * flag that not every engine accepts.
+         * The reference tokenizer treats `\s` as Unicode. Making Java's `\s` Unicode-aware needs the
+         * `(?U)` flag, which Android's ICU-backed regex engine rejects outright with a
+         * PatternSyntaxException — and since this pattern is built in a static initializer, that
+         * surfaced as an ExceptionInInitializerError the first time anything touched the tokenizer.
+         * Listing the separators keeps both engines in agreement without the flag.
          */
         // Raw strings pass \uXXXX through untouched, so the regex engine resolves the escapes.
         const val WS = """\s\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000"""

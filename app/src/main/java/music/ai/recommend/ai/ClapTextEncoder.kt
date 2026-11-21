@@ -21,7 +21,12 @@ import java.nio.LongBuffer
  */
 class ClapTextEncoder(private val models: ModelRepository) {
 
-    private val tokenizer = BpeTokenizer(models)
+    // Streams, opened on first use: the tokenizer parses 1.25 MB and should not do it until
+    // something asks it to encode. See BpeTokenizer.
+    private val tokenizer = BpeTokenizer(
+        { models.openStream(ModelAsset.VOCAB) },
+        { models.openStream(ModelAsset.MERGES) }
+    )
     private val russian = RuTextEncoder(models)
     private val mutex = Mutex()
 
