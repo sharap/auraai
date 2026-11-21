@@ -23,7 +23,7 @@ class RealLibraryDailyMixTest {
         val rows = File(path!!).readLines().map { it.split('\t') }
         val tracks = rows.mapIndexed { i, row ->
             MixTrack(
-                id = i.toLong(),
+                track = i.toLong(),
                 vector = row[3].split(',').map(String::toFloat).toFloatArray(),
                 group = row[1].trim().ifEmpty { "?" }.lowercase(),
                 duplicateKey = "${row[1].trim()}|${row[0].trim()}".lowercase()
@@ -34,12 +34,12 @@ class RealLibraryDailyMixTest {
 
         val day = 24L * 60 * 60 * 1000
         var now = 1_700_000_000_000L
-        val listens = ArrayList<MixListen>()
+        val listens = ArrayList<MixListen<Long>>()
         val lastPlayed = HashMap<Long, Long>()
         val previousDays = ArrayList<List<Long>>()
 
         for (d in 1..14) {
-            val withHistory = tracks.map { it.copy(lastPlayedAt = lastPlayed[it.id]) }
+            val withHistory = tracks.map { it.copy(lastPlayedAt = lastPlayed[it.track]) }
             val recentlyOffered = previousDays.takeLast(7).flatten().toSet()
             val start = System.nanoTime()
             val mix = DailyMix.build(

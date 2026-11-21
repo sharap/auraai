@@ -9,8 +9,17 @@ import kotlin.random.Random
  * What the mix knows about one track: where it sits in embedding space, who it is by, and when it
  * was last heard. [group] keeps one artist or one smart album from filling the playlist.
  */
-data class MixTrack(
-    val id: Long,
+data class MixTrack<Track>(
+    /**
+     * What identifies the track, in whatever a port identifies tracks by.
+     *
+     * A type parameter because the two ports disagree and both are right: the phone has MediaStore
+     * ids, the desktop has paths. Until this was parameterised the file existed twice, identical
+     * line for line except for `Long` against `String` — 58 differences, every one of them this.
+     * The sync layer answered the same question the same way, which is why its forty-five files
+     * could be shared without an argument; the name `track` is its name too.
+     */
+    val track: Track,
     val vector: FloatArray,
     val group: String,
     val lastPlayedAt: Long? = null,
@@ -21,12 +30,14 @@ data class MixTrack(
      */
     val duplicateKey: String = ""
 ) {
-    override fun equals(other: Any?) = other is MixTrack && other.id == id
-    override fun hashCode() = id.hashCode()
+    // Written out because a data class compares a FloatArray by identity, and two entries for one
+    // track are the same entry however their vectors were allocated.
+    override fun equals(other: Any?) = other is MixTrack<*> && other.track == track
+    override fun hashCode() = track.hashCode()
 }
 
 /** A listen, as the mix sees it: [fraction] of the track reached, at [playedAt]. */
-data class MixListen(val songId: Long, val playedAt: Long, val fraction: Float)
+data class MixListen<Track>(val track: Track, val playedAt: Long, val fraction: Float)
 
 /**
  * Builds the playlist of the day from the library's own embeddings and the listening history.
@@ -106,33 +117,33 @@ object DailyMix {
      * @param seed derived from the date, so the same day always yields the same playlist.
      * @param now epoch milliseconds, for ageing the history.
      */
-    fun build(
-        tracks: List<MixTrack>,
-        listens: List<MixListen>,
-        favourites: Set<Long>,
-        recentlyOffered: Set<Long> = emptySet(),
+    fun <Track> build(
+        tracks: List<MixTrack<Track>>,
+        listens: List<MixListen<Track>>,
+        favourites: Set<Track>,
+        recentlyOffered: Set<Track> = emptySet(),
         seed: Long,
         now: Long,
         size: Int = DEFAULT_SIZE
-    ): List<Long> {
-        if (tracks.size <= size) return tracks.map { it.id }
+    ): List<Track> {
+        if (tracks.size <= size) return tracks.map { it.track }
 
         val random = Random(seed)
         val weights = tasteWeights(listens, favourites, now)
-        val byId = tracks.associateBy { it.id }
+        val byTrack = tracks.associateBy { it.track }
 
         val available = tracks.filter { track ->
-            track.id !in recentlyOffered &&
+            track.track !in recentlyOffered &&
                 (track.lastPlayedAt == null || now - track.lastPlayedAt > REPEAT_BLOCK_DAYS * DAY_MS) &&
                 // Skipping something is an answer. Scoring it down is not enough — a skipped track
                 // that happens to sit close to an anchor would still come back tomorrow.
-                ((weights[track.id] ?: 0f) > REJECTED || track.id in favourites)
+                ((weights[track.track] ?: 0f) > REJECTED || track.track in favourites)
         }.ifEmpty { tracks }
 
         val anchors = pickAnchors(available, weights, random)
         val shortlist = shortlist(available, anchors, weights, now)
         val picked = select(shortlist, size, now, random)
-        return order(picked.map { byId.getValue(it) })
+        return order(picked.map { byTrack.getValue(it) })
     }
 
     // ------------------------------------------------------------------ taste
@@ -143,8 +154,20 @@ object DailyMix {
      * A skip is deliberately weaker than a finished listen: skipping happens for reasons that have
      * nothing to do with the track, while sitting through four minutes rarely does.
      */
-    internal fun tasteWeights(listens: List<MixListen>, favourites: Set<Long>, now: Long): Map<Long, Float> {
-        val weights = HashMap<Long, Float>()
+    /**
+     * Public, and not only for tests any more.
+     *
+     * It was `internal` — reachable from each port's own tests while the file lived in the port.
+     * Now the file is shared and the phone's view model asks for the same weights to steer the
+     * wave by, which is a use and not a test. The third time this has come up in the move; the
+     * first two closed again once their callers followed, and this one will not.
+     */
+    fun <Track> tasteWeights(
+        listens: List<MixListen<Track>>,
+        favourites: Set<Track>,
+        now: Long
+    ): Map<Track, Float> {
+        val weights = HashMap<Track, Float>()
         for (listen in listens) {
             val ageDays = (now - listen.playedAt).coerceAtLeast(0L).toDouble() / DAY_MS
             val decay = exp(-ln(2.0) * ageDays / HALF_LIFE_DAYS).toFloat()
@@ -153,7 +176,7 @@ object DailyMix {
                 listen.fraction >= SKIPPED -> PARTIAL_WEIGHT
                 else -> SKIP_WEIGHT
             }
-            weights[listen.songId] = (weights[listen.songId] ?: 0f) + base * decay
+            weights[listen.track] = (weights[listen.track] ?: 0f) + base * decay
         }
         for (id in favourites) weights[id] = (weights[id] ?: 0f) + FAVOURITE_WEIGHT
         return weights
@@ -164,17 +187,21 @@ object DailyMix {
      * makes one day differ from the next; with no history at all the draw is uniform, and the
      * playlist is then simply a varied tour of the library.
      */
-    private fun pickAnchors(tracks: List<MixTrack>, weights: Map<Long, Float>, random: Random): List<MixTrack> {
-        val liked = tracks.filter { (weights[it.id] ?: 0f) > 0f }
+    private fun <Track> pickAnchors(
+        tracks: List<MixTrack<Track>>,
+        weights: Map<Track, Float>,
+        random: Random
+    ): List<MixTrack<Track>> {
+        val liked = tracks.filter { (weights[it.track] ?: 0f) > 0f }
         val pool = liked.ifEmpty { tracks }
-        val anchors = ArrayList<MixTrack>(ANCHORS)
+        val anchors = ArrayList<MixTrack<Track>>(ANCHORS)
         val remaining = pool.toMutableList()
         repeat(minOf(ANCHORS, pool.size)) {
-            val total = remaining.sumOf { (weights[it.id] ?: 0f).toDouble().coerceAtLeast(0.01) }
+            val total = remaining.sumOf { (weights[it.track] ?: 0f).toDouble().coerceAtLeast(0.01) }
             var cut = random.nextDouble() * total
             var chosen = remaining.lastIndex
             for ((i, track) in remaining.withIndex()) {
-                cut -= (weights[track.id] ?: 0f).toDouble().coerceAtLeast(0.01)
+                cut -= (weights[track.track] ?: 0f).toDouble().coerceAtLeast(0.01)
                 if (cut <= 0) {
                     chosen = i
                     break
@@ -187,24 +214,24 @@ object DailyMix {
 
     // ------------------------------------------------------------------ candidates
 
-    private class Candidate(val track: MixTrack, val score: Float, val fresh: Boolean)
+    private class Candidate<Track>(val entry: MixTrack<Track>, val score: Float, val fresh: Boolean)
 
     /**
      * Scores every track by how close it is to the day's anchors, then keeps the best few hundred.
      * Tracks the user skips are pushed down, tracks they finish are pulled up, and the anchors
      * themselves stay in: the playlist is meant to contain some of what it was built from.
      */
-    private fun shortlist(
-        tracks: List<MixTrack>,
-        anchors: List<MixTrack>,
-        weights: Map<Long, Float>,
+    private fun <Track> shortlist(
+        tracks: List<MixTrack<Track>>,
+        anchors: List<MixTrack<Track>>,
+        weights: Map<Track, Float>,
         now: Long
-    ): List<Candidate> {
+    ): List<Candidate<Track>> {
         val candidates = tracks.map { track ->
             val closeness = anchors.maxOfOrNull { dot(track.vector, it.vector) } ?: 0f
-            val taste = (weights[track.id] ?: 0f).coerceIn(-1f, 1f)
+            val taste = (weights[track.track] ?: 0f).coerceIn(-1f, 1f)
             Candidate(
-                track = track,
+                entry = track,
                 score = closeness + TASTE_PULL * taste,
                 fresh = track.lastPlayedAt == null || now - track.lastPlayedAt > FRESH_AFTER_DAYS * DAY_MS
             )
@@ -220,15 +247,20 @@ object DailyMix {
      * already in. Group limits and the freshness quota are applied as hard constraints, because
      * they are the difference between a playlist and a pile of near-duplicates.
      */
-    private fun select(shortlist: List<Candidate>, size: Int, now: Long, random: Random): List<Long> {
-        val picked = ArrayList<Candidate>(size)
+    private fun <Track> select(
+        shortlist: List<Candidate<Track>>,
+        size: Int,
+        now: Long,
+        random: Random
+    ): List<Track> {
+        val picked = ArrayList<Candidate<Track>>(size)
         val groupCounts = HashMap<String, Int>()
         val usedKeys = HashSet<String>()
         val freshNeeded = (size * FRESH_SHARE).toInt()
         val remaining = shortlist.toMutableList()
         // Two per group is the aim, but a library of a few large groups cannot fill a playlist at
         // that rate; there the limit is whatever the groups on offer can supply.
-        val groups = shortlist.distinctBy { it.track.group }.size.coerceAtLeast(1)
+        val groups = shortlist.distinctBy { it.entry.group }.size.coerceAtLeast(1)
         var perGroup = maxOf(PER_GROUP, (size + groups - 1) / groups)
 
         while (picked.size < size && remaining.isNotEmpty()) {
@@ -241,9 +273,9 @@ object DailyMix {
             var bestValue = Float.NEGATIVE_INFINITY
             for ((i, candidate) in remaining.withIndex()) {
                 if (freshOnly && !candidate.fresh) continue
-                if ((groupCounts[candidate.track.group] ?: 0) >= perGroup) continue
-                if (candidate.track.duplicateKey.isNotEmpty() && candidate.track.duplicateKey in usedKeys) continue
-                val similarity = picked.maxOfOrNull { dot(candidate.track.vector, it.track.vector) } ?: 0f
+                if ((groupCounts[candidate.entry.group] ?: 0) >= perGroup) continue
+                if (candidate.entry.duplicateKey.isNotEmpty() && candidate.entry.duplicateKey in usedKeys) continue
+                val similarity = picked.maxOfOrNull { dot(candidate.entry.vector, it.entry.vector) } ?: 0f
                 if (similarity > DUPLICATE) continue
                 val value = RELEVANCE * candidate.score - (1 - RELEVANCE) * similarity
                 if (value > bestValue) {
@@ -259,12 +291,12 @@ object DailyMix {
                 continue
             }
             val chosen = remaining.removeAt(bestIndex)
-            groupCounts[chosen.track.group] = (groupCounts[chosen.track.group] ?: 0) + 1
-            if (chosen.track.duplicateKey.isNotEmpty()) usedKeys += chosen.track.duplicateKey
+            groupCounts[chosen.entry.group] = (groupCounts[chosen.entry.group] ?: 0) + 1
+            if (chosen.entry.duplicateKey.isNotEmpty()) usedKeys += chosen.entry.duplicateKey
             picked += chosen
         }
         // A tiny shuffle of equals would break the ordering pass below, so ordering is left to it.
-        return picked.map { it.track.id }
+        return picked.map { it.entry.track }
     }
 
     /**
@@ -272,19 +304,19 @@ object DailyMix {
      * nearest remaining neighbour. A playlist ordered by score instead would put everything alike
      * at the front and all the outliers at the end.
      */
-    private fun order(tracks: List<MixTrack>): List<Long> {
-        if (tracks.size <= 2) return tracks.map { it.id }
+    private fun <Track> order(tracks: List<MixTrack<Track>>): List<Track> {
+        if (tracks.size <= 2) return tracks.map { it.track }
         val remaining = tracks.toMutableList()
         var current = remaining.minByOrNull { track ->
             tracks.sumOf { dot(track.vector, it.vector).toDouble() }
         } ?: remaining.first()
         remaining.remove(current)
-        val ordered = ArrayList<Long>(tracks.size)
-        ordered += current.id
+        val ordered = ArrayList<Track>(tracks.size)
+        ordered += current.track
         while (remaining.isNotEmpty()) {
             val next = remaining.maxByOrNull { dot(current.vector, it.vector) } ?: break
             remaining.remove(next)
-            ordered += next.id
+            ordered += next.track
             current = next
         }
         return ordered

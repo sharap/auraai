@@ -13,7 +13,7 @@ import java.io.OutputStream
  * ordinary queue of the last few tracks. Everything needed to carry on is here — where the stream
  * was heading, what it was steering clear of, and what it had already played.
  *
- * The library itself is not here: [MixTrack]s are rebuilt from the scan and the history, which is
+ * The library itself is not here: [MixTrack<Long>]s are rebuilt from the scan and the history, which is
  * cheap and keeps the file to a few kilobytes.
  */
 data class WaveSession(

@@ -111,10 +111,10 @@ class DailyMixBuilder(
         if (analysed.size < MIN_LIBRARY) return@withContext DailyPlaylist(today, emptyList())
 
         val lastPlayed = history.lastPlayed()
-        val listens = history.recent().map { MixListen(it.songId, it.playedAt, it.fraction) }
+        val listens = history.recent().map { MixListen<Long>(it.songId, it.playedAt, it.fraction) }
         val tracks = analysed.map { song ->
-            MixTrack(
-                id = song.id,
+            MixTrack<Long>(
+                track = song.id,
                 vector = vectors.getValue(song.id),
                 // The artist keeps one act from filling the playlist. Most of this library has
                 // no artist tag, so it is read off the file name where it can be — see TrackGroups.

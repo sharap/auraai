@@ -364,8 +364,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var waveRestoreJob: Job? = null
     /** Dials the other device on a timer while the network transport is on; see startPeerPolling. */
     private var peerPollJob: Job? = null
-    private var waveTracks: List<MixTrack> = emptyList()
-    private var waveTrackById: Map<Long, MixTrack> = emptyMap()
+    private var waveTracks: List<MixTrack<Long>> = emptyList()
+    private var waveTrackById: Map<Long, MixTrack<Long>> = emptyMap()
     private var savedPlaylists: List<Playlist> = emptyList()
     private var playlistSongs: List<Song> = emptyList()
     private var allSongs: List<Song> = emptyList()
@@ -1782,7 +1782,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val seed = waveSeed(mode, query, vectors) ?: return@launch
 
                 waveTracks = waveLibrary(library, vectors)
-                waveTrackById = waveTracks.associateBy { it.id }
+                waveTrackById = waveTracks.associateBy { it.track }
                 val songsById = library.associateBy { it.id }
 
                 val state = Wave.start(seed, waveTracks, after = _currentSong.value?.id?.let { waveTrackById[it] })
@@ -1801,7 +1801,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     WaveMode.SIMILAR -> _currentSong.value?.title
                     WaveMode.TASTE -> null
                 }
-                val songs = first.mapNotNull { songsById[it.id] }
+                val songs = first.mapNotNull { songsById[it.track] }
                 playSong(songs.first(), songs, fromWave = true)
                 observeWave()
                 persistWave()
@@ -1819,11 +1819,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * The library as the wave sees it: analysed tracks, each with the act to keep off repeat and
      * when it was last heard.
      */
-    private suspend fun waveLibrary(library: List<Song>, vectors: Map<Long, FloatArray>): List<MixTrack> {
+    private suspend fun waveLibrary(library: List<Song>, vectors: Map<Long, FloatArray>): List<MixTrack<Long>> {
         val lastPlayed = playHistory.lastPlayed()
         return library.map { song ->
-            MixTrack(
-                id = song.id,
+            MixTrack<Long>(
+                track = song.id,
                 vector = vectors.getValue(song.id),
                 group = TrackGroups.of(song.artist, song.title, song.folderName),
                 lastPlayedAt = lastPlayed[song.id]
@@ -1850,7 +1850,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // The taste profile, which is the same signal the daily mix starts from: what has been
             // played recently, with skips counting against and favourites counting for.
             WaveMode.TASTE -> withContext(Dispatchers.Default) {
-                val listens = playHistory.recent().map { MixListen(it.songId, it.playedAt, it.fraction) }
+                val listens = playHistory.recent().map { MixListen<Long>(it.songId, it.playedAt, it.fraction) }
                 val weights = DailyMix.tasteWeights(listens, _favoriteSongIds.value, System.currentTimeMillis())
                     .filterValues { it > 0f }
                     .filterKeys { it in vectors }
@@ -1922,7 +1922,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 novelty = _waveNovelty.value
             )
         }
-        val songs = picked.mapNotNull { allSongsById[it.id] }
+        val songs = picked.mapNotNull { allSongsById[it.track] }
         if (songs.isEmpty()) return@withLock
         waveState = walked
 
@@ -2007,7 +2007,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val library = allSongs.filter { it.id in vectors }.distinctBy { it.id }
             if (library.size < MIN_WAVE_LIBRARY) return@launch
             waveTracks = waveLibrary(library, vectors)
-            waveTrackById = waveTracks.associateBy { it.id }
+            waveTrackById = waveTracks.associateBy { it.track }
             waveState = session.state
             _waveMode.value = mode
             _waveDescription.value = session.description

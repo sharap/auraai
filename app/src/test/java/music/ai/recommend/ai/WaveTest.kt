@@ -22,13 +22,13 @@ class WaveTest {
      * real library looks like, and what the artist cooldown assumes: a neighbourhood the wave is
      * heading into must not be blocked wholesale by one artist having just played.
      */
-    private fun library(groups: Int, perGroup: Int, seed: Int = 4): Pair<List<MixTrack>, List<FloatArray>> {
+    private fun library(groups: Int, perGroup: Int, seed: Int = 4): Pair<List<MixTrack<Long>>, List<FloatArray>> {
         val random = Random(seed)
         val centres = List(groups) { normalize(FloatArray(dims) { random.nextFloat() * 2 - 1 }) }
         val tracks = centres.flatMapIndexed { g, centre ->
             List(perGroup) { i ->
                 MixTrack(
-                    id = (g * perGroup + i).toLong(),
+                    track = (g * perGroup + i).toLong(),
                     vector = normalize(FloatArray(dims) { centre[it] + (random.nextFloat() - 0.5f) * 0.2f }),
                     group = "g$g-artist${i % ARTISTS_PER_GROUP}"
                 )
@@ -52,8 +52,8 @@ class WaveTest {
         val (next, _) = Wave.next(state, tracks, count = 5, random = Random(1), now = now)
 
         assertEquals(5, next.size)
-        val fromSeedGroup = next.count { groupOf(it.id, 20) == 3 }
-        assertTrue("started elsewhere: ${next.map { it.id }}", fromSeedGroup >= 3)
+        val fromSeedGroup = next.count { groupOf(it.track, 20) == 3 }
+        assertTrue("started elsewhere: ${next.map { it.track }}", fromSeedGroup >= 3)
     }
 
     /**
@@ -68,13 +68,13 @@ class WaveTest {
         val state = Wave.start(centres[liked], tracks)
         val (before, _) = Wave.next(state, tracks, count = 6, random = Random(3), now = now)
 
-        val afterOneSkip = Wave.react(state, tracks.first { groupOf(it.id, 30) == liked }, fraction = 0.02f)
+        val afterOneSkip = Wave.react(state, tracks.first { groupOf(it.track, 30) == liked }, fraction = 0.02f)
         val (after, _) = Wave.next(afterOneSkip, tracks, count = 6, random = Random(3), now = now)
 
-        val keptBefore = before.count { groupOf(it.id, 30) == liked }
-        val keptAfter = after.count { groupOf(it.id, 30) == liked }
+        val keptBefore = before.count { groupOf(it.track, 30) == liked }
+        val keptAfter = after.count { groupOf(it.track, 30) == liked }
         assertTrue("was $keptBefore of six, now $keptAfter", keptAfter >= keptBefore - 2)
-        assertTrue("the stream left after a single skip: ${after.map { it.id }}", keptAfter >= 2)
+        assertTrue("the stream left after a single skip: ${after.map { it.track }}", keptAfter >= 2)
     }
 
     /** A pattern of skips, on the other hand, does move the stream off that kind of music. */
@@ -88,12 +88,12 @@ class WaveTest {
             val (next, queued) = Wave.next(state, tracks, count = 1, random = Random(step), now = now)
             state = queued
             val track = next.single()
-            state = Wave.react(state, track, fraction = if (groupOf(track.id, 30) == skipped) 0.02f else 1f)
+            state = Wave.react(state, track, fraction = if (groupOf(track.track, 30) == skipped) 0.02f else 1f)
         }
 
         val (after, _) = Wave.next(state, tracks, count = 6, random = Random(99), now = now)
-        val fromSkipped = after.count { groupOf(it.id, 30) == skipped }
-        assertTrue("still serving the skipped neighbourhood: ${after.map { it.id }}", fromSkipped <= 1)
+        val fromSkipped = after.count { groupOf(it.track, 30) == skipped }
+        assertTrue("still serving the skipped neighbourhood: ${after.map { it.track }}", fromSkipped <= 1)
     }
 
     @Test
@@ -128,7 +128,7 @@ class WaveTest {
 
         val (next, _) = Wave.next(state, tracks, count = 30, random = Random(7), now = now)
 
-        assertEquals("a track came twice", next.size, next.map { it.id }.toSet().size)
+        assertEquals("a track came twice", next.size, next.map { it.track }.toSet().size)
         for (window in next.windowed(5)) {
             assertEquals("one artist inside five tracks: ${window.map { it.group }}",
                 5, window.map { it.group }.toSet().size)
@@ -138,12 +138,12 @@ class WaveTest {
     @Test
     fun recentlyPlayedTracksAreHeldBack() {
         val (plain, centres) = library(groups = 5, perGroup = 20)
-        val tracks = plain.map { if (it.id < 40) it.copy(lastPlayedAt = now - day) else it }
+        val tracks = plain.map { if (it.track < 40) it.copy(lastPlayedAt = now - day) else it }
 
         val state = Wave.start(centres[0], tracks)
         val (next, _) = Wave.next(state, tracks, count = 10, random = Random(3), now = now)
 
-        assertTrue("served what was just played: ${next.map { it.id }}", next.none { it.id < 40 })
+        assertTrue("served what was just played: ${next.map { it.track }}", next.none { it.track < 40 })
     }
 
     /** A wave that stops is a broken wave: when every rule cannot be satisfied at once, they are
@@ -162,12 +162,12 @@ class WaveTest {
     @Test
     fun dislikedTracksNeverCome() {
         val (tracks, centres) = library(groups = 4, perGroup = 20)
-        val banned = tracks.filter { groupOf(it.id, 20) == 0 }.map { it.id }.toSet()
+        val banned = tracks.filter { groupOf(it.track, 20) == 0 }.map { it.track }.toSet()
 
         val state = Wave.start(centres[0], tracks) // pointed straight at the banned group
         val (next, _) = Wave.next(state, tracks, count = 20, excluded = banned, random = Random(2), now = now)
 
-        assertTrue("a rejected track came back", next.none { it.id in banned })
+        assertTrue("a rejected track came back", next.none { it.track in banned })
         assertEquals(20, next.size)
     }
 
@@ -183,7 +183,7 @@ class WaveTest {
         // One neighbourhood, two thirds of it one act: the shape that caused the complaint.
         val tracks = List(60) { i ->
             MixTrack(
-                id = i.toLong(),
+                track = i.toLong(),
                 vector = normalize(FloatArray(dims) { centre[it] + (random.nextFloat() - 0.5f) * 0.2f }),
                 group = if (i < 40) "dominant" else "other${i % 7}"
             )

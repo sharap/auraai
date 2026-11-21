@@ -1,13 +1,24 @@
 package music.ai.recommend.ai
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 import kotlin.math.sqrt
 import kotlin.random.Random
 
 class DailyMixTest {
+
+    /*
+     * One suite, in the shared module, for code that is now generic over what identifies a track.
+     * It used to exist twice — the same ten tests, the same hundred and seventy-three lines, once
+     * per port — and the only difference was `Long` here against `String` there. That difference
+     * is what moved into the type parameter, so one suite covers both: the ports' own call sites
+     * are what prove the parameterisation, and the compiler checks those.
+     *
+     * Long rather than String because the numbers read as what they are — track one, track two —
+     * and nothing in the mix cares which it is.
+     */
 
     private val dims = 32
     private val day = 24L * 60 * 60 * 1000
@@ -19,13 +30,13 @@ class DailyMixTest {
     }
 
     /** A library of [groups] clusters, ids 0..n-1, group "g{cluster}". */
-    private fun library(groups: Int, perGroup: Int, seed: Int = 3): List<MixTrack> {
+    private fun library(groups: Int, perGroup: Int, seed: Int = 3): List<MixTrack<Long>> {
         val random = Random(seed)
         val centres = List(groups) { normalize(FloatArray(dims) { random.nextFloat() * 2 - 1 }) }
         return centres.flatMapIndexed { g, centre ->
             List(perGroup) { i ->
                 MixTrack(
-                    path = (g * perGroup + i).toString(),
+                    track = (g * perGroup + i).toLong(),
                     vector = normalize(FloatArray(dims) { centre[it] + (random.nextFloat() - 0.5f) * 0.3f }),
                     group = "g$g"
                 )
@@ -36,7 +47,7 @@ class DailyMixTest {
     @Test
     fun theSameDayGivesTheSamePlaylistAndAnotherDayDoesNot() {
         val tracks = library(groups = 8, perGroup = 20)
-        val listens = List(20) { MixListen(it.toString(), now - day, 1f) }
+        val listens = List(20) { MixListen(it.toLong(), now - day, 1f) }
 
         val monday = DailyMix.build(tracks, listens, favourites = emptySet(), seed = 1, now = now)
         val mondayAgain = DailyMix.build(tracks, listens, favourites = emptySet(), seed = 1, now = now)
@@ -51,74 +62,74 @@ class DailyMixTest {
     @Test
     fun noGroupTakesOverThePlaylist() {
         val tracks = library(groups = 20, perGroup = 30)
-        val listens = List(30) { MixListen(it.toString(), now - day, 1f) } // all from group 0
+        val listens = List(30) { MixListen(it.toLong(), now - day, 1f) } // all from group 0
 
         val mix = DailyMix.build(tracks, listens, favourites = emptySet(), seed = 7, now = now)
 
-        val byGroup = mix.map { id -> tracks.first { it.path == id }.group }.groupingBy { it }.eachCount()
-        assertTrue(byGroup.values.all { it <= 2 })
-        assertTrue(byGroup.size >= 14)
+        val byGroup = mix.map { id -> tracks.first { it.track == id }.group }.groupingBy { it }.eachCount()
+        assertTrue("one group took over: $byGroup", byGroup.values.all { it <= 2 })
+        assertTrue("too few groups: $byGroup", byGroup.size >= 14)
     }
 
     @Test
     fun finishedListensCountForATrackAndSkipsAgainstIt() {
         val weights = DailyMix.tasteWeights(
             listens = listOf(
-                MixListen("1", now, 1f),
-                MixListen("2", now, 0.05f),
-                MixListen("3", now, 0.5f)
+                MixListen(1, now, 1f),
+                MixListen(2, now, 0.05f),
+                MixListen(3, now, 0.5f)
             ),
-            favourites = setOf("4"),
+            favourites = setOf(4),
             now = now
         )
 
-        assertTrue(weights.getValue("1") > 0.9f)
-        assertTrue(weights.getValue("2") < 0f)
-        assertTrue(weights.getValue("3") in 0.2f..0.4f)
-        assertTrue(weights.getValue("4") > weights.getValue("1"))
+        assertTrue(weights.getValue(1) > 0.9f)
+        assertTrue(weights.getValue(2) < 0f)
+        assertTrue(weights.getValue(3) in 0.2f..0.4f)
+        assertTrue("a favourite outweighs a single listen", weights.getValue(4) > weights.getValue(1))
     }
 
     @Test
     fun oldListensFadeOut() {
-        val listens = listOf(MixListen("1", now - 21 * day, 1f), MixListen("2", now, 1f))
+        val listens = listOf(MixListen(1, now - 21 * day, 1f), MixListen(2, now, 1f))
 
         val weights = DailyMix.tasteWeights(listens, favourites = emptySet(), now = now)
 
         // 21 days is the half-life.
-        assertEquals(0.5f, weights.getValue("1") / weights.getValue("2"), 0.02f)
+        assertEquals(0.5f, weights.getValue(1) / weights.getValue(2), 0.02f)
     }
 
     /** Skipped tracks must not come back the next day as recommendations. */
     @Test
     fun skippedTracksAreNotPushed() {
         val tracks = library(groups = 6, perGroup = 25)
-        val skipped = (0..24).map { it.toString() } // the whole of group 0
+        val skipped = (0L..24L).toList() // the whole of group 0
         val listens = skipped.map { MixListen(it, now - day, 0.02f) } +
-            (25..49).map { MixListen(it.toString(), now - day, 1f) } // group 1 finished
+            (25L..49L).map { MixListen(it, now - day, 1f) } // group 1 finished
 
         val mix = DailyMix.build(tracks, listens, favourites = emptySet(), seed = 5, now = now)
 
-        assertTrue(mix.count { it in skipped } <= 2)
+        assertTrue("skipped tracks dominate: $mix", mix.count { it in skipped } <= 2)
     }
 
     @Test
     fun partOfThePlaylistIsUnheardOrLongUnplayed() {
         val recent = library(groups = 5, perGroup = 20).map { it.copy(lastPlayedAt = now - 5 * day) }
         val fresh = library(groups = 5, perGroup = 20, seed = 9)
-            .map { it.copy(path = "n" + it.path) }
-        val listens = recent.take(20).map { MixListen(it.path, now - 2 * day, 1f) }
+            .map { it.copy(track = it.track + 1000) }
+        val listens = recent.take(20).map { MixListen(it.track, now - 2 * day, 1f) }
 
         val mix = DailyMix.build(recent + fresh, listens, favourites = emptySet(), seed = 11, now = now)
 
-        val freshIds = fresh.map { it.path }.toSet()
-        assertTrue(mix.count { it in freshIds } >= (mix.size * 0.4).toInt())
+        val freshIds = fresh.map { it.track }.toSet()
+        assertTrue("too little fresh: $mix", mix.count { it in freshIds } >= (mix.size * 0.4).toInt())
     }
 
     @Test
     fun tracksPlayedTodayAndYesterdaysPlaylistAreLeftOut() {
         val tracks = library(groups = 8, perGroup = 20)
-            .map { if (it.path.toIntOrNull()?.let { n -> n < 20 } == true) it.copy(lastPlayedAt = now - 3600_000) else it }
-        val yesterday = (20..39).map { it.toString() }.toSet()
+            .map { if (it.track < 20) it.copy(lastPlayedAt = now - 3600_000) else it }
+        val yesterday = (20L..39L).toSet()
 
         val mix = DailyMix.build(
             tracks,
@@ -129,8 +140,8 @@ class DailyMixTest {
             now = now
         )
 
-        assertTrue(mix.none { it.toInt() < 20 })
-        assertTrue(mix.none { it in yesterday })
+        assertTrue("just played: $mix", mix.none { it < 20 })
+        assertTrue("offered yesterday: $mix", mix.none { it in yesterday })
     }
 
     /** With no history and no favourites there is still a playlist, and it spans the library. */
@@ -141,8 +152,8 @@ class DailyMixTest {
         val mix = DailyMix.build(tracks, listens = emptyList(), favourites = emptySet(), seed = 17, now = now)
 
         assertEquals(DailyMix.DEFAULT_SIZE, mix.size)
-        val groups = mix.map { id -> tracks.first { it.path == id }.group }.toSet()
-        assertTrue(groups.size >= 8)
+        val groups = mix.map { id -> tracks.first { it.track == id }.group }.toSet()
+        assertTrue("only $groups", groups.size >= 8)
     }
 
     /** The same song filed twice must not appear twice in one playlist. */
@@ -151,15 +162,15 @@ class DailyMixTest {
         val base = library(groups = 8, perGroup = 20)
         // Copies far enough apart in embedding space that only the key catches them.
         val copies = base.take(40).map {
-            it.copy(path = "d" + it.path, vector = normalize(FloatArray(dims) { i -> it.vector[i] + 0.15f }))
+            it.copy(track = it.track + 5000, vector = normalize(FloatArray(dims) { i -> it.vector[i] + 0.15f }))
         }
 
-        val keyed = (base + copies).map { it.copy(duplicateKey = "song" + it.path.removePrefix("d")) }
+        val keyed = (base + copies).map { it.copy(duplicateKey = "song${it.track % 5000}") }
 
         val mix = DailyMix.build(keyed, emptyList(), emptySet(), seed = 23, now = now)
 
-        val originals = mix.map { it.removePrefix("d") }
-        assertEquals(originals.size, originals.toSet().size, "a duplicate slipped in: $mix")
+        val originals = mix.map { if (it >= 5000) it - 5000 else it }
+        assertEquals("a duplicate slipped in: $mix", originals.size, originals.toSet().size)
     }
 
     @Test

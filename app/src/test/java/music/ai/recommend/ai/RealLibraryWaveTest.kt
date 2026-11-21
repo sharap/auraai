@@ -21,7 +21,7 @@ class RealLibraryWaveTest {
         val rows = File(path!!).readLines().map { it.split('\t') }
         val tracks = rows.mapIndexed { i, row ->
             MixTrack(
-                id = i.toLong(),
+                track = i.toLong(),
                 vector = row[3].split(',').map(String::toFloat).toFloatArray(),
                 group = row[1].trim().ifEmpty { "?" }.lowercase()
             )
@@ -33,7 +33,7 @@ class RealLibraryWaveTest {
         // the same folder as that track, hearing out everything else — the hardest case for the
         // steering, since the stream is pointed straight at what is being refused.
         val seedTrack = tracks[tracks.size / 3]
-        val refusedFolder = folderOf(seedTrack.id)
+        val refusedFolder = folderOf(seedTrack.track)
         var state = Wave.start(seedTrack.vector, tracks)
         val random = Random(17)
         val played = ArrayList<Long>()
@@ -44,10 +44,10 @@ class RealLibraryWaveTest {
             val (next, queued) = Wave.next(state, tracks, count = 1, current = null, random = random)
             val track = next.singleOrNull() ?: return@repeat
             state = queued
-            val refused = folderOf(track.id) == refusedFolder
+            val refused = folderOf(track.track) == refusedFolder
             if (refused) skips++
             state = Wave.react(state, track, fraction = if (refused) 0.03f else 1f)
-            played += track.id
+            played += track.track
         }
         val ms = (System.nanoTime() - start) / 1_000_000
 

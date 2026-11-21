@@ -74,7 +74,7 @@ actual class DailyMixBuilder actual constructor() {
 
         val tracks = analysed.map { song ->
             MixTrack(
-                path = song.path,
+                track = song.path,
                 vector = vectors.getValue(song.path),
                 // The artist keeps one act from filling the playlist; with no artist tag the
                 // folder is the next best thing, since libraries are usually filed by album.

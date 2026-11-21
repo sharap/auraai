@@ -135,7 +135,12 @@ object Wave {
      *   in the library would otherwise open with another of theirs, which is what "the wave gets
      *   stuck on one artist" turned out to mean.
      */
-    fun start(seed: FloatArray, tracks: List<MixTrack>, after: MixTrack? = null): WaveState {
+    /**
+     * `MixTrack<Long>` and not `MixTrack<Track>` because this file is still the phone's alone.
+     * When it moves to the shared module it will want the same type parameter the mix now has —
+     * the wave is taste logic and has no business knowing what a track is identified by.
+     */
+    fun start(seed: FloatArray, tracks: List<MixTrack<Long>>, after: MixTrack<Long>? = null): WaveState {
         val centre = centroid(tracks.map { it.vector })
         return WaveState(
             direction = normalize(subtract(seed, centre)),
@@ -150,7 +155,7 @@ object Wave {
      * @param fraction how much of the track was heard, 0..1.
      * @param disliked the listener pressed "don't like" rather than simply skipping.
      */
-    fun react(state: WaveState, track: MixTrack, fraction: Float, disliked: Boolean = false): WaveState {
+    fun react(state: WaveState, track: MixTrack<Long>, fraction: Float, disliked: Boolean = false): WaveState {
         val step = when {
             disliked -> -DISLIKE_PUSH
             fraction >= FINISHED_ABOVE -> FINISHED_PULL
@@ -173,7 +178,7 @@ object Wave {
             direction = direction,
             avoid = avoid,
             rejections = state.rejections + if (step < 0f) 1 else 0,
-            played = state.played + track.id,
+            played = state.played + track.track,
             recentGroups = (state.recentGroups + track.group).takeLast(GROUP_COOLDOWN),
             steps = state.steps + 1
         )
@@ -193,15 +198,15 @@ object Wave {
      */
     fun next(
         state: WaveState,
-        tracks: List<MixTrack>,
+        tracks: List<MixTrack<Long>>,
         count: Int,
-        current: MixTrack? = null,
+        current: MixTrack<Long>? = null,
         excluded: Set<Long> = emptySet(),
         novelty: Float = 0.5f,
         random: Random = Random.Default,
         now: Long = System.currentTimeMillis()
-    ): Pair<List<MixTrack>, WaveState> {
-        val chosen = ArrayList<MixTrack>(count)
+    ): Pair<List<MixTrack<Long>>, WaveState> {
+        val chosen = ArrayList<MixTrack<Long>>(count)
         var walking = state
         var previous = current
         repeat(count) {
@@ -210,7 +215,7 @@ object Wave {
             // Queued tracks count as played straight away: the wave looks several tracks ahead,
             // and without this the same track would be picked for every slot of the lookahead.
             walking = walking.copy(
-                played = walking.played + pick.id,
+                played = walking.played + pick.track,
                 recentGroups = (walking.recentGroups + pick.group).takeLast(GROUP_COOLDOWN)
             )
             previous = pick
@@ -220,30 +225,34 @@ object Wave {
 
     private fun pickOne(
         state: WaveState,
-        tracks: List<MixTrack>,
-        current: MixTrack?,
+        tracks: List<MixTrack<Long>>,
+        current: MixTrack<Long>?,
         excluded: Set<Long>,
         novelty: Float,
         random: Random,
         now: Long
-    ): MixTrack? {
+    ): MixTrack<Long>? {
         val holdBackDays = RECENT_DAYS_FAMILIAR +
             (RECENT_DAYS_NEW - RECENT_DAYS_FAMILIAR) * novelty.coerceIn(0f, 1f)
         // Relaxed in turn when nothing is left: a wave that stops is a broken wave, and a repeat
         // after an hour is a smaller fault than silence.
         for (relaxation in 0..3) {
             val candidates = tracks.filter { track ->
-                if (track.id in excluded) return@filter false
-                if (track.id in state.played) return@filter false
+                if (track.track in excluded) return@filter false
+                if (track.track in state.played) return@filter false
                 if (relaxation < 1 && track.group in state.recentGroups) return@filter false
-                if (relaxation < 2 && track.lastPlayedAt != null &&
-                    now - track.lastPlayedAt < holdBackDays * DAY_MS
-                ) return@filter false
+                // Read into a local because Kotlin will not smart-cast a property of another
+                // module: it cannot promise the value is the same on the second read. The mix's
+                // track moved to :shared, so this is now such a property.
+                val heard = track.lastPlayedAt
+                if (relaxation < 2 && heard != null && now - heard < holdBackDays * DAY_MS) {
+                    return@filter false
+                }
                 true
             }.ifEmpty {
                 if (relaxation < 3) return@ifEmpty emptyList()
                 // Last resort: everything but what the listener rejected outright.
-                tracks.filter { it.id !in excluded }
+                tracks.filter { it.track !in excluded }
             }
             if (candidates.isEmpty()) continue
 
@@ -255,7 +264,7 @@ object Wave {
         return null
     }
 
-    private fun score(track: MixTrack, state: WaveState, current: MixTrack?, novelty: Float): Float {
+    private fun score(track: MixTrack<Long>, state: WaveState, current: MixTrack<Long>?, novelty: Float): Float {
         val specific = normalize(subtract(track.vector, state.centre))
         val towardsDirection = dot(state.direction, specific)
         val followsOn = current?.let { dot(normalize(subtract(it.vector, state.centre)), specific) }
@@ -268,7 +277,7 @@ object Wave {
     }
 
     /** Draws one candidate with a probability that grows with its score. */
-    private fun sample(scored: List<Pair<MixTrack, Float>>, random: Random): MixTrack {
+    private fun sample(scored: List<Pair<MixTrack<Long>, Float>>, random: Random): MixTrack<Long> {
         val best = scored.first().second
         val weights = scored.map { exp(((it.second - best) / TEMPERATURE).toDouble()) }
         var cut = random.nextDouble() * weights.sum()
