@@ -243,6 +243,9 @@ dependencies {
     // embedding is only worth carrying between devices if both decoded the same samples, and
     // MediaCodec's mp3 output begins 576 samples later than ffmpeg's while its VBR seek lands
     // hundreds of samples off. A decoder that is the same code on both sides has neither problem.
+    // What both ports are; see shared/build.gradle.kts.
+    implementation(project(":shared"))
+
     implementation(libs.jlayer)
     implementation(libs.jcodec)
     implementation(libs.androidx.room.runtime)

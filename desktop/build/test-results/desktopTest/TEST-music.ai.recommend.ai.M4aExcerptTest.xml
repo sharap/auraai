@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="M4aExcerptTest[desktop]" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:12:08.542Z" hostname="fedora" time="0.104">
+<testsuite name="M4aExcerptTest[desktop]" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:27:57.815Z" hostname="fedora" time="0.109">
   <properties/>
   <testcase name="aFileThatIsNotThereOrIsNotAnM4aIsRefusedRatherThanGuessedAt[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.0"/>
-  <testcase name="theExcerptIsTheToneThatWasEncoded[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.039"/>
-  <testcase name="theDecodedExcerptIsByteForByteWhatItWas[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.033"/>
-  <testcase name="theDecoderReturnsExactlyOneExcerpt[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.031"/>
-  <testcase name="theWindowIsNamedByTheContainersOwnCountOfTheAudio[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.0"/>
+  <testcase name="theExcerptIsTheToneThatWasEncoded[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.038"/>
+  <testcase name="theDecodedExcerptIsByteForByteWhatItWas[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.036"/>
+  <testcase name="theDecoderReturnsExactlyOneExcerpt[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.033"/>
+  <testcase name="theWindowIsNamedByTheContainersOwnCountOfTheAudio[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.001"/>
   <testcase name="onlyM4aGoesThroughThisDecoder[desktop]" classname="music.ai.recommend.ai.M4aExcerptTest" time="0.0"/>
   <system-out><![CDATA[m4a fixture peak: 0.75522757 energy: 69220.76595123146
 m4a fixture digest: a73b19f7d2aa2376786a7cd5f82a9653dd9c2a73e52fc306a7f04e3e42724d30

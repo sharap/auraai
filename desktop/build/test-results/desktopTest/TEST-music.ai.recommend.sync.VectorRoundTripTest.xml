@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="VectorRoundTripTest[desktop]" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:12:16.157Z" hostname="fedora" time="0.05">
+<testsuite name="VectorRoundTripTest[desktop]" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:05.149Z" hostname="fedora" time="0.05">
   <properties/>
   <testcase name="aPassWithAnIncompleteLibraryRetiresNothingElse[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.007"/>
-  <testcase name="aDeviceThatHasLostItsVectorsReadsTheFolderAgain[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.008"/>
+  <testcase name="aDeviceThatHasLostItsVectorsReadsTheFolderAgain[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.009"/>
   <testcase name="aVectorFromAFormatWithoutASharedDecoderNeverLeaves[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
-  <testcase name="askingForNothingIsAnsweredWithNothing[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
-  <testcase name="aRefusalOnOtherTermsIsReconsideredWhenTheTermsChange[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.003"/>
-  <testcase name="aVersionOneTableIsReadAndNothingInItCountsAsPublished[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.001"/>
-  <testcase name="aVectorTakenInIsOfferedOnwards[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.004"/>
-  <testcase name="aVectorMadeByAnotherModelIsRefused[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
+  <testcase name="askingForNothingIsAnsweredWithNothing[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.001"/>
+  <testcase name="aRefusalOnOtherTermsIsReconsideredWhenTheTermsChange[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.004"/>
+  <testcase name="aVersionOneTableIsReadAndNothingInItCountsAsPublished[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
+  <testcase name="aVectorTakenInIsOfferedOnwards[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.003"/>
+  <testcase name="aVectorMadeByAnotherModelIsRefused[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.003"/>
   <testcase name="aVectorAskedForByNameArrivesAndTheFolderStaysEmpty[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.004"/>
   <testcase name="aVectorFromAnotherAnalysisVersionIsRefused[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
-  <testcase name="anMp3VectorCrossesTheFolderAndComesBackTheSame[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.005"/>
-  <testcase name="aVectorForATrackThisLibraryDoesNotHoldWaitsUnclaimed[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.004"/>
-  <testcase name="aVectorAlreadyHeldIsNotTakenTwice[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
-  <testcase name="theExcerptIsNamedByTheDecoderAndNotByWhatTheTagsClaim[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.002"/>
+  <testcase name="anMp3VectorCrossesTheFolderAndComesBackTheSame[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.006"/>
+  <testcase name="aVectorForATrackThisLibraryDoesNotHoldWaitsUnclaimed[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.003"/>
+  <testcase name="aVectorAlreadyHeldIsNotTakenTwice[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.003"/>
+  <testcase name="theExcerptIsNamedByTheDecoderAndNotByWhatTheTagsClaim[desktop]" classname="music.ai.recommend.sync.VectorRoundTripTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

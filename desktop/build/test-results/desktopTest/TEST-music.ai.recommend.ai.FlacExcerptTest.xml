@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="FlacExcerptTest[desktop]" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:10:57.808Z" hostname="fedora" time="0.357">
+<testsuite name="FlacExcerptTest[desktop]" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:26:47.160Z" hostname="fedora" time="0.291">
   <properties/>
-  <testcase name="theExcerptIsAudioAndNotNoiseOrSilence[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.068"/>
-  <testcase name="theDecodedExcerptIsByteForByteWhatItWas[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.116"/>
-  <testcase name="theDecoderReturnsExactlyOneExcerpt[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.038"/>
+  <testcase name="theExcerptIsAudioAndNotNoiseOrSilence[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.062"/>
+  <testcase name="theDecodedExcerptIsByteForByteWhatItWas[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.066"/>
+  <testcase name="theDecoderReturnsExactlyOneExcerpt[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.05"/>
   <testcase name="theWindowIsNamedByTheStreamsOwnCountOfItsSamples[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.0"/>
   <testcase name="onlyFlacGoesThroughThisDecoder[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.0"/>
-  <testcase name="theSharedDecoderSendsEachFormatToTheRightPlace[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.134"/>
+  <testcase name="theSharedDecoderSendsEachFormatToTheRightPlace[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.11"/>
   <testcase name="aFileThatIsNotThereOrIsNotFlacIsRefusedRatherThanGuessedAt[desktop]" classname="music.ai.recommend.ai.FlacExcerptTest" time="0.001"/>
   <system-out><![CDATA[flac fixture peak: 0.7464897 energy: 75457.86462918244
 flac fixture digest: e8471884664e1c3dd2a547d41b46fc2b336a30d2ebdaf3dc4ce0effe8676c40e

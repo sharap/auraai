@@ -74,6 +74,10 @@ androidx-compose-material3-adaptive-navigation = { group = "androidx.compose.mat
 androidx-compose-material3-adaptive-navigation-suite = { group = "androidx.compose.material3", name = "material3-adaptive-navigation-suite", version.ref = "adaptiveNavigationSuite" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+# The shared module is an Android library as well as a JVM one: one compilation of the common
+# code per platform, consumed by :app and by :desktop. Since AGP 9 the plain `com.android.library`
+# plugin refuses to sit beside the multiplatform one and names this as its replacement.
+android-kmp-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

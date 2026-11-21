@@ -27,6 +27,8 @@ kotlin {
                 // Analysis only, for mp3, and the same decoder the Android app uses. The platform
                 // decoders disagree with each other by tens of milliseconds on where an mp3 frame
                 // sits, which is enough to make an embedding from one device useless on the other.
+                // What both ports are; see shared/build.gradle.kts.
+                implementation(project(":shared"))
                 implementation(libs.jlayer)
                 implementation(libs.jcodec)
             }

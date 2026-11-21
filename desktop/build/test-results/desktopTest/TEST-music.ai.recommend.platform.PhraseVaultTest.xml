@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="PhraseVaultTest[desktop]" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:12:15.344Z" hostname="fedora" time="0.005">
+<testsuite name="PhraseVaultTest[desktop]" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:04.325Z" hostname="fedora" time="0.004">
   <properties/>
   <testcase name="aKeyringThatWillNotGiveThePhraseBackIsNotTrustedWithIt[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.002"/>
   <testcase name="aKeyringThatWorksKeepsThePhraseAndTheFileGoes[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
-  <testcase name="whatTheKeyringHoldsWinsOverAFileLeftBehind[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.001"/>
-  <testcase name="withoutAKeyringThePhraseGoesIntoAFileOnlyItsOwnerCanRead[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
+  <testcase name="whatTheKeyringHoldsWinsOverAFileLeftBehind[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
+  <testcase name="withoutAKeyringThePhraseGoesIntoAFileOnlyItsOwnerCanRead[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.001"/>
   <testcase name="anUnlockedKeyringIsNotLocked[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
-  <testcase name="forgettingTakesItOutOfBoth[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.001"/>
-  <testcase name="noKeyringAtAllIsNotLockedEither[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
+  <testcase name="forgettingTakesItOutOfBoth[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
+  <testcase name="noKeyringAtAllIsNotLockedEither[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.001"/>
   <testcase name="aLockedKeyringIsNotTheSameAsNoPhrase[desktop]" classname="music.ai.recommend.platform.PhraseVaultTest" time="0.0"/>
   <system-out><![CDATA[Sync: the keyring took the phrase and would not give it back; using a file
 ]]></system-out>

@@ -11,9 +11,19 @@ package music.ai.recommend.sync
  * base64 — a vector's floats, a sealed batch and its nonce — and three copies of this is three
  * chances for one of them to be subtly different.
  *
- * The Android app carries a copy of this file. The two must match: see docs/SYNC-FORMAT.md.
+ * In :shared, so there is one of it. It used to say here that the desktop port carried a copy and
+ * the two must match — which was true, and was the point: a file whose whole reason for existing
+ * is that three copies of base64 are three chances to differ, kept in two copies itself.
  */
-internal object Base64Text {
+/**
+ * Public only because of where its callers are, for now.
+ *
+ * It was `internal`, which was right while this file and everything that used it were one module.
+ * The module boundary moved: the records, the protocol and the sealing still live in the ports and
+ * will not for long, and `internal` does not cross a module. When they have moved in here this
+ * goes back to `internal`, and the compiler will say so by not complaining.
+ */
+object Base64Text {
 
     private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 

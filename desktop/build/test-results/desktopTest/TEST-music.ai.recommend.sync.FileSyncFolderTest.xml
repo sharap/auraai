@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="FileSyncFolderTest[desktop]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:12:15.402Z" hostname="fedora" time="0.019">
+<testsuite name="FileSyncFolderTest[desktop]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:04.393Z" hostname="fedora" time="0.02">
   <properties/>
   <testcase name="aPathThatWouldLeaveTheFolderIsRefused[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.002"/>
-  <testcase name="aFileThatIsNotThereIsNotNowRatherThanEmpty[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.0"/>
-  <testcase name="aDayWrittenAsADirectoryOfBatchesIsStillReadable[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.003"/>
+  <testcase name="aFileThatIsNotThereIsNotNowRatherThanEmpty[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.001"/>
+  <testcase name="aDayWrittenAsADirectoryOfBatchesIsStillReadable[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.002"/>
   <testcase name="aBatchLandsInThisDevicesOwnDirectoryAndReadsBack[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.002"/>
   <testcase name="aFolderThatIsNotThereIsAFalseAndNotACrash[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.001"/>
   <testcase name="aDayIsOneGrowingFile[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.0"/>
-  <testcase name="whatThisMachineWritesAnotherDeviceCanRead[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.008"/>
+  <testcase name="whatThisMachineWritesAnotherDeviceCanRead[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.01"/>
   <testcase name="onlyDeviceDirectoriesAreListedAsDevices[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.001"/>
   <testcase name="aDeviceNeverReadsItsOwnDirectory[desktop]" classname="music.ai.recommend.sync.FileSyncFolderTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>

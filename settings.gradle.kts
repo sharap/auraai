@@ -28,3 +28,6 @@ include(":app")
 // The desktop port. One repository now, because two of them meant 9091 lines kept in step by hand
 // and a script that checked they had not drifted — and six files had drifted anyway.
 include(":desktop")
+
+// What both of them are. See shared/build.gradle.kts for what may and may not live here.
+include(":shared")
