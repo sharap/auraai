@@ -104,6 +104,67 @@ val keystoreProperties: Map<String, String> = rootProject.file("keystore.propert
     .orEmpty()
 val hasKeystore = keystoreProperties["storeFile"] != null
 
+/**
+ * The words from `:strings`, as assets.
+ *
+ * That module cannot package them into its own AAR — an android variant of AGP's KMP library
+ * plugin has no `sources.assets` for a generated directory, which is also why the Compose plugin's
+ * own copy task there is left unconfigured — so they are taken from it here and added to this
+ * app's assets below. Without this the app builds, installs, and then throws "Missing resource
+ * with path: composeResources/..." the first time it wants a wave mood or an album name.
+ *
+ * Declared here, above `android { }`, and not down in `dependencies { }`: a configuration that has
+ * been observed can no longer be given dependencies, and the variant wiring below observes it.
+ */
+val stringsWords: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+dependencies {
+    stringsWords(project(path = ":strings", configuration = "androidComposeResources"))
+}
+
+/**
+ * Puts them where the packaging looks.
+ *
+ * `assets.srcDir` does not do it: handed a configuration, AGP 9 resolves it and then packages
+ * nothing, with no task dependency and no complaint. The variant API is the supported way to add a
+ * generated directory, and it wants a task whose output directory it can set — hence a task that
+ * does nothing but hold the words.
+ */
+abstract class StringsAssets : DefaultTask() {
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val words: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun copy() {
+        files.sync {
+            into(outputDirectory)
+            from(words)
+        }
+    }
+}
+
+val stringsAssets = tasks.register<StringsAssets>("stringsAssets") {
+    description = "Takes the words from :strings so they can be packaged as assets."
+    words.from(stringsWords)
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(stringsAssets, StringsAssets::outputDirectory)
+    }
+}
+
 android {
     namespace = "music.ai.recommend"
     compileSdk {
