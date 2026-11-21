@@ -17,7 +17,16 @@ Nothing leaves the machine. The library, the embeddings and the listening histor
 - **Playlist of the day.** A fixed playlist each morning, built from the listening history: tracks
   finished count for, tracks skipped count against, and part of it is reserved for things not heard
   in a long time.
-- **Play similar.** Queues the nearest tracks in embedding space to the one playing.
+- **The wave.** An endless stream steered by what you do with it: a track heard out pulls it
+  closer, a skip pushes it away. Start it from your taste, from the track playing, from a
+  description, or from one of eight moods. A slider says how far it may wander from the familiar.
+  Two things differ from the phone deliberately: a wave left running is *offered* back when the
+  window opens rather than resumed on its own — the phone resumes because Android reclaims the
+  process while you are still listening, and a window that starts playing music when you open it
+  was not asked to — and there is no "don't like" mark on this port for it to avoid, because this
+  port has none.
+- **Play similar.** Queues the nearest tracks in embedding space to the one playing: the same
+  neighbourhood the wave starts from, as a fixed list rather than a stream.
 - **External control.** Publishes MPRIS on the session bus, so media keys, the desktop's player
   widget, Bluetooth headset buttons and `playerctl` all drive it.
 
