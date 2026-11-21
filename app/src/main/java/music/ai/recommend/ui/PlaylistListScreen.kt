@@ -30,9 +30,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import music.ai.recommend.ai.WaveMode
 import music.ai.recommend.ui.theme.LocalMutedOnBackground
 import music.ai.recommend.MusicViewModel
-import music.ai.recommend.WaveMode
 import music.ai.recommend.ai.WaveMood
 import music.ai.recommend.ai.WaveMoods
 import music.ai.recommend.Playlist

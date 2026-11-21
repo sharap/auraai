@@ -17,6 +17,9 @@ data class AppSettings(
     val customEqPresets: List<EqPreset> = emptyList(),
     /** Multiplier on the eps smart-album clustering picks for itself; 1 is automatic. */
     val smartAlbumsEpsScale: Float = 1f,
+
+    /** How far the wave is willing to go for what has not been heard lately; see WaveTuning. */
+    val waveNovelty: Float = 0.5f,
     val volumePercent: Int = 100,
     /** The folder listening history is exchanged through; empty when sync is not set up. */
     val syncFolderPath: String = "",

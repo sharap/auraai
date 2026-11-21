@@ -6,6 +6,8 @@ import kotlinx.coroutines.withContext
 import music.ai.recommend.ai.DailyMix
 import music.ai.recommend.ai.MixListen
 import music.ai.recommend.ai.MixTrack
+import music.ai.recommend.ai.mixLibrary
+import music.ai.recommend.ai.TrackGroups
 import music.ai.recommend.db.getAppDatabase
 import music.ai.recommend.model.Song
 import java.io.File
@@ -72,19 +74,7 @@ actual class DailyMixBuilder actual constructor() {
             MixListen(event.path, event.playedAt, fraction)
         }
 
-        val tracks = analysed.map { song ->
-            MixTrack(
-                track = song.path,
-                vector = vectors.getValue(song.path),
-                // The artist keeps one act from filling the playlist; with no artist tag the
-                // folder is the next best thing, since libraries are usually filed by album.
-                group = song.artist.trim().lowercase()
-                    .takeIf { it.isNotEmpty() && it != "unknown artist" && it != "unknown" && it != "<unknown>" }
-                    ?: song.folderName.lowercase(),
-                lastPlayedAt = lastPlayed[song.path],
-                duplicateKey = "${song.artist.trim()}|${song.title.trim()}".lowercase()
-            )
-        }
+        val tracks = mixLibrary(analysed, { it.path }, vectors, lastPlayed, duplicates = true)
 
         // Whatever was stored last goes into the recent days — including a finished day, which is
         // the whole point of remembering them: yesterday's playlist must not come back today.

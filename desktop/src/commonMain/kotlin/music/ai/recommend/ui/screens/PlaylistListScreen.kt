@@ -19,7 +19,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import music.ai.recommend.MusicViewModel
+import androidx.compose.foundation.layout.FlowRow
 import music.ai.recommend.ai.SmartAlbum
+import music.ai.recommend.ai.WaveMode
+import music.ai.recommend.ai.WaveMoods
+import music.ai.recommend.ui.byKey
 import music.ai.recommend.model.Playlist
 import music.ai.recommend.model.Song
 import music.ai.recommend.ui.components.SongItem
@@ -44,6 +48,12 @@ fun PlaylistListScreen(
     val dailyMix by viewModel.dailyMix.collectAsState()
     val dailyMixBuilding by viewModel.dailyMixBuilding.collectAsState()
     val dailyMixOpen by viewModel.dailyMixOpen.collectAsState()
+    val waveMode by viewModel.waveMode.collectAsState()
+    val waveDescription by viewModel.waveDescription.collectAsState()
+    val waveNovelty by viewModel.waveNovelty.collectAsState()
+    val waveStarting by viewModel.waveStarting.collectAsState()
+    val waveMessage by viewModel.waveMessage.collectAsState()
+    val waveResumable by viewModel.waveResumable.collectAsState()
     
     var showCreateDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
@@ -116,6 +126,25 @@ fun PlaylistListScreen(
                         // stays out of the way entirely until then.
                         // Above everything else, because it is the one thing here that changes
                         // on its own from one day to the next.
+                        // The wave first: it is the one thing here that is about this minute
+                        // rather than about the library.
+                        item(key = "wave") {
+                            WaveCard(
+                                mode = waveMode,
+                                description = waveDescription,
+                                novelty = waveNovelty,
+                                starting = waveStarting,
+                                message = waveMessage,
+                                resumable = waveResumable,
+                                canStartSimilar = currentSong != null,
+                                onStart = { mode, query, label -> viewModel.startWave(mode, query, label) },
+                                onStop = { viewModel.stopWave() },
+                                onNovelty = { viewModel.setWaveNovelty(it) },
+                                onResume = { viewModel.resumeWave() },
+                                onDismissResume = { viewModel.dismissResumableWave() },
+                                onClearMessage = { viewModel.clearWaveMessage() }
+                            )
+                        }
                         if (dailyMix.isNotEmpty() || dailyMixBuilding) {
                             item(key = "daily_mix") {
                                 DailyMixCard(
@@ -562,6 +591,169 @@ private fun DailyMixCard(
                     contentDescription = "Play",
                     tint = MaterialTheme.colorScheme.primary
                 )
+            }
+        }
+    }
+}
+
+/**
+ * The wave: an endless stream that steers on what the listener does with it.
+ *
+ * Shown in three states, because it is three different things to say. Nothing running — the ways to
+ * start one. Running — what it is following and how far it is willing to wander. Resumable — the
+ * offer to carry on the one from earlier today, which this port makes rather than taking by itself;
+ * a window that opens and starts playing music was not asked to.
+ */
+@Composable
+private fun WaveCard(
+    mode: WaveMode?,
+    description: String?,
+    novelty: Float,
+    starting: Boolean,
+    message: String?,
+    resumable: String?,
+    canStartSimilar: Boolean,
+    onStart: (WaveMode, String?, String?) -> Unit,
+    onStop: () -> Unit,
+    onNovelty: (Float) -> Unit,
+    onResume: () -> Unit,
+    onDismissResume: () -> Unit,
+    onClearMessage: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Waves,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Wave", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.weight(1f))
+                if (starting) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else if (mode != null) {
+                    IconButton(onClick = onStop) {
+                        Icon(Icons.Default.Stop, contentDescription = "Stop the wave")
+                    }
+                }
+            }
+
+            if (message != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onClearMessage) { Text("OK") }
+                }
+            }
+
+            if (mode != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = when {
+                        !description.isNullOrBlank() -> description
+                        mode == WaveMode.TASTE -> "Following your taste"
+                        else -> "Running"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Familiar — adventurous",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = novelty,
+                    onValueChange = onNovelty,
+                    // Five stops, as on the phone: a continuous slider invites tuning that a
+                    // listener cannot hear the difference of.
+                    steps = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                return@Column
+            }
+
+            if (resumable != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("A wave from earlier today", style = MaterialTheme.typography.bodyMedium)
+                        if (resumable.isNotBlank()) {
+                            Text(
+                                text = resumable,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    TextButton(onClick = onDismissResume) { Text("Not now") }
+                    Button(onClick = onResume) { Text("Carry on") }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { onStart(WaveMode.TASTE, null, null) },
+                    enabled = !starting
+                ) { Text("From my taste") }
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = { onStart(WaveMode.SIMILAR, null, null) },
+                    enabled = !starting && canStartSimilar
+                ) { Text("Like this track") }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            var query by remember { mutableStateOf("") }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Or describe it") },
+                placeholder = { Text("calm quiet music, soft and relaxing") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    IconButton(
+                        onClick = { if (query.isNotBlank()) onStart(WaveMode.DESCRIPTION, query, null) },
+                        enabled = !starting && query.isNotBlank()
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = "Start from this description")
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            // The moods are the same prompts the phone sends, and their names come from the
+            // shared string module, so the two interfaces cannot call one mood two things.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WaveMoods.all.forEach { mood ->
+                    val name = byKey(mood.nameKey, mood.prompt)
+                    SuggestionChip(
+                        onClick = { onStart(WaveMode.DESCRIPTION, mood.prompt, name) },
+                        enabled = !starting,
+                        label = { Text(name) }
+                    )
+                }
             }
         }
     }

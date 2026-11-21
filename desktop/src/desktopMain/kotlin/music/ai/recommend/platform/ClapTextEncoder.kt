@@ -85,7 +85,7 @@ actual class ClapTextEncoder actual constructor() {
      *   gives a meaningless similarity for every track.
      */
     /** True when encoding would need a download first. */
-    fun needsDownload(): Boolean = !ModelRepository.instance.isAvailable(ModelAsset.TEXT_MODEL)
+    actual fun needsDownload(): Boolean = !ModelRepository.instance.isAvailable(ModelAsset.TEXT_MODEL)
 
     actual suspend fun encode(text: String): FloatArray? = withContext(Dispatchers.IO) {
         if (needsDownload()) return@withContext null

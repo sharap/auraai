@@ -112,20 +112,7 @@ class DailyMixBuilder(
 
         val lastPlayed = history.lastPlayed()
         val listens = history.recent().map { MixListen<Long>(it.track, it.playedAt, it.fraction) }
-        val tracks = analysed.map { song ->
-            MixTrack<Long>(
-                track = song.id,
-                vector = vectors.getValue(song.id),
-                // The artist keeps one act from filling the playlist. Most of this library has
-                // no artist tag, so it is read off the file name where it can be — see TrackGroups.
-                group = TrackGroups.of(song.artist, song.title, song.folderName),
-                lastPlayedAt = lastPlayed[song.id],
-                // Named the same way, so one recording is caught whether or not it carries tags.
-                duplicateKey =
-                    "${TrackGroups.of(song.artist, song.title, song.folderName)}|" +
-                        TrackGroups.songInName(song.title).lowercase()
-            )
-        }
+        val tracks = mixLibrary(analysed, { it.id }, vectors, lastPlayed, duplicates = true)
 
         // Whatever was stored last goes into the recent days — including a finished day, which is
         // the whole point of remembering them: yesterday's playlist must not come back today.

@@ -1,5 +1,18 @@
 package music.ai.recommend
 
+import music.ai.recommend.ai.DailyMix
+import music.ai.recommend.ai.MixListen
+import music.ai.recommend.ai.MixTrack
+import music.ai.recommend.ai.Wave
+import music.ai.recommend.ai.WaveMode
+import music.ai.recommend.ai.WaveSession
+import music.ai.recommend.ai.WaveSessions
+import music.ai.recommend.ai.WaveState
+import music.ai.recommend.ai.WaveTuning
+import music.ai.recommend.ai.mixLibrary
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -467,6 +480,7 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
             loadAllPersistedDataSync() // 1. Load settings first
             loadMusic().join()         // 2. Wait for scan to finish with correct path
             loadScannedIds()           // 3. Then load AI state
+            findResumableWave()        // 4. And a wave left running, if it is still fresh
         }
     }
 
@@ -516,6 +530,7 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
                 phraseKept = phrases.where
             )
             player.volumePercent = _volumePercent.value
+            _waveNovelty.value = s.waveNovelty.coerceIn(0f, 1f)
             _smartAlbumsEpsScale.value = s.smartAlbumsEpsScale.coerceIn(
                 SmartAlbumClustering.MIN_EPS_SCALE, SmartAlbumClustering.MAX_EPS_SCALE
             )
@@ -546,6 +561,7 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
                 eqLevels = _eqBands.value.map { it.level },
                 customEqPresets = _eqPresets.value.filter { it.isCustom },
                 smartAlbumsEpsScale = _smartAlbumsEpsScale.value,
+                waveNovelty = _waveNovelty.value,
                 volumePercent = _volumePercent.value,
                 syncFolderPath = _syncFolderPath.value,
                 // Written only when nothing better would take it. Once the keyring or a file of
@@ -782,7 +798,9 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
         return job
     }
 
-    fun playSong(song: Song, fromList: List<Song> = emptyList()) {
+    fun playSong(song: Song, fromList: List<Song> = emptyList(), fromWave: Boolean = false) {
+        // Picking a track by hand ends the stream: it is no longer the wave's queue.
+        if (!fromWave && _waveMode.value != null) stopWave()
         if (fromList.isNotEmpty()) {
             _queue.value = fromList
         } else if (!_queue.value.any { it.id == song.id }) {
@@ -1497,6 +1515,383 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
         _dailyMixOpen.value = open
     }
 
+    // ------------------------------------------------------------------ the wave
+
+    private val _waveMode = MutableStateFlow<WaveMode?>(null)
+    /** The running wave's mode, or null when no wave is playing. */
+    val waveMode: StateFlow<WaveMode?> = _waveMode.asStateFlow()
+
+    private val _waveDescription = MutableStateFlow<String?>(null)
+    /** What the wave was asked for, for the subtitle: the query, or the track it started from. */
+    val waveDescription: StateFlow<String?> = _waveDescription.asStateFlow()
+
+    private val _waveNovelty = MutableStateFlow(0.5f)
+    /** 0 keeps the wave to the familiar, 1 makes it dig for what has not been heard in a long time. */
+    val waveNovelty: StateFlow<Float> = _waveNovelty.asStateFlow()
+
+    private val _waveMessage = MutableStateFlow<String?>(null)
+    /** Why a wave could not start, for the screen to show and then clear. */
+    val waveMessage: StateFlow<String?> = _waveMessage.asStateFlow()
+
+    private val _waveStarting = MutableStateFlow(false)
+    val waveStarting: StateFlow<Boolean> = _waveStarting.asStateFlow()
+
+    private var waveJob: Job? = null
+    private var waveEventsJob: Job? = null
+    /** Serialises the wave's queue edits, as on the phone, where fast skips interleaved them. */
+    private val waveLock = Mutex()
+    private var waveState: WaveState<String>? = null
+    private var waveTracks: List<MixTrack<String>> = emptyList()
+    private var waveTrackByPath: Map<String, MixTrack<String>> = emptyMap()
+    private var waveRestoreJob: Job? = null
+
+    private fun waveSessionFile() = java.io.File(db.dataDirectory(), "wave.bin")
+
+    /**
+     * Starts an endless stream steered by what happens next: a track heard out pulls it closer, a
+     * skip pushes it away. Nothing is decided in advance — the queue is kept a few tracks deep and
+     * rebuilt whenever the listener says something.
+     *
+     * @param query only for [WaveMode.DESCRIPTION]: what the stream should sound like.
+     * @param label what to show as the subtitle when it reads better than [query] — a mood button
+     *   passes the mood's name while sending CLAP the English prompt behind it.
+     */
+    fun startWave(mode: WaveMode, query: String? = null, label: String? = null) {
+        waveJob?.cancel()
+        _waveStarting.value = true
+        waveJob = viewModelScope.launch {
+            try {
+                val vectors = waveVectors()
+                val library = allSongs.filter { it.path in vectors }.distinctBy { it.path }
+                if (library.size < WaveTuning.MIN_LIBRARY) {
+                    _waveMessage.value = "A wave needs at least ${WaveTuning.MIN_LIBRARY} analysed tracks."
+                    return@launch
+                }
+                _waveMessage.value = null
+                val seed = waveSeed(mode, query, vectors) ?: return@launch
+
+                waveTracks = waveLibrary(library, vectors)
+                waveTrackByPath = waveTracks.associateBy { it.track }
+                val songsByPath = library.associateBy { it.path }
+
+                val after = _currentSong.value?.path?.let { waveTrackByPath[it] }
+                val state = Wave.start(seed, waveTracks, after = after)
+                val (first, queued) = withContext(Dispatchers.Default) {
+                    Wave.next(
+                        state = state,
+                        tracks = waveTracks,
+                        count = WaveTuning.QUEUE_AHEAD + 1,
+                        novelty = _waveNovelty.value
+                    )
+                }
+                if (first.isEmpty()) return@launch
+                waveState = queued
+                _waveMode.value = mode
+                _waveDescription.value = when (mode) {
+                    WaveMode.DESCRIPTION -> label ?: query
+                    WaveMode.SIMILAR -> _currentSong.value?.title
+                    WaveMode.TASTE -> null
+                }
+                val songs = first.mapNotNull { songsByPath[it.track] }
+                if (songs.isEmpty()) return@launch
+                playSong(songs.first(), songs, fromWave = true)
+                observeWave()
+                persistWave()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                println("ViewModel: could not start the wave: ${e.message}")
+                e.printStackTrace()
+            } finally {
+                _waveStarting.value = false
+            }
+        }
+    }
+
+    /**
+     * The analysed library, by path.
+     *
+     * A zero vector is this port's note that a file could not be decoded, not a direction, so it is
+     * left out — see [DailyMixBuilder], which reads the same rows the same way.
+     */
+    private suspend fun waveVectors(): Map<String, FloatArray> = withContext(Dispatchers.IO) {
+        db.musicDao().getAllEmbeddings()
+            .filter { entity -> entity.vector.any { it != 0f } }
+            .associate { entity -> entity.path to FloatArray(entity.vector.size) { entity.vector[it] } }
+    }
+
+    private suspend fun waveLibrary(
+        library: List<Song>,
+        vectors: Map<String, FloatArray>
+    ): List<MixTrack<String>> = withContext(Dispatchers.IO) {
+        val events = db.musicDao().playEvents()
+        val lastPlayed = HashMap<String, Long>(events.size)
+        for (event in events) {
+            val previous = lastPlayed[event.path]
+            if (previous == null || event.playedAt > previous) lastPlayed[event.path] = event.playedAt
+        }
+        mixLibrary(library, { it.path }, vectors, lastPlayed)
+    }
+
+    /** The direction the stream sets off in. */
+    private suspend fun waveSeed(
+        mode: WaveMode,
+        query: String?,
+        vectors: Map<String, FloatArray>
+    ): FloatArray? = when (mode) {
+        WaveMode.SIMILAR -> vectors[_currentSong.value?.path] ?: vectors.values.randomOrNull()
+
+        WaveMode.DESCRIPTION -> {
+            if (query.isNullOrBlank()) null
+            else if (textEncoder.needsDownload()) {
+                _waveMessage.value = "The text model is not downloaded yet."
+                null
+            } else {
+                // No Russian text tower on this port, unlike the phone: the moods send English
+                // prompts of their own, and a description typed in Russian would be encoded as if
+                // it were English, which is nothing like what it says.
+                textEncoder.encode(query)
+            }
+        }
+
+        // The taste profile, which is the same signal the daily mix starts from: what has been
+        // played recently, with skips counting against and favourites counting for.
+        WaveMode.TASTE -> withContext(Dispatchers.Default) {
+            val events = withContext(Dispatchers.IO) { db.musicDao().playEvents() }
+            val listens = events.map { event ->
+                val fraction =
+                    if (event.durationMs <= 0) 0f
+                    else (event.playedMs.toFloat() / event.durationMs).coerceIn(0f, 1f)
+                MixListen(event.path, event.playedAt, fraction)
+            }
+            val weights = DailyMix.tasteWeights(listens, _favoriteSongPaths.value, System.currentTimeMillis())
+                .filterValues { it > 0f }
+                .filterKeys { it in vectors }
+            if (weights.isEmpty()) return@withContext vectors.values.randomOrNull()
+            val dimensions = vectors.values.first().size
+            val sum = FloatArray(dimensions)
+            for ((path, weight) in weights) {
+                val vector = vectors.getValue(path)
+                for (i in 0 until minOf(dimensions, vector.size)) sum[i] += weight * vector[i]
+            }
+            sum
+        }
+    }
+
+    /**
+     * Reacts to every finished listen while the wave runs: steers, then refills the queue.
+     *
+     * A rejection also throws away what was queued behind it — a skip that only took effect three
+     * tracks later would not feel like being listened to.
+     */
+    private fun observeWave() {
+        // One subscription per wave: a second one would top the queue up twice per track.
+        waveEventsJob?.cancel()
+        waveEventsJob = viewModelScope.launch {
+            listens.collect { event ->
+                val state = waveState ?: return@collect
+                // Only what the wave queued steers it. Whatever was playing when the wave started
+                // is closed by the same mechanism, and a wave asked to sound like that track would
+                // otherwise take its own seed for a skip and head straight away from it.
+                if (event.track !in state.played) return@collect
+                val track = waveTrackByPath[event.track] ?: return@collect
+                val fraction = Wave.fractionOf(event.playedMs, event.durationMs)
+                waveState = Wave.react(state, track, fraction)
+                persistWave()
+                refillWave(replaceTail = fraction < WaveTuning.SKIP_FRACTION)
+            }
+        }
+    }
+
+    /**
+     * Keeps [WaveTuning.QUEUE_AHEAD] tracks waiting behind the one playing.
+     *
+     * @param replaceTail throw away what was queued and put fresh tracks there instead, which is
+     *   what a skip asks for.
+     *
+     * The replacements are chosen before anything is removed, and the list is swapped in one
+     * assignment: this port advances by reading [queue] when a track ends, so a list that is
+     * briefly empty is a playback that briefly stops.
+     */
+    private suspend fun refillWave(replaceTail: Boolean = false) = waveLock.withLock {
+        val state = waveState ?: return@withLock
+        val current = _currentSong.value ?: return@withLock
+        val queueNow = _queue.value
+        val index = queueNow.indexOfFirst { it.path == current.path }
+        if (index < 0) return@withLock
+        val ahead = queueNow.size - index - 1
+        val needed = if (replaceTail) WaveTuning.QUEUE_AHEAD else WaveTuning.QUEUE_AHEAD - ahead
+        if (needed <= 0) return@withLock
+
+        val currentTrack = waveTrackByPath[current.path]
+        // Scoring the whole library is a few million multiplications; off the UI thread.
+        val (picked, walked) = withContext(Dispatchers.Default) {
+            Wave.next(
+                state = state,
+                tracks = waveTracks,
+                count = needed,
+                current = currentTrack,
+                novelty = _waveNovelty.value
+            )
+        }
+        val byPath = allSongs.associateBy { it.path }
+        val songs = picked.mapNotNull { byPath[it.track] }
+        if (songs.isEmpty()) return@withLock
+        waveState = walked
+
+        val kept = if (replaceTail) queueNow.subList(0, index + 1) else queueNow
+        _queue.value = kept + songs
+        persistWave()
+    }
+
+    /** Ends the stream, leaving the queue as it is: what is in it was still chosen for the listener. */
+    fun stopWave() {
+        waveJob?.cancel()
+        waveEventsJob?.cancel()
+        waveRestoreJob?.cancel()
+        waveState = null
+        waveTracks = emptyList()
+        waveTrackByPath = emptyMap()
+        _waveMode.value = null
+        _waveDescription.value = null
+        forgetWave()
+    }
+
+    fun setWaveNovelty(value: Float) {
+        val snapped = value.coerceIn(0f, 1f)
+        _waveNovelty.value = snapped
+        saveSettings()
+    }
+
+    fun clearWaveMessage() {
+        _waveMessage.value = null
+    }
+
+    private fun forgetWave() {
+        val file = waveSessionFile()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { if (file.exists()) file.delete() }
+        }
+    }
+
+    /**
+     * Writes the wave down so it can be picked up again next launch.
+     *
+     * Version 2 of the file writes a track's identity as text, which on this port is its path. The
+     * phone writes the same file with MediaStore ids in the same field; neither reads the other's,
+     * and nothing carries it between them — a wave is about one listener at one machine.
+     */
+    private fun persistWave() {
+        val state = waveState ?: return
+        val mode = _waveMode.value ?: return
+        val session = WaveSession(mode.name, _waveDescription.value, state, System.currentTimeMillis())
+        val file = waveSessionFile()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                file.outputStream().use { WaveSessions.write(it, session) { path -> path } }
+            } catch (e: Exception) {
+                println("ViewModel: could not save the wave: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * A wave worth picking up again, found at startup, or null.
+     *
+     * The phone restores a wave by itself, because Android reclaims the process of an app left in
+     * the background: the listener never stopped listening, so resuming is invisible and right.
+     * This port has no such moment — it does not remember what was playing at all, and an app that
+     * was closed was closed on purpose. Starting music on its own when a window opens would be
+     * obnoxious. So the session is read, held here, and offered: [waveResumable] turns the offer
+     * on, [resumeWave] takes it, and anything else the listener does leaves it alone.
+     */
+    private var resumable: WaveSession<String>? = null
+
+    private val _waveResumable = MutableStateFlow<String?>(null)
+    /** The description of a wave that can be resumed, "" for one with none, or null for no offer. */
+    val waveResumable: StateFlow<String?> = _waveResumable.asStateFlow()
+
+    /** Reads the saved wave, if there is one still worth offering. Called once the library is in. */
+    private fun findResumableWave() {
+        if (waveState != null || allSongs.isEmpty()) return
+        waveRestoreJob?.cancel()
+        waveRestoreJob = viewModelScope.launch {
+            val file = waveSessionFile()
+            val session = withContext(Dispatchers.IO) {
+                if (!file.exists()) null
+                else runCatching { file.inputStream().use { WaveSessions.read(it) { text -> text } } }.getOrNull()
+            } ?: return@launch
+
+            val mode = runCatching { WaveMode.valueOf(session.mode) }.getOrNull()
+            // A wave is about the moment; one older than half a day is not the mood it was.
+            if (mode == null || System.currentTimeMillis() - session.savedAt > WaveTuning.MAX_AGE_MS) {
+                forgetWave()
+                return@launch
+            }
+            resumable = session
+            _waveResumable.value = session.description.orEmpty()
+        }
+    }
+
+    /**
+     * Carries on the wave that was offered: same direction, same memory of what it already played.
+     *
+     * The queue is filled from the saved state rather than from a fresh seed, which is the whole
+     * difference between resuming and starting again — a wave that forgot what it had offered
+     * would spend its first few tracks repeating itself.
+     */
+    fun resumeWave() {
+        val session = resumable ?: return
+        _waveResumable.value = null
+        waveJob?.cancel()
+        _waveStarting.value = true
+        waveJob = viewModelScope.launch {
+            try {
+                val vectors = waveVectors()
+                val library = allSongs.filter { it.path in vectors }.distinctBy { it.path }
+                if (library.size < WaveTuning.MIN_LIBRARY) {
+                    _waveMessage.value = "A wave needs at least ${WaveTuning.MIN_LIBRARY} analysed tracks."
+                    return@launch
+                }
+                waveTracks = waveLibrary(library, vectors)
+                waveTrackByPath = waveTracks.associateBy { it.track }
+                val songsByPath = library.associateBy { it.path }
+
+                val (first, walked) = withContext(Dispatchers.Default) {
+                    Wave.next(
+                        state = session.state,
+                        tracks = waveTracks,
+                        count = WaveTuning.QUEUE_AHEAD + 1,
+                        novelty = _waveNovelty.value
+                    )
+                }
+                val songs = first.mapNotNull { songsByPath[it.track] }
+                if (songs.isEmpty()) {
+                    forgetWave()
+                    return@launch
+                }
+                waveState = walked
+                _waveMode.value = WaveMode.valueOf(session.mode)
+                _waveDescription.value = session.description
+                resumable = null
+                playSong(songs.first(), songs, fromWave = true)
+                observeWave()
+                persistWave()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                println("ViewModel: could not resume the wave: ${e.message}")
+            } finally {
+                _waveStarting.value = false
+            }
+        }
+    }
+
+    /** Turns the offer down for this run, leaving the saved wave where it is. */
+    fun dismissResumableWave() {
+        _waveResumable.value = null
+    }
+
     /**
      * Drops listens older than a year, once per launch.
      *
@@ -1513,7 +1908,17 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
         }
     }
 
+    private val _listens = MutableSharedFlow<PlayEvent<String>>(extraBufferCapacity = 16)
+    /**
+     * Every finished listen, as it is recorded. The wave steers on these.
+     *
+     * A hot flow with a buffer rather than a state: a wave reacts to each listen once, and two
+     * listens of the same track in a row are two reactions, not one.
+     */
+    val listens: SharedFlow<PlayEvent<String>> = _listens.asSharedFlow()
+
     private fun recordListen(event: PlayEvent<String>) {
+        _listens.tryEmit(event)
         viewModelScope.launch(Dispatchers.Default) {
             try {
                 db.musicDao().appendPlayEvent(
