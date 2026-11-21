@@ -35,7 +35,7 @@ Nothing leaves the machine. The library, the embeddings and the listening histor
 | | |
 | --- | --- |
 | JDK | 17 or newer to build; the packaged app carries its own runtime |
-| libVLC | playback (`libvlc5` and `vlc-plugin-base` on Debian/Ubuntu) |
+| libVLC | playback (`libvlc5` + `vlc-plugin-base` on Debian/Ubuntu, `vlc-libs` + `vlc-plugins-base` on Fedora) |
 | ffmpeg | decoding the excerpt each track is analysed from |
 
 On Debian or Ubuntu:
@@ -44,20 +44,73 @@ On Debian or Ubuntu:
 sudo apt install libvlc5 vlc-plugin-base ffmpeg
 ```
 
+On Fedora, where both now come from the distribution's own repositories:
+
+```
+sudo dnf install vlc-libs vlc-plugins-base ffmpeg-free
+```
+
 ## Running
+
+From the source tree:
 
 ```
 ./gradlew :desktop:run
 ```
 
+Once a package is installed, from the menu — *AiMusic*, under Audio — or by name:
+
+```
+aimusic
+```
+
 ## Building a package
 
 ```
-./gradlew :desktop:packageDeb
+./gradlew :desktop:packageRpm      # Fedora and the other rpm distributions
+./gradlew :desktop:packageDeb      # Debian and Ubuntu
 ```
 
-The `.deb` lands in `desktop/build/compose/binaries/main/deb/` and declares libVLC and ffmpeg as
-dependencies. `packageDmg` and `packageMsi` exist but have not been tested.
+Each format is assembled by its own distribution's tool — `rpmbuild` for the first, `dpkg-deb` and
+`fakeroot` for the second — so a machine can only build the format it is. Name the format you want
+rather than using `packageDistributionForCurrentOS`: that one asks for every format this operating
+system could in principle carry, which on Linux is now both. The packages land in
+`desktop/build/compose/binaries/main/rpm/` and `.../deb/`, and each is about 175 MB: a Java runtime
+and skiko travel inside.
+
+Both declare libVLC and ffmpeg, which no dependency scan can find, because libVLC is loaded through
+JNA and ffmpeg is run as a process. The rpm asks for them as capabilities — `libvlc.so.5()(64bit)`
+and `/usr/bin/ffmpeg` — rather than by package name, since the names are not the same thing twice:
+that binary is `ffmpeg-free` in Fedora's own repositories and `ffmpeg` in RPM Fusion, and a
+capability is satisfied by either. The deb gets the same two written in afterwards by
+`tools/portable-deb.sh`, which additionally pairs every library name with its `t64` twin so that
+one file installs on both Debian and Ubuntu.
+
+The runtime inside the package is not this machine's JDK. It is a stock Temurin that Gradle
+provisions as a toolchain, for two reasons: Fedora's openjdk cannot be jlinked at all — the jmods
+are a package of their own that is not installed by default, and a `java.security` patched for the
+system crypto policy closes the one other route — and a package should not come out different
+depending on who built it. An ordinary `build` or `run` provisions nothing; only the packaging
+tasks ask.
+
+Installing the result, on Fedora:
+
+```
+sudo dnf install ./desktop/build/compose/binaries/main/rpm/aimusic-1.1.1-1.x86_64.rpm
+```
+
+It installs into `/usr/lib/aimusic`, puts itself in the menu as *AiMusic*, leaves the command
+`aimusic` in `/usr/bin`, and reads the same `~/.aimusic/` as the version started from Gradle — the
+library, the embeddings and the history are one, whichever of them is running.
+
+The `/usr` tree rather than jpackage's default `/opt` is what the command costs: given a directory
+inside `/usr`, jpackage puts launchers in `/usr/bin`, and under `/opt` nothing lands on the PATH.
+There are two launchers for one application, `aimusic` and `AiMusic`, because jpackage names the
+first after the application — and that name is also the label in the menu, where lowercase would
+look like a typo. The second is the same application with the same options, not a second
+configuration; see `packaging/aimusic-launcher.properties`.
+
+`packageDmg` and `packageMsi` exist but have not been tested.
 
 ## Model weights
 

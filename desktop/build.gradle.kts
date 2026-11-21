@@ -1,4 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractCheckNativeDistributionRuntime
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
+import org.jetbrains.compose.desktop.application.tasks.AbstractJvmToolOperationTask
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -84,13 +87,14 @@ compose.desktop {
 
         // The MPRIS DesktopEntry property has to name the .desktop file this build actually
         // installs, and only the build knows it: jpackage joins the package name and the app name
-        // whenever they differ, so "aimusic" + "AiMusic" ships as aimusic-AiMusic.desktop.
+        // whenever they differ, so "aimusic" + "AiMusic" ships as aimusic-AiMusic.desktop — the
+        // same name in the .deb and in the .rpm, checked in both.
         // Passing it in keeps the packaging detail out of the application code, which falls back
         // to a plain name when run straight from Gradle.
         jvmArgs("-Daimusic.desktopEntry=aimusic-AiMusic")
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "AiMusic"
             packageVersion = "1.1.1"
             description = "Music player with CLAP audio search and smart albums"
@@ -105,10 +109,25 @@ compose.desktop {
 
 
             linux {
-                // Debian package names are lowercase; this is also what the installed tree under
-                // /opt and the .deb file itself are named after.
+                // Package names are lowercase on both sides; this is also what the installed
+                // tree and the package file itself are named after.
                 packageName = "aimusic"
+                /*
+                 * Into the /usr tree rather than jpackage's default /opt, which is what makes the
+                 * application startable by name: given a directory inside /usr, jpackage puts the
+                 * launcher in /usr/bin and everything else in /usr/lib/aimusic, and /usr/bin is
+                 * on everyone's PATH. Under /opt there is nothing on the PATH at all and no way
+                 * to add one — the scripts that would do it come from a template this build
+                 * cannot reach.
+                 *
+                 * Both formats are built the same way by jpackage, but only the rpm has been
+                 * tested here; this machine cannot build a .deb at all.
+                 */
+                installationPath = "/usr"
                 debMaintainer = "sharap.software@gmail.com"
+                // "License:" of the generated .spec. Fedora wants an SPDX identifier, and this
+                // is the one in LICENSE: version 3 of the GPL or, at your option, any later.
+                rpmLicenseType = "GPL-3.0-or-later"
                 appCategory = "Audio"
                 menuGroup = "Audio"
                 iconFile.set(project.file("packaging/aimusic.png"))
@@ -117,6 +136,29 @@ compose.desktop {
         }
     }
 }
+
+/**
+ * Which JDK the packaging tools run from, and why it is not the one that compiles the code.
+ *
+ * jlink builds the runtime that goes inside the package, and it needs a JDK it can read the
+ * modules out of. There are two ways: a `jmods` directory, or — since JDK 24 — the running image
+ * itself, which it accepts only if nothing in it has been touched since it was built. Fedora's
+ * openjdk has neither: the jmods are a separate package that is not installed by default, and
+ * `conf/security/java.security` is patched for the system crypto policy, so the second way is
+ * refused too. jlink stops with "java.security has been modified" and no flag overrides it.
+ *
+ * So packaging asks for a JDK of its own through Gradle's toolchains, the mechanism this build
+ * already provisions JDKs with. Two things follow, both of them wanted: the runtime handed to
+ * other people is a stock upstream one rather than whatever this machine's distribution ships,
+ * and the package does not come out different depending on which machine built it.
+ *
+ * Lazily, through a provider: it is read when a packaging task runs, so an ordinary `build` —
+ * here or on CI, which never packages — provisions nothing.
+ */
+val packagingJdk = javaToolchains.launcherFor {
+    languageVersion.set(JavaLanguageVersion.of(25))
+    vendor.set(JvmVendorSpec.ADOPTIUM)
+}.map { it.metadata.installationPath.asFile.absolutePath }
 
 /**
  * Puts the package's dependencies right once jpackage is done.
@@ -135,6 +177,20 @@ compose.desktop {
  * evaluated.
  */
 afterEvaluate {
+    // Inside afterEvaluate, and not beside the declaration above, for an ordering reason: the
+    // plugin sets these itself when it registers the tasks, and whichever assignment is added
+    // last is the one that holds. Added from here, ours is.
+    //
+    // checkRuntime probes a JDK and writes down what the later tasks package; told nothing, it
+    // reports on this machine's JDK while jlink reads another one.
+    tasks.withType<AbstractCheckNativeDistributionRuntime>().configureEach {
+        jdkHome.set(packagingJdk)
+    }
+    // jlink and jpackage, for every format and for the plain app image.
+    tasks.withType<AbstractJvmToolOperationTask>().configureEach {
+        javaHome.set(packagingJdk)
+    }
+
     val portableDeb = tasks.register<Exec>("portableDeb") {
         description = "Makes the .deb installable on both Debian and Ubuntu."
         group = "compose desktop"
@@ -150,6 +206,45 @@ afterEvaluate {
     }
 
     tasks.named("packageDeb") { finalizedBy(portableDeb) }
+
+    /*
+     * Two things the Compose DSL has no field for, passed straight to jpackage. Both formats, in
+     * both flavours, because a package that comes out of the release flavour is the same package.
+     *
+     * First: the lowercase command. See packaging/aimusic-launcher.properties for what it is and
+     * why there are two launchers rather than one.
+     *
+     * Second, rpm only: the two dependencies no scan of the binaries can find, because libVLC
+     * arrives through JNA and ffmpeg is run as a process. This format needs no repacking
+     * afterwards the way the .deb does — jpackage has a flag for it.
+     *
+     * They are named as capabilities rather than as packages, because package names are exactly
+     * what went wrong with the .deb — the same two are written into it by tools/portable-deb.sh
+     * in Debian's spelling, so change one list and look at the other. libvlc is vlc-libs on
+     * Fedora and libvlc5 on openSUSE, and the ffmpeg binary is ffmpeg-free in Fedora's own
+     * repositories and ffmpeg in RPM Fusion; a soname and a path under /usr/bin mean the same
+     * thing everywhere, and rpm resolves both. The plugins have no capability to point at, so
+     * that one gets alternatives instead — rpm's own answer to dpkg's `|`.
+     */
+    val terminalLauncher = project.file("packaging/aimusic-launcher.properties")
+    for (format in listOf("Deb", "ReleaseDeb", "Rpm", "ReleaseRpm")) {
+        tasks.named<AbstractJPackageTask>("package$format") {
+            inputs.file(terminalLauncher)
+            freeArgs.addAll("--add-launcher", "aimusic=${terminalLauncher.absolutePath}")
+            if (format.endsWith("Rpm")) {
+                freeArgs.addAll(
+                    "--linux-package-deps",
+                    // Quoted here by hand: free arguments reach jpackage's argument file exactly
+                    // as given, and that file is split on whitespace unless a value is quoted.
+                    listOf(
+                        "libvlc.so.5()(64bit)",
+                        "/usr/bin/ffmpeg",
+                        "(vlc-plugins-base or vlc)",
+                    ).joinToString(", ", prefix = "\"", postfix = "\"")
+                )
+            }
+        }
+    }
 }
 
 // The shared model types are stable, and only this side's Compose compiler can be told so: see

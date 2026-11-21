@@ -32,6 +32,11 @@ set -euo pipefail
 root="${1:-composeApp/build/compose/binaries}"
 
 # Что jpackage не выводит, потому что оно не линкуется.
+#
+# То же самое для rpm лежит в desktop/build.gradle.kts, у задачи packageRpm: там это
+# передаётся флагом --linux-package-deps и записано возможностями (libvlc.so.5, /usr/bin/ffmpeg),
+# а не именами пакетов. Список один и тот же по смыслу, но двумя словарями; меняя здесь,
+# посмотрите туда.
 required="libvlc5, vlc-plugin-base, ffmpeg"
 
 # Внутри архива всё принадлежит root. Под обычным пользователем это
