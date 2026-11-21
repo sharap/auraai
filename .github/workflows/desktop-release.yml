@@ -1,7 +1,13 @@
-name: Release
+name: Desktop release
 
 # Pushing a version tag publishes a release with the Debian package attached, so a release is a
 # `git tag` rather than someone remembering to build and upload by hand.
+#
+# Named for the desktop port because the repository now holds both: the Android app's own release
+# goes out as a signed APK and does not pass through here. This file lived under the desktop's own
+# directory for a while after the two repositories were merged, where GitHub does not look for
+# workflows at all — so the release was not broken, it simply never ran again. Moved up, with every
+# path that said composeApp pointed at desktop instead.
 on:
   push:
     tags:
@@ -40,7 +46,7 @@ jobs:
       - name: Check the tag against the built version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          declared=$(grep -oP 'packageVersion = "\K[^"]+' composeApp/build.gradle.kts)
+          declared=$(grep -oP 'packageVersion = "\K[^"]+' desktop/build.gradle.kts)
           tagged="${GITHUB_REF_NAME#v}"
           if [ "$declared" != "$tagged" ]; then
             echo "Tag $GITHUB_REF_NAME does not match packageVersion $declared" >&2
@@ -49,10 +55,10 @@ jobs:
           echo "Releasing $declared"
 
       - name: Run the tests
-        run: ./gradlew :composeApp:desktopTest
+        run: ./gradlew :desktop:desktopTest
 
       - name: Build the package
-        run: ./gradlew :composeApp:packageDeb
+        run: ./gradlew :desktop:packageDeb
 
       # The package is handed to people, and its dependencies are a fact that should be visible
       # from outside rather than a guess. Doubles as a check: without the alternatives through `|`
@@ -60,7 +66,7 @@ jobs:
       # it was built on.
       - name: Package dependencies
         run: |
-          deps=$(dpkg-deb -f composeApp/build/compose/binaries/main/deb/*.deb Depends)
+          deps=$(dpkg-deb -f desktop/build/compose/binaries/main/deb/*.deb Depends)
           echo "::notice title=Package dependencies::$deps"
           case "$deps" in
             *"|"*) ;;
@@ -73,7 +79,7 @@ jobs:
 
       # Published next to the package: it is a 170 MB download and worth being able to check.
       - name: Checksum
-        working-directory: composeApp/build/compose/binaries/main/deb
+        working-directory: desktop/build/compose/binaries/main/deb
         run: sha256sum *.deb > SHA256SUMS
 
       - name: Publish the release
@@ -81,6 +87,6 @@ jobs:
         with:
           draft: true
           files: |
-            composeApp/build/compose/binaries/main/deb/*.deb
-            composeApp/build/compose/binaries/main/deb/SHA256SUMS
-          body_path: .github/release-notes.md
+            desktop/build/compose/binaries/main/deb/*.deb
+            desktop/build/compose/binaries/main/deb/SHA256SUMS
+          body_path: .github/desktop-release-notes.md

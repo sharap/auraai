@@ -5,8 +5,10 @@ results to themselves. Both halves of what the apps know are expensive: hours of
 embeddings, and months of listening for the history the wave and the daily mix are built on. This
 describes how the two carry that to each other.
 
-The format is documented here, in one place, and the desktop port points at this file. Both
-implementations have to follow the same words or neither can trust what the other wrote.
+The format is documented here, in one place. Both implementations have to follow the same words or
+neither can trust what the other wrote — and since the two code bases were merged they are two
+modules of one repository, `app/` and `desktop/`, rather than two repositories that had to be kept
+in step by hand.
 
 ## What travels
 
@@ -270,7 +272,7 @@ vector that is wrong in a way nobody notices is worse than a vector that was nev
 formats are analysed locally on each device until there is a shared decoder for them too.
 
 The excerpt is the part that took measuring, and the reason it is in the record rather than assumed.
-`ai/Excerpt.kt` decides it, and that file exists twice, once in each repository, and must stay
+`ai/Excerpt.kt` decides it, and that file exists twice, once per module, and must stay
 identical. The numbers behind it, measured on one mp3 with everything else held fixed:
 
 | difference between the two sides | cosine |
@@ -979,9 +981,15 @@ Four kinds of line a reader cannot use, and they are not treated alike:
 
 ## Keeping the two implementations honest
 
-Three things must not drift, and each has a guard:
+Three things must not drift, and each has a guard. The guards are written for the arrangement that
+held while this was two repositories — a diff between two working copies, done by hand or by a
+script. One repository makes the diff local; one shared module, which is where these files are
+headed, makes it unnecessary, because there will be one file and nothing to compare it against.
+Until then the rule stands as written.
 
-- `ai/Excerpt.kt` and `ai/Mp3Excerpt.kt` exist in both repositories and must be identical apart from
+
+
+- `ai/Excerpt.kt` and `ai/Mp3Excerpt.kt` exist in both modules and must be identical apart from
   the line naming which side it is on. Diff them. So do the other decoders beside them —
   `FlacExcerpt`, `WavExcerpt`, `M4aExcerpt`, `SharedDecoder` — and `ai/AnalysisBacklog.kt`, which
   decides what a scan looks at and when a refusal expires. Forty-one files in all claim a copy, and
@@ -1001,7 +1009,7 @@ Three things must not drift, and each has a guard:
   expected answer is asserted in `HistoryMergeTest`. If the desktop port folds the same file in and
   gets a different answer, one of the two is wrong, and the history is the one thing in either app
   that cannot be recomputed.
-- Everything under `sync/` exists in both repositories and must be identical apart from the line
+- Everything under `sync/` exists in both modules and must be identical apart from the line
   naming which side the copy is on, exactly like the two excerpt files. Diff them. Forty-two
   files, the socket transport among them: the records and the track key, the batch envelope, the merge, the device id, the writers
   and the readers for history, vectors, playlists and the mix, the playlist log and its replay, the

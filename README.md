@@ -28,6 +28,17 @@ playlist built from them stay in the app's own storage.
 - **A player.** Media3 playback with a background service, equalizer, adaptive text colours
   computed from the wallpaper, pause on headphone disconnect and configurable audio focus.
 
+## The desktop port
+
+The same player for a desktop lives in [`desktop/`](desktop/README.md), with its own README. It is
+a Compose Multiplatform module rather than a second program: it shares the sync format, the excerpt
+rule, the decoders and the analysis with the Android app, which is why the two can hand each other
+vectors and listening history and have them accepted. See
+[`docs/SYNC-FORMAT.md`](docs/SYNC-FORMAT.md) for what exactly they agree on.
+
+Both are built from this repository: `./gradlew :app:assembleDebug` for the phone,
+`./gradlew :desktop:run` for the desktop.
+
 ## Building
 
 ```bash

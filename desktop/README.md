@@ -38,16 +38,16 @@ sudo apt install libvlc5 vlc-plugin-base ffmpeg
 ## Running
 
 ```
-./gradlew :composeApp:run
+./gradlew :desktop:run
 ```
 
 ## Building a package
 
 ```
-./gradlew :composeApp:packageDeb
+./gradlew :desktop:packageDeb
 ```
 
-The `.deb` lands in `composeApp/build/compose/binaries/main/deb/` and declares libVLC and ffmpeg as
+The `.deb` lands in `desktop/build/compose/binaries/main/deb/` and declares libVLC and ffmpeg as
 dependencies. `packageDmg` and `packageMsi` exist but have not been tested.
 
 ## Model weights
@@ -86,7 +86,7 @@ embeddings are not merely old, they describe a different space.
 ## Tests
 
 ```
-./gradlew :composeApp:desktopTest
+./gradlew :desktop:desktopTest
 ```
 
 ## Licence
