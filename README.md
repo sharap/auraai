@@ -28,16 +28,31 @@ playlist built from them stay in the app's own storage.
 - **A player.** Media3 playback with a background service, equalizer, adaptive text colours
   computed from the wallpaper, pause on headphone disconnect and configurable audio focus.
 
-## The desktop port
+## Two ports and one core
 
-The same player for a desktop lives in [`desktop/`](desktop/README.md), with its own README. It is
-a Compose Multiplatform module rather than a second program: it shares the sync format, the excerpt
-rule, the decoders and the analysis with the Android app, which is why the two can hand each other
-vectors and listening history and have them accepted. See
-[`docs/SYNC-FORMAT.md`](docs/SYNC-FORMAT.md) for what exactly they agree on.
+| Module | What it is |
+| --- | --- |
+| `:app` | The Android app: screens, services, Room, MediaStore, the release signing. |
+| `:desktop` | The desktop player, Compose Multiplatform, with [its own README](desktop/README.md): its screens, vlcj for playback, jaudiotagger, the Secret Service for the sync phrase. |
+| `:shared` | What both of them are: the sync format and its socket transport, the excerpt rule, the decoders, the analysis, the daily mix. Two targets, Android and JVM, from one set of files. |
+| `:strings` | The words both interfaces show, as Compose Multiplatform resources — so a smart album cannot be called one thing on the phone and another on the desktop. |
 
-Both are built from this repository: `./gradlew :app:assembleDebug` for the phone,
-`./gradlew :desktop:run` for the desktop.
+```bash
+./gradlew :app:assembleDebug   # the phone
+./gradlew :desktop:run         # the desktop
+./gradlew build                # everything, with the tests
+```
+
+The two were separate repositories until November 2026, which meant 9091 lines existed twice and a
+script checked they had not drifted — and six files had drifted anyway, because nothing fails when
+two copies disagree. `:shared` is where those lines went. What may not go in there is anything
+platform-bound: no Room, no MediaStore, no Android framework, no AWT. Where the common code needs
+the platform it asks through an interface, and each port answers in its own source set — which is
+also why the track's identity is a type parameter, a MediaStore id on the phone and a path on the
+desktop.
+
+See [`docs/SYNC-FORMAT.md`](docs/SYNC-FORMAT.md) for what exactly the two agree on when they hand
+each other vectors and listening history.
 
 ## Building
 
@@ -142,17 +157,33 @@ holds personal data and is not in the repository.
 ## Tests
 
 ```bash
-./gradlew testDebugUnitTest
+./gradlew build                        # all three JVM suites, about 400 tests
+./gradlew build assembleDebugAndroidTest   # and the instrumented sources, which `build` leaves out
 ```
 
-The JVM tests cover the parts that can be reasoned about without a device: the tokenizer, the audio
-feature extractor, contrast calculations, clustering, album naming and the daily playlist. Some
-tests are experiments on a real exported library and skip themselves unless `AURAAI_EMBEDDINGS`
-points at an export.
+They are in three places, and the split follows what needs a platform:
 
-Instrumented tests live in `app/src/androidTest` and are opt-in where they are slow or destructive.
-Note that `connectedAndroidTest` uninstalls the app, taking hours of analysis with it; install the
-APKs manually and run `am instrument` instead.
+| Where | What it covers |
+| --- | --- |
+| `shared/src/commonTest` | The sync format and its transport, the decoders, the sound print, the daily mix, the listen tracker — the bulk of it. One suite for both ports, run against the JVM target. |
+| `app/src/test` | What is left of the Android app's own logic, plus experiments on a real exported library that skip themselves unless `AURAAI_EMBEDDINGS` points at an export. |
+| `desktop/src/desktopTest` | This port's own storage and phrase vault, and the decoders checked against ffmpeg on whatever music the machine has. |
+
+**`./gradlew build` does not compile `app/src/androidTest`.** It compiles and runs the unit tests
+and lint, and leaves the instrumented source set alone — so a renamed field or a changed
+constructor can sit there for weeks while every build reports success. Six such breakages
+accumulated during the merge of the two code bases. `assembleDebugAndroidTest` is the cheap guard,
+and the `android-tests` job in [the workflow](.github/workflows/desktop-build.yml) runs it on every
+push, with no device needed.
+
+Running the instrumented tests does need a device. Install the APKs and use `am instrument`:
+`connectedAndroidTest` uninstalls the app, taking hours of analysis with it.
+
+Three of the desktop tests are green when they have checked nothing: `SharedDecodersOnThisMachine`,
+`FlacAgainstFfmpeg` and `M4aAgainstFfmpeg` return early when there is no music folder or no ffmpeg,
+rather than declaring themselves skipped. On a clean machine they count as passes, and the numbers
+cannot tell them apart from real ones. `assumeTrue` instead of `return` would put them in the
+skipped column, where they belong.
 
 ## Licence
 
