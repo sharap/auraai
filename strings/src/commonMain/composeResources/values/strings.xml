@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The names of the smart albums, read by both interfaces. One file, so they cannot differ. -->
+<resources>
+    <string name="smart_label_trance">Trance</string>
+    <string name="smart_label_house">House</string>
+    <string name="smart_label_edm">EDM</string>
+    <string name="smart_label_dnb">Drum &amp; Bass</string>
+    <string name="smart_label_pop">Pop</string>
+    <string name="smart_label_dance_pop">Dance Pop</string>
+    <string name="smart_label_estrada">Pop Ballads</string>
+    <string name="smart_label_chanson">Chanson</string>
+    <string name="smart_label_rock">Rock</string>
+    <string name="smart_label_metal">Heavy Rock</string>
+    <string name="smart_label_post_rock">Post-Rock</string>
+    <string name="smart_label_indie_folk">Indie Folk</string>
+    <string name="smart_label_folk">Folk</string>
+    <string name="smart_label_harp">Celtic Harp</string>
+    <string name="smart_label_nordic">Nordic Folk</string>
+    <string name="smart_label_folk_dance">Folk Dances</string>
+    <string name="smart_label_classical">Classical</string>
+    <string name="smart_label_piano">Piano</string>
+    <string name="smart_label_romantic">Romantic</string>
+    <string name="smart_label_opera">Opera</string>
+    <string name="smart_label_choir">Choir</string>
+    <string name="smart_label_epic">Epic</string>
+    <string name="smart_label_soundtrack">Soundtracks</string>
+    <string name="smart_label_ambient">Ambient</string>
+    <string name="smart_label_new_age">New Age</string>
+    <string name="smart_label_flamenco">Spanish Guitar</string>
+    <string name="smart_label_latin">Latin</string>
+    <string name="smart_label_jazz">Jazz</string>
+    <string name="smart_label_blues">Blues</string>
+    <string name="smart_label_hip_hop">Hip-Hop</string>
+    <string name="smart_label_winds">Winds</string>
+    <string name="smart_label_nature">Nature Sounds</string>
+    <string name="smart_label_gothic">Gothic</string>
+    <string name="smart_label_synth_pop">Synth-Pop</string>
+    <string name="smart_label_lofi">Lo-Fi</string>
+    <string name="smart_album_untitled">Mix %1$d</string>
+</resources>

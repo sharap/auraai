@@ -31,3 +31,7 @@ include(":desktop")
 
 // What both of them are. See shared/build.gradle.kts for what may and may not live here.
 include(":shared")
+
+// The words both interfaces show. Its own module because :shared may not hold a UI resource
+// runtime, and the strings may not live twice.
+include(":strings")

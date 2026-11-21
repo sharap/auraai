@@ -29,6 +29,8 @@ kotlin {
                 // sits, which is enough to make an embedding from one device useless on the other.
                 // What both ports are; see shared/build.gradle.kts.
                 implementation(project(":shared"))
+                // The words both interfaces show; see strings/build.gradle.kts.
+                implementation(project(":strings"))
                 implementation(libs.jlayer)
                 implementation(libs.jcodec)
             }

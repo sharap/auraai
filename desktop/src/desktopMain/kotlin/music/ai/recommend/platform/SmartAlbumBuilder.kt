@@ -4,6 +4,10 @@ import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import music.ai.recommend.ai.AlbumLabels
+import music.ai.recommend.strings.resources.Res
+import music.ai.recommend.strings.resources.allStringResources
+import music.ai.recommend.strings.resources.smart_album_untitled
+import org.jetbrains.compose.resources.getString
 import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.ai.SmartAlbumNaming
@@ -87,14 +91,26 @@ actual class SmartAlbumBuilder actual constructor(private val textEncoder: ClapT
         )
     }
 
-    private fun present(stored: Stored, songs: List<Song>): List<SmartAlbum> {
+    /**
+     * The album's name in the owner's language, out of the strings both interfaces read.
+     *
+     * Suspending, which is what reading a Compose resource outside composition is; the caller was
+     * already suspending. Before this the names were English literals in the source, so the phone
+     * said «Транс» where this said "Trance", and the album with no label of its own was "Mix 3"
+     * here and «Альбом 3» there.
+     */
+    private suspend fun nameOf(key: String): String? =
+        Res.allStringResources[key]?.let { getString(it) }
+
+    private suspend fun present(stored: Stored, songs: List<Song>): List<SmartAlbum> {
         val byPath = songs.associateBy { it.path }
         val albums = stored.albums.orEmpty()
             .map { album -> album to album.paths.orEmpty().mapNotNull { byPath[it] } }
             .filter { (_, albumSongs) -> albumSongs.isNotEmpty() }
 
         val baseTitles = albums.mapIndexed { i, (album, _) ->
-            AlbumLabels.all.getOrNull(album.label)?.title ?: "Mix ${i + 1}"
+            AlbumLabels.all.getOrNull(album.label)?.let { nameOf(it.nameKey) }
+                ?: getString(Res.string.smart_album_untitled, i + 1)
         }
         val titles = SmartAlbumNaming.uniqueTitles(
             baseTitles,

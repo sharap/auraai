@@ -21,50 +21,6 @@ data class SmartAlbum(
  * Prompts are English because the text encoder was trained on English captions; they describe
  * the sound, not the market category, since that is what an audio embedding can actually match.
  */
-internal data class AlbumLabel(val prompt: String, val title: String)
-
-internal object AlbumLabels {
-    val all = listOf(
-        AlbumLabel("trance music with euphoric synth leads", "Trance"),
-        AlbumLabel("house music with a four-on-the-floor beat", "House"),
-        AlbumLabel("big room electronic dance music drops", "EDM"),
-        AlbumLabel("drum and bass with fast breakbeats", "Drum & Bass"),
-        AlbumLabel("catchy pop song with female vocals", "Pop"),
-        AlbumLabel("upbeat dance pop remix", "Dance Pop"),
-        AlbumLabel("russian pop ballad with male vocals", "Pop Ballads"),
-        AlbumLabel("russian chanson with guitar and male vocals", "Chanson"),
-        AlbumLabel("rock band with electric guitars and drums", "Rock"),
-        AlbumLabel("heavy metal with distorted guitars", "Heavy Rock"),
-        AlbumLabel("instrumental post-rock with swelling guitars", "Post-Rock"),
-        AlbumLabel("indie folk with acoustic guitar and soft vocals", "Indie Folk"),
-        AlbumLabel("medieval folk music with flutes and fiddles", "Folk"),
-        AlbumLabel("celtic harp music", "Celtic Harp"),
-        AlbumLabel("nordic folk with ethereal female vocals", "Nordic Folk"),
-        AlbumLabel("traditional folk dance music", "Folk Dances"),
-        AlbumLabel("classical orchestra symphony", "Classical"),
-        AlbumLabel("solo piano classical piece", "Piano"),
-        AlbumLabel("romantic piano and strings", "Romantic"),
-        AlbumLabel("opera singing with orchestra", "Opera"),
-        AlbumLabel("sacred choir singing a cappella", "Choir"),
-        AlbumLabel("epic cinematic orchestral trailer music", "Epic"),
-        AlbumLabel("film soundtrack score", "Soundtracks"),
-        AlbumLabel("calm ambient soundscape", "Ambient"),
-        AlbumLabel("relaxing new age music", "New Age"),
-        AlbumLabel("spanish flamenco guitar", "Spanish Guitar"),
-        AlbumLabel("latin reggaeton party music", "Latin"),
-        AlbumLabel("jazz with saxophone", "Jazz"),
-        AlbumLabel("blues guitar", "Blues"),
-        AlbumLabel("hip hop beat with rap vocals", "Hip-Hop"),
-        AlbumLabel("duduk and wind instruments playing a sad melody", "Winds"),
-        AlbumLabel("birds singing in nature", "Nature Sounds"),
-        AlbumLabel("dark gothic music", "Gothic"),
-        AlbumLabel("eighties synth pop", "Synth-Pop"),
-        AlbumLabel("lo-fi chill beats", "Lo-Fi")
-    )
-
-    /** Changes whenever the vocabulary does, invalidating cached label embeddings and names. */
-    val fingerprint: Int = all.joinToString("|") { it.prompt }.hashCode()
-}
 
 /**
  * Pure pieces of turning clusters into named albums.

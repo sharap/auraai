@@ -245,6 +245,8 @@ dependencies {
     // hundreds of samples off. A decoder that is the same code on both sides has neither problem.
     // What both ports are; see shared/build.gradle.kts.
     implementation(project(":shared"))
+    // The words both interfaces show; see strings/build.gradle.kts.
+    implementation(project(":strings"))
 
     implementation(libs.jlayer)
     implementation(libs.jcodec)

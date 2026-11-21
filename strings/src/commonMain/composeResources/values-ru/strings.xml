@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The names of the smart albums, read by both interfaces. One file, so they cannot differ. -->
+<resources>
+    <string name="smart_label_trance">Транс</string>
+    <string name="smart_label_house">Хаус</string>
+    <string name="smart_label_edm">EDM</string>
+    <string name="smart_label_dnb">Драм-н-бейс</string>
+    <string name="smart_label_pop">Поп</string>
+    <string name="smart_label_dance_pop">Танцевальный поп</string>
+    <string name="smart_label_estrada">Эстрада</string>
+    <string name="smart_label_chanson">Шансон</string>
+    <string name="smart_label_rock">Рок</string>
+    <string name="smart_label_metal">Тяжёлый рок</string>
+    <string name="smart_label_post_rock">Пост-рок</string>
+    <string name="smart_label_indie_folk">Инди-фолк</string>
+    <string name="smart_label_folk">Фолк</string>
+    <string name="smart_label_harp">Кельтская арфа</string>
+    <string name="smart_label_nordic">Северный фолк</string>
+    <string name="smart_label_folk_dance">Народные танцы</string>
+    <string name="smart_label_classical">Классика</string>
+    <string name="smart_label_piano">Фортепиано</string>
+    <string name="smart_label_romantic">Романтика</string>
+    <string name="smart_label_opera">Опера</string>
+    <string name="smart_label_choir">Хоралы</string>
+    <string name="smart_label_epic">Эпик</string>
+    <string name="smart_label_soundtrack">Саундтреки</string>
+    <string name="smart_label_ambient">Эмбиент</string>
+    <string name="smart_label_new_age">Нью-эйдж</string>
+    <string name="smart_label_flamenco">Испанская гитара</string>
+    <string name="smart_label_latin">Латино</string>
+    <string name="smart_label_jazz">Джаз</string>
+    <string name="smart_label_blues">Блюз</string>
+    <string name="smart_label_hip_hop">Хип-хоп</string>
+    <string name="smart_label_winds">Духовые</string>
+    <string name="smart_label_nature">Звуки природы</string>
+    <string name="smart_label_gothic">Готика</string>
+    <string name="smart_label_synth_pop">Синти-поп</string>
+    <string name="smart_label_lofi">Лоу-фай</string>
+    <string name="smart_album_untitled">Микс %1$d</string>
+</resources>

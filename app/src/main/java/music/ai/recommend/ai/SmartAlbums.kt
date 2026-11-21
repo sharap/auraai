@@ -2,12 +2,15 @@ package music.ai.recommend.ai
 
 import android.content.Context
 import android.util.Log
-import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import music.ai.recommend.R
+import music.ai.recommend.strings.resources.Res
+import music.ai.recommend.strings.resources.allStringResources
+import music.ai.recommend.strings.resources.smart_album_untitled
+import org.jetbrains.compose.resources.getString
 import music.ai.recommend.model.Song
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -30,50 +33,6 @@ data class SmartAlbum(
  * Prompts are English because the text encoder was trained on English captions; they describe
  * the sound, not the market category, since that is what an audio embedding can actually match.
  */
-internal data class AlbumLabel(val prompt: String, @StringRes val title: Int)
-
-internal object AlbumLabels {
-    val all = listOf(
-        AlbumLabel("trance music with euphoric synth leads", R.string.smart_label_trance),
-        AlbumLabel("house music with a four-on-the-floor beat", R.string.smart_label_house),
-        AlbumLabel("big room electronic dance music drops", R.string.smart_label_edm),
-        AlbumLabel("drum and bass with fast breakbeats", R.string.smart_label_dnb),
-        AlbumLabel("catchy pop song with female vocals", R.string.smart_label_pop),
-        AlbumLabel("upbeat dance pop remix", R.string.smart_label_dance_pop),
-        AlbumLabel("russian pop ballad with male vocals", R.string.smart_label_estrada),
-        AlbumLabel("russian chanson with guitar and male vocals", R.string.smart_label_chanson),
-        AlbumLabel("rock band with electric guitars and drums", R.string.smart_label_rock),
-        AlbumLabel("heavy metal with distorted guitars", R.string.smart_label_metal),
-        AlbumLabel("instrumental post-rock with swelling guitars", R.string.smart_label_post_rock),
-        AlbumLabel("indie folk with acoustic guitar and soft vocals", R.string.smart_label_indie_folk),
-        AlbumLabel("medieval folk music with flutes and fiddles", R.string.smart_label_folk),
-        AlbumLabel("celtic harp music", R.string.smart_label_harp),
-        AlbumLabel("nordic folk with ethereal female vocals", R.string.smart_label_nordic),
-        AlbumLabel("traditional folk dance music", R.string.smart_label_folk_dance),
-        AlbumLabel("classical orchestra symphony", R.string.smart_label_classical),
-        AlbumLabel("solo piano classical piece", R.string.smart_label_piano),
-        AlbumLabel("romantic piano and strings", R.string.smart_label_romantic),
-        AlbumLabel("opera singing with orchestra", R.string.smart_label_opera),
-        AlbumLabel("sacred choir singing a cappella", R.string.smart_label_choir),
-        AlbumLabel("epic cinematic orchestral trailer music", R.string.smart_label_epic),
-        AlbumLabel("film soundtrack score", R.string.smart_label_soundtrack),
-        AlbumLabel("calm ambient soundscape", R.string.smart_label_ambient),
-        AlbumLabel("relaxing new age music", R.string.smart_label_new_age),
-        AlbumLabel("spanish flamenco guitar", R.string.smart_label_flamenco),
-        AlbumLabel("latin reggaeton party music", R.string.smart_label_latin),
-        AlbumLabel("jazz with saxophone", R.string.smart_label_jazz),
-        AlbumLabel("blues guitar", R.string.smart_label_blues),
-        AlbumLabel("hip hop beat with rap vocals", R.string.smart_label_hip_hop),
-        AlbumLabel("duduk and wind instruments playing a sad melody", R.string.smart_label_winds),
-        AlbumLabel("birds singing in nature", R.string.smart_label_nature),
-        AlbumLabel("dark gothic music", R.string.smart_label_gothic),
-        AlbumLabel("eighties synth pop", R.string.smart_label_synth_pop),
-        AlbumLabel("lo-fi chill beats", R.string.smart_label_lofi)
-    )
-
-    /** Changes whenever the vocabulary does, invalidating cached label embeddings and names. */
-    val fingerprint: Int = all.joinToString("|") { it.prompt }.hashCode()
-}
 
 /**
  * Pure pieces of turning clusters into named albums.
@@ -266,12 +225,22 @@ class SmartAlbumBuilder(
         )
     }
 
-    private fun present(stored: Stored, songs: List<Song>): List<SmartAlbum> {
+    /**
+     * The album's name in the owner's language, out of the strings both interfaces read.
+     *
+     * Suspending, which is what reading a Compose resource outside composition is. The caller was
+     * already suspending, so this cost nothing; what it bought is that the phone and the desktop
+     * can no longer disagree about what an album is called.
+     */
+    private suspend fun nameOf(key: String): String? =
+        Res.allStringResources[key]?.let { getString(it) }
+
+    private suspend fun present(stored: Stored, songs: List<Song>): List<SmartAlbum> {
         val byId = songs.associateBy { it.id }
         val albums = stored.albums.map { album -> album to album.songIds.asList().mapNotNull { byId[it] } }
         val baseTitles = albums.mapIndexed { i, (album, _) ->
-            AlbumLabels.all.getOrNull(album.label)?.let { context.getString(it.title) }
-                ?: context.getString(R.string.smart_album_untitled, i + 1)
+            AlbumLabels.all.getOrNull(album.label)?.let { nameOf(it.nameKey) }
+                ?: getString(Res.string.smart_album_untitled, i + 1)
         }
         val titles = SmartAlbumNaming.uniqueTitles(
             baseTitles,
