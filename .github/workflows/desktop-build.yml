@@ -1,0 +1,69 @@
+name: Desktop build
+
+# On every push and every pull request, because the point is a machine that has nothing of ours:
+# no Gradle cache from previous builds here, no downloaded model weights, no local.properties
+# pointing at an Android SDK, no music folder. Merging the two code bases rewired the build of
+# three modules — a new :shared, a renamed :desktop, a new :strings, one version catalogue instead
+# of two — and that rewiring is the one thing four hundred tests cannot check, because they all ran
+# on the machine that already had everything.
+#
+# The desktop port only. The Android app needs its 438 MB of model weights and a release keystore,
+# neither of which belongs in a repository; it can be added with -Pauraai.bundleModels=false when
+# somebody wants it.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Shared module and desktop port
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Both modules, with their tests: :shared holds the sync format, the decoders and the
+      # analysis, and :desktop is what runs them. `build` and not `assemble`, so the tests run.
+      - name: Build and test
+        run: ./gradlew :shared:build :desktop:build
+
+      # Said out loud rather than left in the log, because the number is the point: it is what
+      # proves the tests ran at all rather than being skipped or quietly not compiled.
+      - name: Count what ran
+        if: always()
+        run: |
+          total=0
+          for dir in shared/build/test-results/*/ desktop/build/test-results/*/; do
+            [ -d "$dir" ] || continue
+            n=$(grep -ho 'tests="[0-9]*"' "$dir"*.xml 2>/dev/null | grep -o '[0-9]*' | paste -sd+ | bc)
+            f=$(grep -ho 'failures="[0-9]*"' "$dir"*.xml 2>/dev/null | grep -o '[0-9]*' | paste -sd+ | bc)
+            s=$(grep -ho 'skipped="[0-9]*"' "$dir"*.xml 2>/dev/null | grep -o '[0-9]*' | paste -sd+ | bc)
+            echo "::notice title=$dir::${n:-0} tests, ${f:-0} failures, ${s:-0} skipped"
+            total=$((total + ${n:-0}))
+          done
+          echo "::notice title=Tests in all::$total"
+          [ "$total" -gt 0 ] || { echo "::error::no test results at all"; exit 1; }
+
+      - name: Keep the reports when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            shared/build/reports/tests/
+            desktop/build/reports/tests/
+            shared/build/test-results/
+            desktop/build/test-results/
+          retention-days: 7
