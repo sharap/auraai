@@ -38,6 +38,12 @@ kotlin {
             dependencies {
                 implementation(kotlin("test"))
             }
+            // The committed audio fixtures live once, beside the shared module's own tests, and
+            // this port's tests read them off the classpath. VectorRoundTripTest needs a real mp3
+            // to put in a library — it is the test that proves a vector made here is accepted
+            // there — and a second copy of the same 300 KB is how the repository ended up carrying
+            // 1.5 MB of identical audio twice.
+            resources.srcDir(rootProject.file("shared/src/commonTest/resources"))
         }
 
         val desktopMain by getting {

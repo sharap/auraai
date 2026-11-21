@@ -8,7 +8,12 @@
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
-/build
+# Any module's build directory, not just the root's. Each module used to carry its own .gitignore
+# saying `/build`; the desktop port's was deleted along with the rest of its duplicated build
+# plumbing when the two repositories were merged, and :shared never had one — so 1662 files of
+# build output, 4.8 MB, were committed before anything noticed. One rule here covers every module,
+# including the next one.
+build/
 /captures
 .externalNativeBuild
 .cxx

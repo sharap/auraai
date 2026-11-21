@@ -42,7 +42,22 @@ class VectorRoundTripTest {
      */
     private lateinit var tracks: List<Song>
 
-    private val fixture = File("src/desktopTest/resources/mp3_excerpt_fixture.mp3")
+    /**
+     * Read off the classpath, where the build puts the shared module's test resources.
+     *
+     * It used to be `File("src/desktopTest/resources/...")` — a path into the source tree, and a
+     * second copy of an mp3 the shared tests already carried. The path also only worked because the
+     * test task happened to run in this module's directory.
+     */
+    private val fixture: File by lazy {
+        val bytes = checkNotNull(javaClass.getResourceAsStream("/mp3_excerpt_fixture.mp3")) {
+            "mp3_excerpt_fixture.mp3 is missing from the test resources"
+        }.use { it.readBytes() }
+        File(baseDir, "mp3_excerpt_fixture.mp3").apply {
+            parentFile.mkdirs()
+            writeBytes(bytes)
+        }
+    }
 
     private fun song(path: String, artist: String, title: String, duration: Long) = Song(
         id = 0,
