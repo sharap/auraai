@@ -41,23 +41,7 @@ class EmbeddingStore private constructor(context: Context) {
         private const val PREFS = "embedding_store"
         private const val KEY_ANALYSIS_VERSION = "analysis_version"
 
-        /**
-         * Bumped whenever anything that changes the value of an embedding changes — the feature
-         * extractor, the excerpt selection, the projection. Version 2 corrected the log-mel features
-         * to match ClapFeatureExtractor; measured against text queries the peak similarity of a
-         * matching description tripled, so version 1 embeddings are not worth keeping.
-         *
-         * Version 3 pinned the excerpt down to an exact range of samples, see [Excerpt]. Until then
-         * the window began wherever the seek landed and so came out short of ten seconds, which the
-         * feature extractor padded with silence; on the tracks measured that moved an embedding by
-         * a cosine of up to 0.14. Version 2 embeddings therefore describe a slightly different ten
-         * seconds of each track than version 3 does, and mixing the two would leave the similarity
-         * space half a step out of true.
-         */
-        internal const val ANALYSIS_VERSION = 3
 
-        /** How many numbers one of these has. CLAP's audio tower projects to 512. */
-        internal const val DIMENSIONS = 512
     }
 
 

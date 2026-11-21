@@ -1,5 +1,7 @@
 package music.ai.recommend.db
 
+import music.ai.recommend.ai.ANALYSIS_VERSION
+import music.ai.recommend.ai.EMBEDDING_DIMENSIONS
 import kotlinx.coroutines.runBlocking
 import java.io.DataOutputStream
 import java.io.File

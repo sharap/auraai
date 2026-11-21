@@ -32,25 +32,4 @@ data class EmbeddingEntity(
     val refusedStamp: String? = null
 )
 
-/**
- * Bumped whenever anything that changes the value of an embedding changes — the feature extractor,
- * the excerpt selection, the projection. See the Android app's `EmbeddingStore`, where the same
- * number lives: a vector carries it between devices and is refused if it differs, so the two must
- * agree. Here rather than beside the desktop's storage because sync, which is common code, has to
- * be able to say it.
- *
- * Version 2 corrected two things at once: the log-mel features now match `ClapFeatureExtractor`
- * (the previous ones used an HTK mel scale from 0 Hz, unnormalised filters on whole-bin edges and a
- * natural logarithm, which put the 64 mel channels on the wrong frequencies entirely), and the
- * excerpt is taken from the middle of the track rather than from a fixed 20 s in.
- *
- * Version 3 pinned the excerpt to an exact range of samples, see `Excerpt`. Before it, the window
- * was centred on a duration the tag reader gives in whole seconds, while the Android app centred it
- * on microseconds, so the same track was embedded from ten seconds that began up to half a second
- * apart — worth a cosine of about 0.95 where 0.9985 is the bar for two embeddings describing the
- * same thing. That is also what made them impossible to carry between devices.
- */
-const val ANALYSIS_VERSION = 3
 
-/** How many numbers one embedding has. CLAP's audio tower projects to 512. */
-const val EMBEDDING_DIMENSIONS = 512

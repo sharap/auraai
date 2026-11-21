@@ -11,7 +11,7 @@ import org.jetbrains.compose.resources.getString
 import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.SmartAlbumClustering
 import music.ai.recommend.ai.SmartAlbumNaming
-import music.ai.recommend.db.ANALYSIS_VERSION
+import music.ai.recommend.ai.ANALYSIS_VERSION
 import music.ai.recommend.db.getAppDatabase
 import music.ai.recommend.model.Song
 import java.io.DataInputStream

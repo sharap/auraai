@@ -3,6 +3,8 @@ package music.ai.recommend.sync
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
+import music.ai.recommend.ai.ANALYSIS_VERSION
+import music.ai.recommend.ai.EMBEDDING_DIMENSIONS
 import music.ai.recommend.ai.EmbeddingStore
 import music.ai.recommend.ai.Excerpt
 import music.ai.recommend.ai.SharedDecoder
@@ -53,8 +55,8 @@ class EmbeddingVectorStore(
         val model = variant.asset.sha256 ?: return null
         return VectorTerms(
             model = model,
-            analysisVersion = EmbeddingStore.ANALYSIS_VERSION,
-            dimensions = EmbeddingStore.DIMENSIONS
+            analysisVersion = ANALYSIS_VERSION,
+            dimensions = EMBEDDING_DIMENSIONS
         )
     }
 

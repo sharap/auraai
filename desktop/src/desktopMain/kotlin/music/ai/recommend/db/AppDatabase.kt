@@ -1,5 +1,6 @@
 package music.ai.recommend.db
 
+import music.ai.recommend.ai.ANALYSIS_VERSION
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import music.ai.recommend.model.*
@@ -8,7 +9,9 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.FileOutputStream
 
-// ANALYSIS_VERSION and EMBEDDING_DIMENSIONS live in db/EmbeddingEntity.kt, where common
+// ANALYSIS_VERSION and EMBEDDING_DIMENSIONS live in the shared module, in ai/AnalysisTerms.kt:
+// they are the one number both ports have to agree on, and they used to be declared in each.
+// Formerly in db/EmbeddingEntity.kt, where common
 // code — sync among it — can say them too.
 
 class DesktopMusicDao(private val baseDir: File) : MusicDao {

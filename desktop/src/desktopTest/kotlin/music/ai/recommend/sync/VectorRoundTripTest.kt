@@ -2,9 +2,9 @@ package music.ai.recommend.sync
 
 import kotlinx.coroutines.runBlocking
 import music.ai.recommend.ai.Excerpt
-import music.ai.recommend.db.ANALYSIS_VERSION
+import music.ai.recommend.ai.ANALYSIS_VERSION
 import music.ai.recommend.db.DesktopMusicDao
-import music.ai.recommend.db.EMBEDDING_DIMENSIONS
+import music.ai.recommend.ai.EMBEDDING_DIMENSIONS
 import music.ai.recommend.db.EmbeddingEntity
 import music.ai.recommend.model.Song
 import java.io.File

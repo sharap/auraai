@@ -1,5 +1,6 @@
 package music.ai.recommend.sync
 
+import music.ai.recommend.ai.EMBEDDING_DIMENSIONS
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -120,7 +121,7 @@ class VectorCoordinatorTest {
         return found
     }
 
-    private fun vector(seed: Int) = FloatArray(EmbeddingStore.DIMENSIONS) {
+    private fun vector(seed: Int) = FloatArray(EMBEDDING_DIMENSIONS) {
         ((it + seed) % 17) * 0.05f + 0.013f
     }
 

@@ -3,8 +3,8 @@ package music.ai.recommend.sync
 import music.ai.recommend.ai.AnalysisBacklog
 import music.ai.recommend.ai.Excerpt
 import music.ai.recommend.ai.SharedDecoder
-import music.ai.recommend.db.ANALYSIS_VERSION
-import music.ai.recommend.db.EMBEDDING_DIMENSIONS
+import music.ai.recommend.ai.ANALYSIS_VERSION
+import music.ai.recommend.ai.EMBEDDING_DIMENSIONS
 import music.ai.recommend.db.EmbeddingEntity
 import music.ai.recommend.db.MusicDao
 import music.ai.recommend.model.Song

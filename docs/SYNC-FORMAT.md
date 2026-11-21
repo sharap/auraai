@@ -272,8 +272,9 @@ vector that is wrong in a way nobody notices is worse than a vector that was nev
 formats are analysed locally on each device until there is a shared decoder for them too.
 
 The excerpt is the part that took measuring, and the reason it is in the record rather than assumed.
-`ai/Excerpt.kt` decides it, and that file exists twice, once per module, and must stay
-identical. The numbers behind it, measured on one mp3 with everything else held fixed:
+`ai/Excerpt.kt` decides it, and there is one of it, in `:shared` — it existed twice, once per
+port, for as long as the two were separate programs. The numbers behind it, measured on one mp3
+with everything else held fixed:
 
 | difference between the two sides | cosine |
 | --- | --- |
@@ -981,37 +982,66 @@ Four kinds of line a reader cannot use, and they are not treated alike:
 
 ## Keeping the two implementations honest
 
-Three things must not drift, and each has a guard. The guards are written for the arrangement that
-held while this was two repositories — a diff between two working copies, done by hand or by a
-script. One repository makes the diff local; one shared module, which is where these files are
-headed, makes it unnecessary, because there will be one file and nothing to compare it against.
-Until then the rule stands as written.
+This section used to list three things that must not drift and a guard for each, because the format
+and the code that spoke it existed twice — once per repository — and the guards were diffs, run by
+hand or by a script that compared eighty-three files and reported how many had drifted. Six of them
+had.
+
+None of that is true any longer. The files are in `:shared`: one `Excerpt.kt`, one `Mp3Excerpt.kt`,
+one of everything under `sync/`, compiled once for Android and once for the JVM, so there is nothing
+to compare and nothing to remember to compare. The number both ports must agree on,
+`ANALYSIS_VERSION`, is in `ai/AnalysisTerms.kt` and declared once; it was the last pair of values
+kept equal by attention. The golden mp3 test and the history fixture are in the shared module's own
+`commonTest`, which is what the old wording wished for: *if the desktop port folds this file in and
+gets a different answer, one of the two is wrong* — now both read the same file through the same
+code, and the question cannot arise.
+
+What is left to be careful about is of a different kind, and there is no diff for it:
+
+- **Nothing platform-bound may enter `:shared`.** No Room, no MediaStore, no Android framework, no
+  AWT. Where the common code needs the platform it asks through an interface or an `expect`, and
+  each port answers in its own source set. The compiler enforces this for the Android framework and
+  for AWT, because neither is on the module's classpath; it cannot enforce taste.
+- **The platform implementations must stay faithful to what the interfaces promise**, and those
+  promises are prose, in the interfaces' own documentation. `HistoryStore`, `VectorStore`,
+  `SyncFolder`, `PeerRecords`: each says what it must return and when, and a port that answers
+  differently produces a difference in behaviour that no diff would have caught even when the files
+  were copies.
+- **`:shared` must not gain a target that is not the JVM** without revisiting two decisions taken
+  because both of its targets are: the JDK is used directly in `commonMain` — sockets, AES-GCM,
+  SHA-256, `RandomAccessFile` — and `commonTest` runs on JUnit 4. Either would fail to compile
+  rather than fail quietly, which is the right way round.
+
+The paragraphs below describe the arrangement as it is, with the parts that were about keeping two
+copies in step removed.
 
 
 
-- `ai/Excerpt.kt` and `ai/Mp3Excerpt.kt` exist in both modules and must be identical apart from
-  the line naming which side it is on. Diff them. So do the other decoders beside them —
-  `FlacExcerpt`, `WavExcerpt`, `M4aExcerpt`, `SharedDecoder` — and `ai/AnalysisBacklog.kt`, which
-  decides what a scan looks at and when a refusal expires. Forty-one files in all claim a copy, and
-  every one of them says so in its own first lines, so the rule a diff checks is "same name, must
-  be identical".
+- `ai/Excerpt.kt`, `ai/Mp3Excerpt.kt` and the decoders beside them — `FlacExcerpt`, `WavExcerpt`,
+  `M4aExcerpt`, `SharedDecoder` — are one file each, in `:shared`, along with
+  `ai/AnalysisBacklog.kt`, which decides what a scan looks at and when a refusal expires. They used
+  to be forty-one files that each claimed a copy in their own first lines.
 - The mp3 decoder has a golden test, `Mp3ExcerptTest`, which decodes a committed 25-second fixture
-  and checks the sha256 of the result. It runs on the Android side, where the tests run, and it
-  pins the behaviour of the canonical copy: if it fails after a change, every embedding made from
-  an mp3 has stopped being comparable and the analysis version has to be raised.
-- `ANALYSIS_VERSION` must be the same number on both sides. A vector carries it and is refused if it
-  differs, so a mistake here costs a re-analysis rather than a wrong answer.
+  and checks the sha256 of the result. It is in the shared module's `commonTest`: if it fails after
+  a change, every embedding made from an mp3 has stopped being comparable and the analysis version
+  has to be raised. The Android copy of this test had three cases the desktop's did not — a missing
+  file naming no window, not throwing, and refusing a format that is not mp3 — which is what a
+  second suite costs and does not buy.
+- `ANALYSIS_VERSION` is declared once, in `ai/AnalysisTerms.kt`, with `EMBEDDING_DIMENSIONS`
+  beside it. A vector carries the version and is refused if it differs, so disagreement never gave
+  a wrong answer — it gave no answer, quietly, while both libraries went on looking analysed. These
+  two numbers were the last values in the project kept equal by somebody remembering.
 - The merge itself gets **one fixture, two implementations**:
-  `app/src/test/resources/sync/history-fixture.jsonl` is a day's file with every case a reader has
+  `shared/src/commonTest/resources/sync/history-fixture.jsonl` is a day's file with every case a reader has
   to survive put in on purpose — a listen told of twice, a device whose clock is two days fast, a
   listen older than the local store keeps, a record naming no track, a missing batch, a batch sealed
   in a way this version cannot read, a line left half-written, and the reader's own batch. The
-  expected answer is asserted in `HistoryMergeTest`. If the desktop port folds the same file in and
-  gets a different answer, one of the two is wrong, and the history is the one thing in either app
-  that cannot be recomputed.
-- Everything under `sync/` exists in both modules and must be identical apart from the line
-  naming which side the copy is on, exactly like the two excerpt files. Diff them. Forty-two
-  files, the socket transport among them: the records and the track key, the batch envelope, the merge, the device id, the writers
+  expected answer is asserted in `HistoryMergeTest`, which lives beside it in the shared module and
+  is read off the test classpath rather than by a path into the source tree. One fixture and one
+  implementation now: the sentence that stood here asked what would happen if the desktop port got
+  a different answer, and the answer is that there is no second port to get one.
+- Everything under `sync/` is one file each, in `:shared` — forty-two of them, the socket transport
+  among them: the records and the track key, the batch envelope, the merge, the device id, the writers
   and the readers for history, vectors, playlists and the mix, the playlist log and its replay, the
   matcher, the terms a vector is believed on, the sealing and the base64 it rides in, the state kept between
   runs, the coordinator, and the interfaces that keep the folder and the stores out of all of it.
