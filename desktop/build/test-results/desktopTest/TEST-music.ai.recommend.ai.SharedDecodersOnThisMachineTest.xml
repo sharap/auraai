@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="SharedDecodersOnThisMachineTest[desktop]" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:27:58.099Z" hostname="fedora" time="5.973">
+<testsuite name="SharedDecodersOnThisMachineTest[desktop]" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:48.012Z" hostname="fedora" time="5.992">
   <properties/>
-  <testcase name="everyFormatWithASharedDecoderDecodesToSomethingWorthComparing[desktop]" classname="music.ai.recommend.ai.SharedDecodersOnThisMachineTest" time="5.973"/>
+  <testcase name="everyFormatWithASharedDecoderDecodesToSomethingWorthComparing[desktop]" classname="music.ai.recommend.ai.SharedDecodersOnThisMachineTest" time="5.992"/>
   <system-out><![CDATA[DECODERSUM flac-aura-1|2002 - The End Of The Beginning/01 - The End Of the Beginning.flac|122000|480000|61ee0eb3ab355a7b43c10b8bb4ec8f6899087104eab3117d6c0f6ca8aefe9aed
 DECODERSUM flac-aura-1|2002 - The End Of The Beginning/02 - Remembrance.flac|136000|480000|f67a76d7a799bf01952c9663e2ae9ab728d5c330d19df602951eddd7243900bd
 DECODERSUM flac-aura-1|2002 - The End Of The Beginning/03 - From Dust To The Beyond.flac|165000|480000|5cf6432c7b6823bdcb4445bf237806746b6ed1854e430ea66adc5f10106adda7

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="RefusalStoreTest[desktop]" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:04.316Z" hostname="fedora" time="0.004">
+<testsuite name="RefusalStoreTest[desktop]" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:54.261Z" hostname="fedora" time="0.005">
   <properties/>
   <testcase name="a table written before refusals existed gives up its zero vectors[desktop]" classname="music.ai.recommend.db.RefusalStoreTest" time="0.002"/>
   <testcase name="storing a vector clears the refusal[desktop]" classname="music.ai.recommend.db.RefusalStoreTest" time="0.001"/>
-  <testcase name="vectors with no track go only when told to[desktop]" classname="music.ai.recommend.db.RefusalStoreTest" time="0.0"/>
+  <testcase name="vectors with no track go only when told to[desktop]" classname="music.ai.recommend.db.RefusalStoreTest" time="0.001"/>
   <testcase name="a refusal is kept apart from the vectors and survives a reload[desktop]" classname="music.ai.recommend.db.RefusalStoreTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

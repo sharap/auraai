@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="SoundPrintTest[desktop]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:04.074Z" hostname="fedora" time="0.042">
+<testsuite name="SoundPrintTest[desktop]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:54.006Z" hostname="fedora" time="0.044">
   <properties/>
-  <testcase name="another recording is another print, and so is a copy cut short[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.009"/>
+  <testcase name="another recording is another print, and so is a copy cut short[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.01"/>
   <testcase name="nothing to read is nothing to say[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.008"/>
   <testcase name="wav is the data chunk and not the chunks around it[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.003"/>
   <testcase name="a print is taken once and taken again when the file changes[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.002"/>
-  <testcase name="flac is found past its metadata, however much of it there is[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.005"/>
-  <testcase name="a second copy of a sound takes the vector the first one already has[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.001"/>
+  <testcase name="flac is found past its metadata, however much of it there is[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.004"/>
+  <testcase name="a second copy of a sound takes the vector the first one already has[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.002"/>
   <testcase name="a container this does not know is still the same on both devices[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.003"/>
   <testcase name="the same sound under different tags is the same recording[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.006"/>
   <testcase name="m4a is the mdat box, before or after everything else[desktop]" classname="music.ai.recommend.ai.SoundPrintTest" time="0.005"/>

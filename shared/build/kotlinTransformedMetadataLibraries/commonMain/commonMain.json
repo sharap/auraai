@@ -28,5 +28,65 @@
     },
     "file": "/home/user/.gradle/caches/modules-2/files-2.1/com.google.code.gson/gson/2.10.1/b3add478d4382b78ea20b1671390a858002feb6c/gson-2.10.1.jar",
     "sourceSetName": null
+  },
+  {
+    "moduleId": {
+      "groupAndName": {
+        "group": "org.jetbrains.kotlinx",
+        "name": "kotlinx-coroutines-core"
+      },
+      "componentId": {
+        "type": "module",
+        "group": "org.jetbrains.kotlinx",
+        "name": "kotlinx-coroutines-core"
+      }
+    },
+    "file": "/home/user/and/AuraAI/shared/build/kotlinTransformedMetadataLibraries/commonMain/org.jetbrains.kotlinx-kotlinx-coroutines-core-1.10.1-concurrentMain-KUhp4Q.klib",
+    "sourceSetName": "concurrentMain"
+  },
+  {
+    "moduleId": {
+      "groupAndName": {
+        "group": "org.jetbrains.kotlinx",
+        "name": "kotlinx-coroutines-core"
+      },
+      "componentId": {
+        "type": "module",
+        "group": "org.jetbrains.kotlinx",
+        "name": "kotlinx-coroutines-core"
+      }
+    },
+    "file": "/home/user/and/AuraAI/shared/build/kotlinTransformedMetadataLibraries/commonMain/org.jetbrains.kotlinx-kotlinx-coroutines-core-1.10.1-commonMain-KUhp4Q.klib",
+    "sourceSetName": "commonMain"
+  },
+  {
+    "moduleId": {
+      "groupAndName": {
+        "group": "javazoom",
+        "name": "jlayer"
+      },
+      "componentId": {
+        "type": "module",
+        "group": "javazoom",
+        "name": "jlayer"
+      }
+    },
+    "file": "/home/user/.gradle/caches/modules-2/files-2.1/javazoom/jlayer/1.0.1/2bfef7a5a4c9af2184ff74b460b6d7d24349b98a/jlayer-1.0.1.jar",
+    "sourceSetName": null
+  },
+  {
+    "moduleId": {
+      "groupAndName": {
+        "group": "org.jcodec",
+        "name": "jcodec"
+      },
+      "componentId": {
+        "type": "module",
+        "group": "org.jcodec",
+        "name": "jcodec"
+      }
+    },
+    "file": "/home/user/.gradle/caches/modules-2/files-2.1/org.jcodec/jcodec/0.2.5/b1968a3dbf46aa5ac9630ce9e3cbf67c4940d08/jcodec-0.2.5.jar",
+    "sourceSetName": null
   }
 ]

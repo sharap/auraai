@@ -34,7 +34,10 @@
         "dependsOn": [],
         "moduleDependency": [
           "org.jetbrains.kotlin:kotlin-stdlib",
-          "com.google.code.gson:gson"
+          "com.google.code.gson:gson",
+          "org.jetbrains.kotlinx:kotlinx-coroutines-core",
+          "javazoom:jlayer",
+          "org.jcodec:jcodec"
         ],
         "binaryLayout": "klib"
       }

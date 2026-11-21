@@ -39,6 +39,12 @@ kotlin {
             // Gson rather than kotlinx.serialization: the record format is already written against
             // it on both sides, and changing how records are parsed is not part of moving them.
             implementation(libs.google.code.gson)
+            // VectorCourier bridges a blocking socket conversation to the suspending coordinator.
+            implementation(libs.kotlinx.coroutines.core)
+            // The shared decoders: mp3 through JLayer, m4a through the AAC decoder jcodec carries.
+            // Both ports already depended on these, because both ports carried the decoders.
+            implementation(libs.jlayer)
+            implementation(libs.jcodec)
         }
         commonTest.dependencies {
             implementation(libs.junit)

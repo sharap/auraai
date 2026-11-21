@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="WavExcerptTest[desktop]" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:04.117Z" hostname="fedora" time="0.151">
+<testsuite name="WavExcerptTest[desktop]" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:54.052Z" hostname="fedora" time="0.16">
   <properties/>
-  <testcase name="theReaderReturnsExactlyOneExcerptAndItIsWhatItWas[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.039"/>
+  <testcase name="theReaderReturnsExactlyOneExcerptAndItIsWhatItWas[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.036"/>
   <testcase name="theWindowIsNamedByTheSizeOfTheAudioItself[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.016"/>
-  <testcase name="theSameAudioInThreeWidthsDecodesToTheSameExcerpt[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.095"/>
+  <testcase name="theSameAudioInThreeWidthsDecodesToTheSameExcerpt[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.107"/>
   <testcase name="aFileThatIsNotThereOrIsNotAWavIsRefusedRatherThanGuessedAt[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.001"/>
   <testcase name="onlyWavGoesThroughThisReader[desktop]" classname="music.ai.recommend.ai.WavExcerptTest" time="0.0"/>
   <system-out><![CDATA[wav 16-bit digest: c117eeac24dc8c608584f4b81ae3dd5c27a9fcd4e0d6a2e84533d49d5caeab94 peak: 0.36871186

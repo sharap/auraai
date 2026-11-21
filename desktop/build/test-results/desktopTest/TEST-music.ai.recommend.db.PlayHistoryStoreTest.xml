@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="PlayHistoryStoreTest[desktop]" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:28:04.272Z" hostname="fedora" time="0.043">
+<testsuite name="PlayHistoryStoreTest[desktop]" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:54.216Z" hostname="fedora" time="0.044">
   <properties/>
-  <testcase name="aLogFromANewerVersionIsNotWrittenOver[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.033"/>
-  <testcase name="aLogWrittenBeforeSyncIsConvertedOnce[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.002"/>
+  <testcase name="aLogFromANewerVersionIsNotWrittenOver[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.034"/>
+  <testcase name="aLogWrittenBeforeSyncIsConvertedOnce[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.003"/>
   <testcase name="anInterruptedAppendCostsOnlyItsOwnRecord[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
   <testcase name="aListenIsNumberedAndCreditedToThisMachine[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
-  <testcase name="whatCameFromAnotherDeviceIsNeverOfferedForExport[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.002"/>
-  <testcase name="numbersCarryOnAfterARestart[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.0"/>
+  <testcase name="whatCameFromAnotherDeviceIsNeverOfferedForExport[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
+  <testcase name="numbersCarryOnAfterARestart[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
   <testcase name="theOutboxCarriesOnFromItsWatermarkAndTakesNoMoreThanAsked[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
-  <testcase name="onlyWhatArrivedSinceIsCountedAsAlreadyHeld[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
+  <testcase name="onlyWhatArrivedSinceIsCountedAsAlreadyHeld[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.0"/>
   <testcase name="pruningKeepsTheNumbersAndTheDevices[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
   <testcase name="aLogThatCouldNotBeConvertedIsNotAppendedTo[desktop]" classname="music.ai.recommend.db.PlayHistoryStoreTest" time="0.001"/>
   <system-out><![CDATA[DesktopMusicDao: play_history.bin is in a newer format, leaving it untouched
@@ -16,7 +16,7 @@ DesktopMusicDao: play_history.bin is in a newer format, leaving it untouched
 DesktopMusicDao: converting 3 listens to the numbered log
 DesktopMusicDao: history ends in a partial record, keeping 1 listens
 DesktopMusicDao: converting 2 listens to the numbered log
-DesktopMusicDao: could not rewrite the history: /tmp/aimusic-history-test-10365819381228/play_history.bin.tmp (Отказано в доступе)
+DesktopMusicDao: could not rewrite the history: /tmp/aimusic-history-test-11435764242865/play_history.bin.tmp (Отказано в доступе)
 DesktopMusicDao: converting 2 listens to the numbered log
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>

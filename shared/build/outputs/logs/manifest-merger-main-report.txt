@@ -1,13 +1,13 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml:2:13-83
-INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml:2:13-83
+ADDED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml:2:13-83
+INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml:2:13-83
 	package
-		INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml
+		INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml
 	xmlns:android
-		ADDED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml:2:23-81
+		ADDED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml:2:23-81
 uses-sdk
-INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml reason: use-sdk injection requested
-INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml
+INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml reason: use-sdk injection requested
+INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml
 	android:minSdkVersion
-		INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest17425342261703030031.xml
+		INJECTED from /home/user/and/AuraAI/shared/build/intermediates/tmp/ProcessLibraryManifest/tempAndroidManifest3293511627975271527.xml
