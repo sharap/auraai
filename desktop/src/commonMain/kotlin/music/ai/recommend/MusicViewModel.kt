@@ -1,5 +1,6 @@
 package music.ai.recommend
 
+import music.ai.recommend.ai.RussianText
 import music.ai.recommend.ai.DailyMix
 import music.ai.recommend.ai.MixListen
 import music.ai.recommend.ai.MixTrack
@@ -174,6 +175,18 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
 
     private val _modelsPendingBytes = MutableStateFlow(0L)
     val modelsPendingBytes: StateFlow<Long> = _modelsPendingBytes.asStateFlow()
+
+    // The Russian encoder is watched separately from the CLAP pair, because it is fetched
+    // separately: 32 MB that only someone who types Russian has any use for.
+    private val _russianModelReady = MutableStateFlow(false)
+    val russianModelReady: StateFlow<Boolean> = _russianModelReady.asStateFlow()
+
+    private val _russianModelPendingBytes = MutableStateFlow(0L)
+    val russianModelPendingBytes: StateFlow<Long> = _russianModelPendingBytes.asStateFlow()
+
+    /** Why a search by description came back with nothing, when the reason is a missing model. */
+    private val _aiSearchMessage = MutableStateFlow<String?>(null)
+    val aiSearchMessage: StateFlow<String?> = _aiSearchMessage.asStateFlow()
 
     private val _dailyMix = MutableStateFlow<List<Song>>(emptyList())
     val dailyMix: StateFlow<List<Song>> = _dailyMix.asStateFlow()
@@ -1361,6 +1374,22 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
             try {
                 delay(SEARCH_DEBOUNCE_MS)
 
+                // Said out loud rather than answered with an empty list: this is the one failure a
+                // button fixes, and until the Russian encoder is here a Russian query can do
+                // nothing at all.
+                if (textEncoder.needsDownload(query)) {
+                    val russian = RussianText.handles(query)
+                    val megabytes =
+                        (if (russian) models.russianPendingBytes() else models.pendingBytes()) / (1024 * 1024)
+                    val which = if (russian) "the Russian query encoder" else "the text model"
+                    withContext(Dispatchers.Main) {
+                        _aiSearchMessage.value = "Search by description needs $which — $megabytes MB, from Settings."
+                        _aiSearchResults.value = emptyList()
+                    }
+                    return@launch
+                }
+                withContext(Dispatchers.Main) { _aiSearchMessage.value = null }
+
                 // Without a usable query vector every score would be identical noise.
                 val queryVector = textEncoder.encode(query) ?: return@launch
                 val embeddings = db.musicDao().getAllEmbeddings()
@@ -1509,6 +1538,22 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
         }
     }
 
+    /**
+     * Fetches the Russian query encoder, which is not part of [downloadModels].
+     *
+     * Its own call because it is its own 32 MB: the app analyses and searches without it, just not
+     * in Russian, and nobody who types only English should be made to wait for it.
+     */
+    fun downloadRussianModel() {
+        viewModelScope.launch {
+            models.ensureRussian()
+            refreshModelState()
+            // A query typed before the download finished would have been answered with nothing.
+            _aiSearchMessage.value = null
+            if (_isAiSearchEnabled.value && _searchQuery.value.length > 2) performAiSearch(_searchQuery.value)
+        }
+    }
+
     fun deleteModels() {
         viewModelScope.launch {
             val freed = models.deleteDownloaded()
@@ -1520,6 +1565,8 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
     private fun refreshModelState() {
         _modelsReady.value = models.audioModelReady() && models.textModelReady()
         _modelsPendingBytes.value = models.pendingBytes()
+        _russianModelReady.value = models.russianModelReady()
+        _russianModelPendingBytes.value = models.russianPendingBytes()
     }
 
     fun playDailyMix() {
@@ -1660,13 +1707,17 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
 
         WaveMode.DESCRIPTION -> {
             if (query.isNullOrBlank()) null
-            else if (textEncoder.needsDownload()) {
-                _waveMessage.value = "The text model is not downloaded yet."
+            else if (textEncoder.needsDownload(query)) {
+                // Which of the two doors is missing, because they are fetched separately: naming
+                // "the text model" for a Russian description would send someone to look at a file
+                // they already have.
+                _waveMessage.value =
+                    if (RussianText.handles(query)) "The Russian query encoder is not downloaded yet."
+                    else "The text model is not downloaded yet."
                 null
             } else {
-                // No Russian text tower on this port, unlike the phone: the moods send English
-                // prompts of their own, and a description typed in Russian would be encoded as if
-                // it were English, which is nothing like what it says.
+                // A description in Russian goes through the student encoder, the same way it does
+                // on the phone; the eight moods send English prompts of their own.
                 textEncoder.encode(query)
             }
         }

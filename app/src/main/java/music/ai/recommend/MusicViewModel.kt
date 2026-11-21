@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import music.ai.recommend.ai.RussianText
 import music.ai.recommend.ai.AiScanState
 import music.ai.recommend.ai.AudioModelVariant
 import music.ai.recommend.ai.ClapTextEncoder
@@ -1832,7 +1833,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (query.isNullOrBlank()) null
                 else if (textEncoder.needsDownload(query)) {
                     _waveMessage.value = getApplication<Application>().getString(
-                        if (RuTextEncoder.handles(query)) R.string.ai_search_needs_russian_model
+                        if (RussianText.handles(query)) R.string.ai_search_needs_russian_model
                         else R.string.ai_search_needs_model
                     )
                     null
@@ -2189,7 +2190,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return AiSearchResult(
                 emptyList(),
                 needsModel = true,
-                needsRussianModel = RuTextEncoder.handles(query)
+                needsRussianModel = RussianText.handles(query)
             )
         }
         return try {

@@ -34,6 +34,8 @@ fun SettingsScreen(viewModel: MusicViewModel) {
     val modelProgress by viewModel.modelProgress.collectAsState()
     val modelsReady by viewModel.modelsReady.collectAsState()
     val modelsPendingBytes by viewModel.modelsPendingBytes.collectAsState()
+    val russianModelReady by viewModel.russianModelReady.collectAsState()
+    val russianModelPendingBytes by viewModel.russianModelPendingBytes.collectAsState()
     val smartAlbumsEpsScale by viewModel.smartAlbumsEpsScale.collectAsState()
     val backgroundAlpha by viewModel.backgroundAlpha.collectAsState()
     val backgroundImageUri by viewModel.backgroundImageUri.collectAsState()
@@ -228,6 +230,30 @@ fun SettingsScreen(viewModel: MusicViewModel) {
                                     Text("Remove weights", color = MaterialTheme.colorScheme.error)
                                 }
                             }
+                        }
+                    }
+
+                    // Its own line and its own button, because it is its own download. Someone who
+                    // never types Russian has no use for it, and someone who does gets nothing at
+                    // all from a search until it is here.
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        if (russianModelReady) "Russian queries: ready" else "Russian queries: not downloaded",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "A query with any Cyrillic in it goes through a separate 32 MB encoder, " +
+                            "trained to answer the way CLAP's English tower does. CLAP itself never " +
+                            "saw Russian: without this, a Russian search returns plausible nonsense.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (!russianModelReady && !modelProgress.running) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { viewModel.downloadRussianModel() }) {
+                            Text("Download (${russianModelPendingBytes / (1024 * 1024)} MB)")
                         }
                     }
                 }

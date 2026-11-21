@@ -455,6 +455,7 @@ fun MainContentArea(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isAiSearchEnabled by viewModel.isAiSearchEnabled.collectAsState()
     val aiSearchResults by viewModel.aiSearchResults.collectAsState()
+    val aiSearchMessage by viewModel.aiSearchMessage.collectAsState()
     val selectedPlaylist by viewModel.selectedPlaylist.collectAsState()
 
     Scaffold(
@@ -639,6 +640,17 @@ fun MainContentArea(
                                         // re-sorting here by the displayed percentage would undo
                                         // the ordering, since strong matches all saturate at 99%.
                                         val rankedSongs = aiSearchResults
+
+                                        aiSearchMessage?.let { message ->
+                                            item {
+                                                Text(
+                                                    message,
+                                                    modifier = Modifier.padding(16.dp),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
 
                                         items(rankedSongs) { (song, rank) ->
                                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {

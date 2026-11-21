@@ -116,14 +116,5 @@ class RuTextEncoder(private val models: ModelRepository) {
 
     companion object {
         private const val TAG = "RuTextEncoder"
-
-        /**
-         * Whether a query should go through this encoder rather than CLAP's own.
-         *
-         * Any Cyrillic at all is enough. A mixed query ("Мельница remix") goes here too: a fifth of
-         * the student's training fed it the English side precisely so that it stays usable for
-         * English, while CLAP would make nothing of the Cyrillic half.
-         */
-        fun handles(text: String): Boolean = text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
     }
 }

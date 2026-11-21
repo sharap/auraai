@@ -40,11 +40,11 @@ class ClapTextEncoder(private val models: ModelRepository) {
      * that someone who never searches in Russian should not be made to download.
      */
     fun needsDownload(text: String = ""): Boolean =
-        if (RuTextEncoder.handles(text)) russian.needsDownload()
+        if (RussianText.handles(text)) russian.needsDownload()
         else !models.isAvailable(ModelAsset.forText)
 
     fun pendingDownloadBytes(text: String = ""): Long =
-        if (RuTextEncoder.handles(text)) russian.pendingDownloadBytes()
+        if (RussianText.handles(text)) russian.pendingDownloadBytes()
         else models.pendingDownloadBytes(ModelAsset.forText)
 
     /**
@@ -55,7 +55,7 @@ class ClapTextEncoder(private val models: ModelRepository) {
      *   produced a meaningless similarity for every track.
      */
     suspend fun encode(text: String): FloatArray? = withContext(Dispatchers.Default) {
-        if (RuTextEncoder.handles(text)) return@withContext russian.encode(text)
+        if (RussianText.handles(text)) return@withContext russian.encode(text)
         val session = session() ?: return@withContext null
         val env = ortEnv ?: return@withContext null
 

@@ -15,7 +15,7 @@ data class ModelProgress(
 }
 
 /**
- * The CLAP weights, which are fetched on first use rather than shipped.
+ * The model weights, which are fetched on first use rather than shipped.
  *
  * They are 408 MB and not this project's to redistribute, so the repository carries the code and
  * the tokenizer's vocabulary while the weights come from Hugging Face, checked against a known
@@ -36,11 +36,25 @@ expect class ModelDownloader() {
     fun audioModelSha256(): String
     fun textModelReady(): Boolean
 
-    /** Bytes still to fetch for everything the app uses. */
+    /**
+     * The Russian query encoder, which is asked about separately from the two above.
+     *
+     * It is optional in a way they are not: without it the app still analyses and still searches,
+     * just not in Russian, and it is 32 MB nobody who types only English should be made to fetch.
+     */
+    fun russianModelReady(): Boolean
+
+    /** Bytes still to fetch for the CLAP weights, which is what the app needs to work at all. */
     fun pendingBytes(): Long
 
-    /** Downloads whatever is missing. @return true once everything is present. */
+    /** Bytes still to fetch for the Russian encoder. */
+    fun russianPendingBytes(): Long
+
+    /** Downloads whatever CLAP is missing. @return true once both towers are present. */
     suspend fun ensureAll(): Boolean
+
+    /** Downloads the Russian encoder. @return true once it is present. */
+    suspend fun ensureRussian(): Boolean
 
     /** Removes the downloaded weights. @return bytes freed. */
     suspend fun deleteDownloaded(): Long

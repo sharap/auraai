@@ -12,6 +12,13 @@ Nothing leaves the machine. The library, the embeddings and the listening histor
 - **Search by description.** "calm piano", "epic cinematic orchestral" — the query is embedded with
   CLAP and compared against every analysed track. Results are cut where they stop standing out from
   the rest of the library for that particular query, rather than at a fixed score.
+- **…in Russian too.** CLAP only ever saw English, so a query with any Cyrillic in it goes through a
+  separate encoder trained to answer the way CLAP's text tower answers for the English translation
+  of the same phrase — the same 32 MB file the phone uses, and its own download, offered in
+  settings. Measured on this library: a Russian query used to reproduce 12% of what its English
+  twin returned, and 45% now; the query vectors themselves went from a cosine of 0.18 to 0.71.
+  Russian still finds less than English does, and "мужчина поёт по-русски" remains out of reach —
+  what language the singing is in is not something CLAP's space holds.
 - **Smart albums.** The library is grouped by sound with DBSCAN over PCA-reduced embeddings, and
   each group is named zero-shot against a vocabulary of genre descriptions.
 - **Playlist of the day.** A fixed playlist each morning, built from the listening history: tracks
@@ -126,9 +133,11 @@ does not match is deleted rather than kept.
 | --- | --- | --- |
 | `audio_model.onnx` | 269 MB | `Xenova/larger_clap_music_and_speech`, `onnx/audio_model.onnx` |
 | `text_model.onnx` | 121 MB | the same repository, `onnx/text_model_quantized.onnx` |
+| `ru_text_encoder_quantized.onnx` | 32 MB | `sharapsoftware/auraai-ru-encoder` — this project's own, because the encoder was distilled against this app's CLAP export and exists nowhere else. Optional, and fetched on its own: without it everything works except Russian queries. |
 
 To use a mirror instead, pass `-Daimusic.hf.endpoint`, `-Daimusic.hf.repo` or
-`-Daimusic.hf.revision`. Behind a proxy the app follows `HTTPS_PROXY`/`HTTP_PROXY`, and an explicit
+`-Daimusic.hf.revision`; the Russian encoder comes from its own pair, `-Daimusic.ru.repo` and
+`-Daimusic.ru.revision`. Behind a proxy the app follows `HTTPS_PROXY`/`HTTP_PROXY`, and an explicit
 `-Dhttps.proxyHost` overrides that.
 
 If you already have the files, putting them in `~/.aimusic/models/` under those names skips the

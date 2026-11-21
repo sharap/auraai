@@ -8,12 +8,18 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import music.ai.recommend.ai.BpeTokenizer
-import java.io.File
+import music.ai.recommend.ai.RussianText
 import java.nio.LongBuffer
 
 actual class ClapTextEncoder actual constructor() {
     private val vocabFileName = "vocab.json"
     private val mergesFileName = "merges.txt"
+
+    /**
+     * The other door, for queries written in Russian. See [RuTextEncoder]: CLAP's own tower only
+     * ever saw English, and fed Russian it answers with something plausible and meaningless.
+     */
+    private val russian = RuTextEncoder()
 
     /** Guards session construction, so several in-flight searches cannot each build a ~126 MB one. */
     private val mutex = Mutex()
@@ -40,12 +46,12 @@ actual class ClapTextEncoder actual constructor() {
             // method no longer does before returning. The check stays because of what it buys: a
             // caller that has not made sure of the resources gets no encoder rather than one that
             // throws on first use.
-            if (openResource(vocabFileName)?.use { } == null) return
-            if (openResource(mergesFileName)?.use { } == null) return
+            if (BundledResource.open(vocabFileName)?.use { } == null) return
+            if (BundledResource.open(mergesFileName)?.use { } == null) return
 
             tokenizer = BpeTokenizer(
-                { checkNotNull(openResource(vocabFileName)) { "$vocabFileName is missing" } },
-                { checkNotNull(openResource(mergesFileName)) { "$mergesFileName is missing" } }
+                { checkNotNull(BundledResource.open(vocabFileName)) { "$vocabFileName is missing" } },
+                { checkNotNull(BundledResource.open(mergesFileName)) { "$mergesFileName is missing" } }
             )
 
             val env = OrtEnvironment.getEnvironment()
@@ -58,25 +64,6 @@ actual class ClapTextEncoder actual constructor() {
         }
     }
 
-    private fun openResource(name: String): java.io.InputStream? {
-        val paths = listOf(
-            // Compose Resources lays files out under this package, which the build pins in
-            // `compose.resources.packageOfResClass` precisely so that this string does not depend
-            // on the module's name. Nothing checks it: if the two ever disagree, the tokenizer is
-            // simply not found, and only a text search would notice.
-            "composeResources/music.ai.recommend.resources/files/$name",
-            "composeResources/files/$name",
-            "files/$name",
-            name
-        )
-        for (path in paths) {
-            val stream = javaClass.classLoader.getResourceAsStream(path)
-                ?: javaClass.getResourceAsStream("/$path")
-            if (stream != null) return stream
-        }
-        return null
-    }
-
     /**
      * Encodes [text] into a unit-length CLAP embedding.
      *
@@ -84,10 +71,13 @@ actual class ClapTextEncoder actual constructor() {
      *   should fall back to plain text search rather than scoring against a zero vector, which
      *   gives a meaningless similarity for every track.
      */
-    /** True when encoding would need a download first. */
-    actual fun needsDownload(): Boolean = !ModelRepository.instance.isAvailable(ModelAsset.TEXT_MODEL)
+    /** True when encoding would need a download first — of whichever model this text goes to. */
+    actual fun needsDownload(text: String): Boolean =
+        if (RussianText.handles(text)) russian.needsDownload()
+        else !ModelRepository.instance.isAvailable(ModelAsset.TEXT_MODEL)
 
     actual suspend fun encode(text: String): FloatArray? = withContext(Dispatchers.IO) {
+        if (RussianText.handles(text)) return@withContext russian.encode(text)
         if (needsDownload()) return@withContext null
         if (ortSession == null) mutex.withLock { loadModel() }
         val session = ortSession ?: return@withContext null
@@ -104,7 +94,7 @@ actual class ClapTextEncoder actual constructor() {
                 session.run(mapOf("input_ids" to tensor)).use { output ->
                     @Suppress("UNCHECKED_CAST")
                     val result = output.get(0).value as Array<FloatArray>
-                    normalize(result[0])
+                    normalizeUnit(result[0])
                 }
             }
         } catch (e: Exception) {
@@ -118,16 +108,7 @@ actual class ClapTextEncoder actual constructor() {
         ortSession = null
         ortEnv = null
         tokenizer = null
-    }
-
-    private fun normalize(v: FloatArray): FloatArray {
-        var norm = 0f
-        for (x in v) norm += x * x
-        norm = kotlin.math.sqrt(norm)
-        if (norm > 0f) {
-            for (i in v.indices) v[i] /= norm
-        }
-        return v
+        russian.release()
     }
 
     private companion object {

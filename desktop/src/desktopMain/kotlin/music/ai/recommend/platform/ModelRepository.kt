@@ -17,12 +17,26 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
+/** Whose Hugging Face repository a weight file comes from. */
+enum class ModelSource {
+    /** The CLAP exports, from the upstream repository. */
+    UPSTREAM,
+
+    /**
+     * Weights trained for this project, from its own repository.
+     *
+     * The Russian encoder exists nowhere else: it was distilled against this project's own CLAP
+     * export, so there is no upstream to point at.
+     */
+    PROJECT
+}
+
 /**
  * A weight file the AI engine needs.
  *
- * Only the two ONNX exports are listed: they are hundreds of megabytes and cannot live in a git
- * repository, while the tokenizer's vocab.json and merges.txt are about a megabyte together and
- * ship with the source.
+ * Only the ONNX exports are listed: they are tens to hundreds of megabytes and cannot live in a git
+ * repository, while the vocabularies the tokenizers read — vocab.json, merges.txt, ru_vocab.txt —
+ * are about two megabytes together and ship with the source.
  *
  * The sizes and checksums are those of the files this app was developed against, verified byte for
  * byte, so a download that differs from them is a download that would produce different embeddings.
@@ -31,7 +45,8 @@ enum class ModelAsset(
     val fileName: String,
     val remotePath: String,
     val sizeBytes: Long,
-    val sha256: String
+    val sha256: String,
+    val source: ModelSource = ModelSource.UPSTREAM
 ) {
     /** fp32 audio tower. The embeddings in the library were produced by exactly this file. */
     AUDIO_MODEL(
@@ -47,7 +62,34 @@ enum class ModelAsset(
         remotePath = "onnx/text_model_quantized.onnx",
         sizeBytes = 126_603_262L,
         sha256 = "8f9f29c5f6adee917553d4b3a70729c731c0d18b88efca0ae67c1a1fc278f3b6"
-    )
+    ),
+
+    /**
+     * The Russian query encoder: a small multilingual student taught to reproduce CLAP's text
+     * embeddings, so a Russian query can be compared against the same track vectors. int8.
+     *
+     * Optional, and not part of [forClap]: 32 MB that someone who never types Russian should not be
+     * made to download. The same file and the same checksum as the phone's.
+     */
+    RU_TEXT_MODEL(
+        fileName = "ru_text_encoder_quantized.onnx",
+        remotePath = "ru_text_encoder_quantized.onnx",
+        sizeBytes = 32_784_917L,
+        sha256 = "854dfc4b60cd6e1e44b04b02da662d893af4ac0bc025f205014a2ccd9f9f8d2f",
+        source = ModelSource.PROJECT
+    );
+
+    companion object {
+        /** What the analysis and the search need, Russian or no Russian. */
+        val forClap = listOf(AUDIO_MODEL, TEXT_MODEL)
+
+        /**
+         * What a Russian query needs, which is the one file: the WordPiece vocabulary ships with
+         * the source, the way vocab.json and merges.txt do. The phone has to list its vocabulary as
+         * an asset of its own because an APK can be built without the bundled models.
+         */
+        val forRussianText = listOf(RU_TEXT_MODEL)
+    }
 }
 
 /**
@@ -157,7 +199,9 @@ class ModelRepository private constructor() {
             return
         }
 
-        val url = URL("$HF_ENDPOINT/$HF_REPO/resolve/$HF_REVISION/${asset.remotePath}")
+        val repo = if (asset.source == ModelSource.PROJECT) RU_REPO else HF_REPO
+        val revision = if (asset.source == ModelSource.PROJECT) RU_REVISION else HF_REVISION
+        val url = URL("$HF_ENDPOINT/$repo/resolve/$revision/${asset.remotePath}")
         val connection = openConnection(url, existing)
         try {
             val code = connection.responseCode
@@ -295,6 +339,15 @@ class ModelRepository private constructor() {
         private val HF_ENDPOINT: String = System.getProperty("aimusic.hf.endpoint") ?: "https://huggingface.co"
         private val HF_REPO: String = System.getProperty("aimusic.hf.repo") ?: "Xenova/larger_clap_music_and_speech"
         private val HF_REVISION: String = System.getProperty("aimusic.hf.revision") ?: "main"
+
+        /**
+         * Where the Russian encoder comes from, which is not where CLAP comes from: it was trained
+         * for this project against its own CLAP export and is published in this project's own
+         * repository. Same defaults as the phone's build.
+         */
+        private val RU_REPO: String =
+            System.getProperty("aimusic.ru.repo") ?: "sharapsoftware/auraai-ru-encoder"
+        private val RU_REVISION: String = System.getProperty("aimusic.ru.revision") ?: "main"
 
         private const val DEFAULT_BUFFER = 1 shl 16
         private const val PROGRESS_INTERVAL_MS = 250L

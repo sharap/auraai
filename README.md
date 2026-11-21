@@ -16,7 +16,9 @@ playlist built from them stay in the app's own storage.
   album or across the whole library.
 - **…in Russian too.** CLAP only ever saw English, so a Russian query goes through a small encoder
   trained here to answer the way CLAP's text tower answers for the English translation of the same
-  phrase. It is a separate 33 MB download, fetched only once something is typed in Russian.
+  phrase. It is a separate 33 MB download, fetched only once something is typed in Russian. Both
+  ports use the same file and decide the same way which door a query goes through — see
+  `shared/.../ai/RussianText.kt`, which is that decision and nothing else.
 - **Smart albums.** The library is grouped by sound with DBSCAN over the track embeddings, and each
   group is named zero-shot ("Транс", "Классика · Secret Garden") by comparing its centre with a
   vocabulary of genre and mood descriptions. The grouping radius is adjustable in settings.
