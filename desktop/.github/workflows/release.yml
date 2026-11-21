@@ -1,0 +1,86 @@
+name: Release
+
+# Pushing a version tag publishes a release with the Debian package attached, so a release is a
+# `git tag` rather than someone remembering to build and upload by hand.
+on:
+  push:
+    tags:
+      - 'v*'
+  # Lets a build be tried without tagging first.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    name: Debian package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # jpackage shells out to both when it builds a .deb, and the control file is rewritten
+      # under fakeroot afterwards so the ownership inside the archive survives.
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot dpkg-dev
+
+      # A tag that disagrees with the built version would publish v1.2.0 containing a file called
+      # aimusic_1.1.0_amd64.deb, which is the kind of thing nobody notices until someone reports it.
+      - name: Check the tag against the built version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          declared=$(grep -oP 'packageVersion = "\K[^"]+' composeApp/build.gradle.kts)
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$declared" != "$tagged" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match packageVersion $declared" >&2
+            exit 1
+          fi
+          echo "Releasing $declared"
+
+      - name: Run the tests
+        run: ./gradlew :composeApp:desktopTest
+
+      - name: Build the package
+        run: ./gradlew :composeApp:packageDeb
+
+      # The package is handed to people, and its dependencies are a fact that should be visible
+      # from outside rather than a guess. Doubles as a check: without the alternatives through `|`
+      # the package was built without tools/portable-deb.sh and installs only on the distribution
+      # it was built on.
+      - name: Package dependencies
+        run: |
+          deps=$(dpkg-deb -f composeApp/build/compose/binaries/main/deb/*.deb Depends)
+          echo "::notice title=Package dependencies::$deps"
+          case "$deps" in
+            *"|"*) ;;
+            *) echo "::error::No alternative names in the package: the dependency fix did not run"; exit 1 ;;
+          esac
+          case "$deps" in
+            *libvlc5*) ;;
+            *) echo "::error::libvlc5 missing from the dependencies"; exit 1 ;;
+          esac
+
+      # Published next to the package: it is a 170 MB download and worth being able to check.
+      - name: Checksum
+        working-directory: composeApp/build/compose/binaries/main/deb
+        run: sha256sum *.deb > SHA256SUMS
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            composeApp/build/compose/binaries/main/deb/*.deb
+            composeApp/build/compose/binaries/main/deb/SHA256SUMS
+          body_path: .github/release-notes.md
