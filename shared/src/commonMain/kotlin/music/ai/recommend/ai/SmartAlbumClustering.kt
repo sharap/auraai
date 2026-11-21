@@ -380,7 +380,15 @@ object SmartAlbumClustering {
 
     // ------------------------------------------------------------------ vectors
 
-    internal fun dot(a: FloatArray, b: FloatArray): Float {
+    /**
+ * Public only because its caller has not moved yet.
+ *
+ * `SmartAlbums` still lives in each port, and will for a while: the two versions disagree about
+ * where an album's title comes from — Android reads a string resource and is translated, the
+ * desktop holds the English text — and settling that is a decision about localisation rather than
+ * a file to move. When it is settled and `SmartAlbums` comes in here, this goes back to internal.
+ */
+fun dot(a: FloatArray, b: FloatArray): Float {
         var sum = 0f
         for (i in 0 until min(a.size, b.size)) sum += a[i] * b[i]
         return sum

@@ -63,7 +63,8 @@ class MusicScanner {
                         album = album,
                         albumId = albumId,
                         duration = duration,
-                        uri = uri,
+                        // As text: the shared model holds no platform types.
+                        uri = uri.toString(),
                         path = path,
                         folderName = folderName
                     )

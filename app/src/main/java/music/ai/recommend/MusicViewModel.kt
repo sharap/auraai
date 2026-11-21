@@ -870,7 +870,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSong(song: Song) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                getApplication<Application>().contentResolver.delete(song.uri, null, null)
+                // Parsed back here, which is the one place that needs the platform type.
+                getApplication<Application>().contentResolver.delete(
+                    android.net.Uri.parse(song.uri), null, null
+                )
                 withContext(Dispatchers.Main) { loadMusic() }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to delete file", e)

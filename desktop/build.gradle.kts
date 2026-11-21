@@ -149,3 +149,11 @@ afterEvaluate {
 
     tasks.named("packageDeb") { finalizedBy(portableDeb) }
 }
+
+// The shared model types are stable, and only this side's Compose compiler can be told so: see
+// compose-stability.conf at the root, which both UI modules read.
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("compose-stability.conf")
+    )
+}
