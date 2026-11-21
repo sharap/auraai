@@ -14,6 +14,10 @@
 # build output, 4.8 MB, were committed before anything noticed. One rule here covers every module,
 # including the next one.
 build/
+# Where the Kotlin compiler leaves its own working files and the odd error log. Appeared the first
+# time an incremental build tripped over a file that had moved between modules; it is build output
+# like any other, and the rule above does not cover it because the directory is not called build.
+.kotlin/
 /captures
 .externalNativeBuild
 .cxx
