@@ -9,9 +9,9 @@ import kotlin.random.Random
  * Immutable: every reaction produces a new state, so the stream can be reasoned about and tested
  * step by step instead of through a mutable object that playback keeps poking at.
  */
-data class WaveState(
+data class WaveState<Track>(
     /**
-     * Unit vector the stream is heading towards, in centred space — see [WaveState.centre].
+     * Unit vector the stream is heading towards, in centred space — see [WaveState<Track>.centre].
      */
     val direction: FloatArray,
     /**
@@ -34,7 +34,15 @@ data class WaveState(
      */
     val avoid: FloatArray? = null,
     /** Played in this session, so the stream does not circle back. */
-    val played: Set<Long> = emptySet(),
+    /**
+     * What the stream has already offered, by whatever the port identifies tracks by.
+     *
+     * The type parameter is the only platform-shaped thing in this file, and it is here for the
+     * same reason as in [MixTrack]: a MediaStore id on the phone, a path on the desktop, and the
+     * wave does not care which. Until the two code bases were merged this file was the phone's
+     * alone and said `Set<Long>`.
+     */
+    val played: Set<Track> = emptySet(),
     /** Artists of the last few tracks, to keep one act from taking over. */
     val recentGroups: List<String> = emptyList(),
     val steps: Int = 0,
@@ -136,13 +144,13 @@ object Wave {
      *   stuck on one artist" turned out to mean.
      */
     /**
-     * `MixTrack<Long>` and not `MixTrack<Track>` because this file is still the phone's alone.
+     * `MixTrack<Track>` and not `MixTrack<Track>` because this file is still the phone's alone.
      * When it moves to the shared module it will want the same type parameter the mix now has —
      * the wave is taste logic and has no business knowing what a track is identified by.
      */
-    fun start(seed: FloatArray, tracks: List<MixTrack<Long>>, after: MixTrack<Long>? = null): WaveState {
+    fun <Track> start(seed: FloatArray, tracks: List<MixTrack<Track>>, after: MixTrack<Track>? = null): WaveState<Track> {
         val centre = centroid(tracks.map { it.vector })
-        return WaveState(
+        return WaveState<Track>(
             direction = normalize(subtract(seed, centre)),
             centre = centre,
             recentGroups = listOfNotNull(after?.group)
@@ -155,7 +163,7 @@ object Wave {
      * @param fraction how much of the track was heard, 0..1.
      * @param disliked the listener pressed "don't like" rather than simply skipping.
      */
-    fun react(state: WaveState, track: MixTrack<Long>, fraction: Float, disliked: Boolean = false): WaveState {
+    fun <Track> react(state: WaveState<Track>, track: MixTrack<Track>, fraction: Float, disliked: Boolean = false): WaveState<Track> {
         val step = when {
             disliked -> -DISLIKE_PUSH
             fraction >= FINISHED_ABOVE -> FINISHED_PULL
@@ -196,17 +204,17 @@ object Wave {
      * @param novelty 0 keeps to the familiar, 1 digs for what has not been heard in a long time
      *   or ever; 0.5 is the middle the stream ran at before this was adjustable.
      */
-    fun next(
-        state: WaveState,
-        tracks: List<MixTrack<Long>>,
+    fun <Track> next(
+        state: WaveState<Track>,
+        tracks: List<MixTrack<Track>>,
         count: Int,
-        current: MixTrack<Long>? = null,
-        excluded: Set<Long> = emptySet(),
+        current: MixTrack<Track>? = null,
+        excluded: Set<Track> = emptySet(),
         novelty: Float = 0.5f,
         random: Random = Random.Default,
         now: Long = System.currentTimeMillis()
-    ): Pair<List<MixTrack<Long>>, WaveState> {
-        val chosen = ArrayList<MixTrack<Long>>(count)
+    ): Pair<List<MixTrack<Track>>, WaveState<Track>> {
+        val chosen = ArrayList<MixTrack<Track>>(count)
         var walking = state
         var previous = current
         repeat(count) {
@@ -223,15 +231,15 @@ object Wave {
         return chosen to walking
     }
 
-    private fun pickOne(
-        state: WaveState,
-        tracks: List<MixTrack<Long>>,
-        current: MixTrack<Long>?,
-        excluded: Set<Long>,
+    private fun <Track> pickOne(
+        state: WaveState<Track>,
+        tracks: List<MixTrack<Track>>,
+        current: MixTrack<Track>?,
+        excluded: Set<Track>,
         novelty: Float,
         random: Random,
         now: Long
-    ): MixTrack<Long>? {
+    ): MixTrack<Track>? {
         val holdBackDays = RECENT_DAYS_FAMILIAR +
             (RECENT_DAYS_NEW - RECENT_DAYS_FAMILIAR) * novelty.coerceIn(0f, 1f)
         // Relaxed in turn when nothing is left: a wave that stops is a broken wave, and a repeat
@@ -264,7 +272,7 @@ object Wave {
         return null
     }
 
-    private fun score(track: MixTrack<Long>, state: WaveState, current: MixTrack<Long>?, novelty: Float): Float {
+    private fun <Track> score(track: MixTrack<Track>, state: WaveState<Track>, current: MixTrack<Track>?, novelty: Float): Float {
         val specific = normalize(subtract(track.vector, state.centre))
         val towardsDirection = dot(state.direction, specific)
         val followsOn = current?.let { dot(normalize(subtract(it.vector, state.centre)), specific) }
@@ -277,7 +285,7 @@ object Wave {
     }
 
     /** Draws one candidate with a probability that grows with its score. */
-    private fun sample(scored: List<Pair<MixTrack<Long>, Float>>, random: Random): MixTrack<Long> {
+    private fun <Track> sample(scored: List<Pair<MixTrack<Track>, Float>>, random: Random): MixTrack<Track> {
         val best = scored.first().second
         val weights = scored.map { exp(((it.second - best) / TEMPERATURE).toDouble()) }
         var cut = random.nextDouble() * weights.sum()

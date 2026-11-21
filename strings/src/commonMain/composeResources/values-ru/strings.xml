@@ -37,4 +37,12 @@
     <string name="smart_label_synth_pop">Синти-поп</string>
     <string name="smart_label_lofi">Лоу-фай</string>
     <string name="smart_album_untitled">Микс %1$d</string>
+    <string name="mood_calm">Спокойное</string>
+    <string name="mood_energetic">Энергичное</string>
+    <string name="mood_sad">Меланхоличное</string>
+    <string name="mood_bright">Светлое</string>
+    <string name="mood_dance">Танцевальное</string>
+    <string name="mood_instrumental">Инструментальное</string>
+    <string name="mood_focus">Для сосредоточения</string>
+    <string name="mood_epic">Эпичное</string>
 </resources>

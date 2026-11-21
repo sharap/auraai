@@ -2,6 +2,7 @@ package music.ai.recommend.ai
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,10 +31,38 @@ class WaveSessionTest {
         savedAt = 1_700_000_000_000L
     )
 
-    private fun roundTrip(session: WaveSession): WaveSession? {
+    private fun roundTrip(session: WaveSession<Long>): WaveSession<Long>? {
         val out = ByteArrayOutputStream()
-        WaveSessions.write(out, session)
-        return WaveSessions.read(ByteArrayInputStream(out.toByteArray()))
+        WaveSessions.write(out, session) { it.toString() }
+        return WaveSessions.read(ByteArrayInputStream(out.toByteArray())) { it.toLongOrNull() }
+    }
+
+    /**
+     * The same file, with paths for identities: what the desktop port will write.
+     *
+     * The point of version 2 of this format. Version 1 wrote a long per played track and could
+     * only ever have served the phone.
+     */
+    @Test
+    fun aWaveOfPathsSurvivesBeingWrittenDown() {
+        val paths = setOf("/home/user/music/a.mp3", "/home/user/music/с пробелом и юникодом.flac")
+        val session = WaveSession(
+            mode = "DESCRIPTION",
+            description = "calm quiet music",
+            state = WaveState(
+                direction = floatArrayOf(0.1f, -0.2f, 0.3f),
+                centre = floatArrayOf(0.01f, 0.02f, 0.03f),
+                played = paths,
+                recentGroups = listOf("Album"),
+                steps = 4
+            ),
+            savedAt = 1_700_000_000_000L
+        )
+        val out = ByteArrayOutputStream()
+        WaveSessions.write(out, session) { it }
+        val back = WaveSessions.read<String>(ByteArrayInputStream(out.toByteArray())) { it }!!
+        assertEquals(paths, back.state.played)
+        assertEquals("calm quiet music", back.description)
     }
 
     @Test
@@ -68,18 +97,18 @@ class WaveSessionTest {
     @Test
     fun aTruncatedFileIsNoWave() {
         val out = ByteArrayOutputStream()
-        WaveSessions.write(out, session())
+        WaveSessions.write(out, session()) { it.toString() }
         val bytes = out.toByteArray()
-        assertNull(WaveSessions.read(ByteArrayInputStream(bytes.copyOf(bytes.size / 2))))
-        assertNull(WaveSessions.read(ByteArrayInputStream(ByteArray(0))))
-        assertNull(WaveSessions.read(ByteArrayInputStream(ByteArray(64) { 0x5a })))
+        assertNull(WaveSessions.read(ByteArrayInputStream(bytes.copyOf(bytes.size / 2))) { it.toLongOrNull() })
+        assertNull(WaveSessions.read(ByteArrayInputStream(ByteArray(0))) { it.toLongOrNull() })
+        assertNull(WaveSessions.read(ByteArrayInputStream(ByteArray(64) { 0x5a })) { it.toLongOrNull() })
     }
 
     /** Six kilobytes or so: it is written on every track, so the size is part of the design. */
     @Test
     fun theRecordStaysSmall() {
         val out = ByteArrayOutputStream()
-        WaveSessions.write(out, session())
+        WaveSessions.write(out, session()) { it.toString() }
         assertTrue("${out.size()} bytes", out.size() in 5_000..8_000)
     }
 }

@@ -192,7 +192,7 @@ class WaveTest {
 
         // The first pick is what the complaint was about: within one refill the cooldown already
         // keeps the same act from coming twice, so it is only the opening track that was exposed.
-        fun firstPicks(state: WaveState) = (1..20).map {
+        fun firstPicks(state: WaveState<Long>) = (1..20).map {
             Wave.next(state, tracks, count = 1, random = Random(it), now = now).first.single().group
         }
 

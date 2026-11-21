@@ -58,7 +58,7 @@ fun PlaylistListScreen(
     val waveNovelty by viewModel.waveNovelty.collectAsState()
     var describing by remember { mutableStateOf(false) }
     // Resolved here because a lambda passed down to the card cannot read string resources.
-    val moodTitles = WaveMoods.all.associate { it.prompt to stringResource(id = it.title) }
+    val moodTitles = WaveMoods.all.associate { it.prompt to byKey(it.nameKey, it.prompt) }
     val dailyMixBuilding by viewModel.dailyMixBuilding.collectAsState()
     val building by viewModel.smartAlbumsBuilding.collectAsState()
     val scannedIds by viewModel.scannedSongIds.collectAsState()
@@ -366,7 +366,7 @@ private fun WaveCard(
             Spacer(modifier = Modifier.height(4.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(WaveMoods.all, key = { it.prompt }) { mood ->
-                    val title = stringResource(id = mood.title)
+                    val title = byKey(mood.nameKey, mood.prompt)
                     AssistChip(
                         onClick = { onMood(mood) },
                         label = { Text(title) },

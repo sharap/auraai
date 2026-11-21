@@ -360,7 +360,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var waveEventsJob: Job? = null
     /** Serialises the wave's queue edits: fast skips used to interleave them. */
     private val waveLock = Mutex()
-    private var waveState: WaveState? = null
+    private var waveState: WaveState<Long>? = null
     private var waveRestoreJob: Job? = null
     /** Dials the other device on a timer while the network transport is on; see startPeerPolling. */
     private var peerPollJob: Job? = null
@@ -1968,7 +1968,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val file = waveSessionFile()
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                file.outputStream().use { WaveSessions.write(it, session) }
+                // Identities as text, which is what version 2 of the file writes; on this port a
+                    // track is a MediaStore id. See WaveSessions.
+                    file.outputStream().use { WaveSessions.write(it, session) { id -> id.toString() } }
             } catch (e: Exception) {
                 Log.w(TAG, "Could not save the wave", e)
             }
@@ -1990,7 +1992,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val file = waveSessionFile()
             val session = withContext(Dispatchers.IO) {
                 if (!file.exists()) null
-                else runCatching { file.inputStream().use { WaveSessions.read(it) } }.getOrNull()
+                else runCatching {
+                    file.inputStream().use { WaveSessions.read(it) { text -> text.toLongOrNull() } }
+                }.getOrNull()
             } ?: return@launch
 
             val mode = runCatching { WaveMode.valueOf(session.mode) }.getOrNull()

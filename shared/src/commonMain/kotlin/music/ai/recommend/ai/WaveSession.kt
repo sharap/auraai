@@ -16,12 +16,12 @@ import java.io.OutputStream
  * The library itself is not here: [MixTrack<Long>]s are rebuilt from the scan and the history, which is
  * cheap and keeps the file to a few kilobytes.
  */
-data class WaveSession(
+data class WaveSession<Track>(
     /** [music.ai.recommend.WaveMode], by name, so the file does not depend on the enum's order. */
     val mode: String,
     /** Subtitle of the wave: the query, or the track it started from. */
     val description: String?,
-    val state: WaveState,
+    val state: WaveState<Track>,
     val savedAt: Long
 )
 
@@ -34,13 +34,24 @@ data class WaveSession(
  */
 object WaveSessions {
 
-    private const val VERSION = 1
+    /**
+     * Version 2 writes the track's identity as text instead of a long.
+     *
+     * Which is what let this file be shared: the phone identifies a track by a MediaStore id and
+     * the desktop by a path, and `writeLong` could only ever serve one of them. Text is how a track
+     * is already written down everywhere the two devices talk to each other — see `TrackKey` and
+     * `HistoryStore.asText` — so this is the project's own convention rather than a new one.
+     *
+     * A version 1 file reads as null, which this function already means to say for a file of an
+     * older shape: the wave starts again rather than resuming. One stream, once, on the phone.
+     */
+    private const val VERSION = 2
 
     /** Guards against a corrupt length being read as an allocation request. */
     private const val MAX_VECTOR = 4096
     private const val MAX_IDS = 100_000
 
-    fun write(out: OutputStream, session: WaveSession) {
+    fun <Track> write(out: OutputStream, session: WaveSession<Track>, asText: (Track) -> String) {
         DataOutputStream(out.buffered()).use { sink ->
             sink.writeInt(VERSION)
             sink.writeLong(session.savedAt)
@@ -56,14 +67,14 @@ object WaveSessions {
             sink.writeBoolean(state.avoid != null)
             state.avoid?.let { sink.writeVector(it) }
             sink.writeInt(state.played.size)
-            for (id in state.played) sink.writeLong(id)
+            for (track in state.played) sink.writeUTF(asText(track))
             sink.writeInt(state.recentGroups.size)
             for (group in state.recentGroups) sink.writeUTF(group)
         }
     }
 
     /** @return the session, or null when there is none to be had: truncated, or of an older shape. */
-    fun read(input: InputStream): WaveSession? = try {
+    fun <Track> read(input: InputStream, fromText: (String) -> Track?): WaveSession<Track>? = try {
         DataInputStream(input.buffered()).use { source ->
             if (source.readInt() != VERSION) return null
             val savedAt = source.readLong()
@@ -78,16 +89,18 @@ object WaveSessions {
             val avoid = if (source.readBoolean()) source.readVector() else null
 
             val playedCount = source.readCount(MAX_IDS)
-            val played = HashSet<Long>(playedCount * 2)
-            repeat(playedCount) { played += source.readLong() }
+            val played = HashSet<Track>(playedCount * 2)
+            // A line this port cannot read is dropped rather than failing the whole session: it
+            // means a track that no longer exists, or a file written by the other port.
+            repeat(playedCount) { fromText(source.readUTF())?.let { played += it } }
             val groupCount = source.readCount(MAX_IDS)
             val groups = ArrayList<String>(groupCount)
             repeat(groupCount) { groups += source.readUTF() }
 
-            WaveSession(
+            WaveSession<Track>(
                 mode = mode,
                 description = description,
-                state = WaveState(
+                state = WaveState<Track>(
                     direction = direction,
                     centre = centre,
                     avoid = avoid,
