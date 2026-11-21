@@ -60,7 +60,11 @@ class ClusterExperimentTest {
             file.bufferedWriter().use { out ->
                 for (label in AlbumLabels.all) {
                     val v = runBlocking { encoder.encode(label.prompt) } ?: error("encoding failed")
-                    out.write("${label.prompt}\t${context.getString(label.title)}\t${v.joinToString(",")}\n")
+                    // The key, not the name: the names moved to the :strings module and are read
+                    // through Compose Resources, which needs a composition or a suspend call. This
+                    // file writes a table for an offline experiment, and the key identifies the
+                    // label just as well.
+                    out.write("${label.prompt}\t${label.nameKey}\t${v.joinToString(",")}\n")
                 }
             }
         } finally {

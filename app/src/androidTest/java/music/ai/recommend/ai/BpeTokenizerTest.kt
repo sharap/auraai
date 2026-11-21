@@ -30,7 +30,14 @@ class BpeTokenizerTest {
             "vocab.json / merges.txt must be present to run this test",
             models.isAvailable(listOf(ModelAsset.VOCAB, ModelAsset.MERGES))
         )
-        tokenizer = BpeTokenizer(models)
+        // Streams, opened on first use: the tokenizer no longer holds a ModelRepository, which is
+        // what let it move to the shared module. This test is the only thing that exercises that
+        // loading path at all — it needs the real vocab out of the APK, so it lives here and not
+        // in commonTest, and `gradlew build` does not compile this source set.
+        tokenizer = BpeTokenizer(
+            { models.openStream(ModelAsset.VOCAB) },
+            { models.openStream(ModelAsset.MERGES) }
+        )
     }
 
     @Test

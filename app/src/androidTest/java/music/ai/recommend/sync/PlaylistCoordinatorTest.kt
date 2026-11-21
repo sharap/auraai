@@ -1,6 +1,5 @@
 package music.ai.recommend.sync
 
-import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -80,7 +79,7 @@ class PlaylistCoordinatorTest {
                     album = "",
                     albumId = 0,
                     duration = cursor.getLong(4),
-                    uri = Uri.EMPTY,
+                    uri = "",
                     path = cursor.getString(1).orEmpty(),
                     folderName = ""
                 )

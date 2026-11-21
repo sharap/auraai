@@ -1,6 +1,5 @@
 package music.ai.recommend.sync
 
-import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -111,7 +110,7 @@ class PushDiagnosisTest {
                     album = "",
                     albumId = 0,
                     duration = cursor.getLong(4),
-                    uri = Uri.EMPTY,
+                    uri = "",
                     path = cursor.getString(1).orEmpty(),
                     folderName = ""
                 )

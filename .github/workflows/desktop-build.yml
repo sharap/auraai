@@ -1,4 +1,4 @@
-name: Desktop build
+name: Build
 
 # On every push and every pull request, because the point is a machine that has nothing of ours:
 # no Gradle cache from previous builds here, no downloaded model weights, no local.properties
@@ -7,9 +7,14 @@ name: Desktop build
 # of two — and that rewiring is the one thing four hundred tests cannot check, because they all ran
 # on the machine that already had everything.
 #
-# The desktop port only. The Android app needs its 438 MB of model weights and a release keystore,
-# neither of which belongs in a repository; it can be added with -Pauraai.bundleModels=false when
-# somebody wants it.
+# Two jobs. The desktop port with its tests, and a compile of the Android app's instrumented test
+# sources — which needs neither a device, nor the model weights, nor a keystore, and which `build`
+# does not do. Six breakages had piled up in that source set during the merge of the two code
+# bases, unnoticed through eighteen green builds, because `gradlew build` compiles everything
+# except it.
+#
+# The Android app itself is not built here: that wants its 438 MB of model weights and a release
+# keystore, neither of which belongs in a repository.
 on:
   push:
   pull_request:
@@ -67,3 +72,24 @@ jobs:
             shared/build/test-results/
             desktop/build/test-results/
           retention-days: 7
+
+  android-tests:
+    name: Android instrumented test sources compile
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Compiled, not run: running them needs a device. What this catches is the thing a device
+      # would never get to — a test source set that no longer matches the code it tests. Without
+      # the weights, since nothing here loads a model; the tokenizer files ship either way.
+      - name: Compile the instrumented tests
+        run: ./gradlew :app:assembleDebugAndroidTest -Pauraai.bundleModels=false
