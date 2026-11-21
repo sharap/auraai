@@ -1,5 +1,6 @@
 package music.ai.recommend.ai
 
+import org.junit.Assume.assumeTrue
 import java.io.File
 import kotlin.math.abs
 import kotlin.test.Test
@@ -23,31 +24,25 @@ import kotlin.test.assertTrue
  */
 class FlacAgainstFfmpegTest {
 
-    private val library = File(System.getProperty("user.home"), "Music")
+    /** The music to compare against: `-Daura.music=…`, or this machine's own folder. */
+    private val library = System.getProperty("aura.music")
+        ?.let { File(it) }
+        ?: File(System.getProperty("user.home"), "Music")
 
     /** How many files to compare. All of them takes minutes; the first few dozen find most bugs. */
     private val limit = System.getProperty("flac.limit")?.toIntOrNull() ?: 40
 
     @Test
     fun theSharedDecoderAgreesWithFfmpegSampleForSample() {
-        if (!library.isDirectory) {
-            println("FlacAgainstFfmpeg: no ${library.path}, skipped")
-            return
-        }
-        if (!hasFfmpeg()) {
-            println("FlacAgainstFfmpeg: no ffmpeg, skipped")
-            return
-        }
+        assumeTrue("no ${library.path} on this machine", library.isDirectory)
+        assumeTrue("no ffmpeg on this machine", hasFfmpeg())
 
         val files = library.walkTopDown()
             .filter { it.isFile && FlacExcerpt.handles(it.name) }
             .sortedBy { it.path }
             .take(limit)
             .toList()
-        if (files.isEmpty()) {
-            println("FlacAgainstFfmpeg: no flac files under ${library.path}, skipped")
-            return
-        }
+        assumeTrue("no flac files under ${library.path}", files.isNotEmpty())
 
         var checked = 0
         var identical = 0

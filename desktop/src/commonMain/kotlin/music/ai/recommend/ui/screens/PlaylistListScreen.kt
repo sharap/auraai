@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.FlowRow
 import music.ai.recommend.ai.SmartAlbum
 import music.ai.recommend.ai.WaveMode
 import music.ai.recommend.ai.WaveMoods
-import music.ai.recommend.ui.byKey
+import music.ai.recommend.strings.byKey
 import music.ai.recommend.model.Playlist
 import music.ai.recommend.model.Song
 import music.ai.recommend.ui.components.SongItem

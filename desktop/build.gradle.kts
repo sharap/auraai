@@ -159,3 +159,14 @@ composeCompiler {
         rootProject.layout.projectDirectory.file("compose-stability.conf")
     )
 }
+
+// Switches these tests read, forwarded into the test JVM, which is a different process from the
+// one Gradle runs in. Without this, `-Dflac.limit=5` set what Gradle saw and the tests went on
+// reading their defaults, so the knob had never once worked. `aura.music` points the
+// decoder-against-ffmpeg comparisons at a folder other than ~/Music, which is also how the
+// "nothing to compare, skip" path gets exercised on a machine that does have music.
+tasks.withType<Test>().configureEach {
+    for (name in listOf("flac.limit", "m4a.limit", "aura.music")) {
+        System.getProperty(name)?.let { systemProperty(name, it) }
+    }
+}

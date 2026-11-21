@@ -49,7 +49,13 @@ actual class SmartAlbumBuilder actual constructor(private val textEncoder: ClapT
         val songs = library.filter { it.path in vectors }.distinctBy { it.path }
         if (songs.size < 2 * SmartAlbumClustering.MIN_ALBUM_SIZE) return@withContext emptyList()
 
-        val signature = SmartAlbumNaming.signature(songs.map { it.path }, ANALYSIS_VERSION, epsScale)
+        val signature = SmartAlbumNaming.signature(
+            songs.map { it.path },
+            // One audio model on this port, so nothing to tell apart; the analysis version is
+            // folded in by signature itself.
+            variant = null,
+            epsScale = epsScale
+        )
         val cached = if (rebuild) null else load()
         // An unnamed result is only good until the text model can be reached.
         val stored = if (cached != null && cached.signature == signature && cached.named) {

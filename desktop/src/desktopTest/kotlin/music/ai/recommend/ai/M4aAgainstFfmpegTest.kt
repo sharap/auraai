@@ -1,5 +1,6 @@
 package music.ai.recommend.ai
 
+import org.junit.Assume.assumeTrue
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -22,28 +23,22 @@ import kotlin.test.assertTrue
  */
 class M4aAgainstFfmpegTest {
 
-    private val library = File(System.getProperty("user.home"), "Music")
+    /** The music to compare against: `-Daura.music=…`, or this machine's own folder. */
+    private val library = System.getProperty("aura.music")
+        ?.let { File(it) }
+        ?: File(System.getProperty("user.home"), "Music")
     private val limit = System.getProperty("m4a.limit")?.toIntOrNull() ?: 140
 
     @Test
     fun theSharedDecoderHearsTheSameMusicAsFfmpeg() {
-        if (!library.isDirectory) {
-            println("M4aAgainstFfmpeg: no ${library.path}, skipped")
-            return
-        }
-        if (!hasFfmpeg()) {
-            println("M4aAgainstFfmpeg: no ffmpeg, skipped")
-            return
-        }
+        assumeTrue("no ${library.path} on this machine", library.isDirectory)
+        assumeTrue("no ffmpeg on this machine", hasFfmpeg())
         val files = library.walkTopDown()
             .filter { it.isFile && M4aExcerpt.handles(it.name) }
             .sortedBy { it.path }
             .take(limit)
             .toList()
-        if (files.isEmpty()) {
-            println("M4aAgainstFfmpeg: no m4a files, skipped")
-            return
-        }
+        assumeTrue("no m4a files under ${library.path}", files.isNotEmpty())
 
         var checked = 0
         val cosines = ArrayList<Double>()

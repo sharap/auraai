@@ -1,5 +1,6 @@
 package music.ai.recommend.ai
 
+import org.junit.Assume.assumeTrue
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -17,14 +18,14 @@ import kotlin.test.Test
  */
 class SharedDecodersOnThisMachineTest {
 
-    private val library = File(System.getProperty("user.home"), "Music")
+    /** The music to compare against: `-Daura.music=…`, or this machine's own folder. */
+    private val library = System.getProperty("aura.music")
+        ?.let { File(it) }
+        ?: File(System.getProperty("user.home"), "Music")
 
     @Test
     fun everyFormatWithASharedDecoderDecodesToSomethingWorthComparing() {
-        if (!library.isDirectory) {
-            println("SharedDecoders: no ${library.path}, nothing to compare")
-            return
-        }
+        assumeTrue("no ${library.path} to compare against", library.isDirectory)
         val byFormat = HashMap<String, MutableList<File>>()
         library.walkTopDown().filter { it.isFile }.sortedBy { it.path }.forEach { file ->
             val decoder = SharedDecoder.of(file.name) ?: return@forEach

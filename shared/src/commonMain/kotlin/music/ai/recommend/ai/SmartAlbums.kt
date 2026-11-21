@@ -1,11 +1,12 @@
 package music.ai.recommend.ai
 
-import androidx.compose.runtime.Immutable
 import music.ai.recommend.model.Song
 import kotlin.math.roundToInt
 
 /** An album the library was grouped into by sound rather than by tags. */
-@Immutable
+// Declared stable to both Compose compilers in compose-stability.conf at the repository root,
+// rather than annotated @Immutable here: this module has no Compose dependency, and could not
+// annotate a type it shares with two interfaces even if it wanted to.
 data class SmartAlbum(
     /** Stable for the same set of tracks, so navigation survives a rebuild that changes nothing. */
     val id: String,
@@ -29,9 +30,6 @@ data class SmartAlbum(
  * embedding can be compared with descriptions of genres and moods. Scored raw, albums lean toward
  * whatever label sits nearest "music in general" — the same shared component that made raw
  * clustering fail — so part of each label's fit to the library as a whole is subtracted.
- *
- * Tracks are identified by path, which is what the embeddings table is keyed by. Song.id on this
- * platform is only a hash of the path, so routing through it would add collisions for nothing.
  */
 object SmartAlbumNaming {
 
@@ -46,7 +44,7 @@ object SmartAlbumNaming {
      * end up named after whatever is left. Half the baseline kept the dominant genre while still
      * separating the albums, on both a 161-track EDM library and a 4308-track mixed one.
      */
-    internal fun bestLabels(
+    fun bestLabels(
         albumCentroids: List<FloatArray>,
         libraryCentroid: FloatArray,
         labelEmbeddings: List<FloatArray>
@@ -68,12 +66,12 @@ object SmartAlbumNaming {
 
     /**
      * Titles for albums in size order. The first album with a label keeps it plain; a repeat is
-     * told apart by the artist that dominates it ("Classical · Secret Garden") and, failing that,
-     * by a number ("Classical 2").
+     * told apart by the artist that dominates it ("Классика · Secret Garden") and, failing that,
+     * by a number ("Классика 2").
      *
      * @param artists the dominant artist per album, or null when no one artist does.
      */
-    internal fun uniqueTitles(titles: List<String>, artists: List<String?> = List(titles.size) { null }): List<String> {
+    fun uniqueTitles(titles: List<String>, artists: List<String?> = List(titles.size) { null }): List<String> {
         val result = MutableList(titles.size) { "" }
         val taken = HashSet<String>()
         val numbered = HashMap<String, Int>()
@@ -96,7 +94,7 @@ object SmartAlbumNaming {
     }
 
     /** The artist of at least half the album, if there is one. */
-    internal fun dominantArtist(artistsAndTitles: List<Pair<String, String>>): String? {
+    fun dominantArtist(artistsAndTitles: List<Pair<String, String>>): String? {
         val top = artistsAndTitles.mapNotNull { (artist, title) -> artistOf(artist, title) }
             .groupingBy { it }.eachCount().maxByOrNull { it.value } ?: return null
         return top.key.takeIf { top.value * 2 >= artistsAndTitles.size }
@@ -106,19 +104,23 @@ object SmartAlbumNaming {
      * The artists that make up most of an album. Many files carry no artist tag but name one in
      * the title ("Валерий Меладзе - Небеса"), so that is used as a fallback.
      */
-    internal fun leadingArtists(songs: List<Song>, limit: Int = 3): String =
+    fun leadingArtists(songs: List<Song>, limit: Int = 3): String =
         leadingArtistsOf(songs.map { it.artist to it.title }, limit)
 
     /** [leadingArtists] over (artist tag, title) pairs. */
-    internal fun leadingArtistsOf(artistsAndTitles: List<Pair<String, String>>, limit: Int = 3): String =
+    fun leadingArtistsOf(artistsAndTitles: List<Pair<String, String>>, limit: Int = 3): String =
         artistsAndTitles.mapNotNull { (artist, title) -> artistOf(artist, title) }
             .groupingBy { it }.eachCount()
             .entries.sortedByDescending { it.value }
             .take(limit)
             .joinToString(", ") { it.key }
 
-    internal fun artistOf(artist: String, title: String): String? {
+    fun artistOf(artist: String, title: String): String? {
         val tagged = artist.trim()
+        // Three spellings, because the two ports read tags with different libraries: MediaStore
+        // says "<unknown>", jaudiotagger leaves "Unknown Artist" or "Unknown". Each port used to
+        // reject only the spelling it saw itself, so an album of untagged tracks was subtitled
+        // "Unknown Artist" on one of them.
         if (!tagged.equals("<unknown>", ignoreCase = true) &&
             !tagged.equals("Unknown Artist", ignoreCase = true) &&
             !tagged.equals("Unknown", ignoreCase = true) &&
@@ -134,19 +136,31 @@ object SmartAlbumNaming {
 
     private const val BASELINE_WEIGHT = 0.5f
 
-    /** Order-independent id for a set of tracks. */
-    internal fun albumId(paths: List<String>): String =
-        paths.sorted().joinToString(",").hashCode().toUInt().toString(16)
+    /** Order-independent id for a set of tracks, by whatever the port identifies them with. */
+    fun <Track : Comparable<Track>> albumId(tracks: Collection<Track>): String =
+        tracks.sorted().joinToString(",").hashCode().toUInt().toString(16)
 
     /**
      * Identifies what the albums were built from; any change means they must be rebuilt.
      *
-     * eps is folded in as a rounded integer rather than a formatted decimal, so the signature does
-     * not depend on the machine's locale.
+     * Four things can change under a cached clustering, and until the two ports met each counted
+     * only some of them. The phone folded in which model variant produced the embeddings — and so
+     * missed a change of [ANALYSIS_VERSION], where the vectors are replaced while the set of tracks
+     * stays identical, leaving stale clusters served as current. The desktop folded in the analysis
+     * version and had no notion of a variant at all. Both are in here now; a port with one model
+     * passes null for the variant.
+     *
+     * eps is folded in as a rounded integer rather than a formatted decimal, so the signature can
+     * never depend on the machine's locale.
      */
-    internal fun signature(paths: Collection<String>, analysisVersion: Int, epsScale: Float = 1f): String {
+    fun <Track : Comparable<Track>> signature(
+        tracks: Collection<Track>,
+        variant: String?,
+        epsScale: Float = 1f
+    ): String {
         var hash = 1L
-        for (path in paths.sorted()) hash = hash * 1_000_003L + path.hashCode()
-        return "$analysisVersion:${AlbumLabels.fingerprint}:${(epsScale * 100).roundToInt()}:${paths.size}:$hash"
+        for (track in tracks.sorted()) hash = hash * 1_000_003L + track.hashCode()
+        return "$ANALYSIS_VERSION:$variant:${AlbumLabels.fingerprint}:" +
+            "${(epsScale * 100).roundToInt()}:${tracks.size}:$hash"
     }
 }
