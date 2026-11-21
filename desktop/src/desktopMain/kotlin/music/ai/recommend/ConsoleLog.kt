@@ -15,8 +15,15 @@ import java.io.PrintStream
  * restarted and the output was gone. A log beside the data costs a few kilobytes and ends that.
  *
  * Both streams are still printed as before, so running it from a terminal looks exactly the same.
+ * The copy in the file carries a timestamp per line, which the console copy does not — that is the
+ * one difference, and it is the difference that makes the file worth keeping. Three separate
+ * diagnoses in one sitting stalled on the same question: the log said a hundred and fifty dial
+ * attempts and six tracks started, and nothing at all about whether that was a minute or an hour.
+ * Milliseconds, because what is usually being asked is whether two things happened together.
  */
 object ConsoleLog {
+
+    private const val NEWLINE = '\n'.code
 
     /** Kept small on purpose: this is for the last few runs, not for history. */
     private const val MOST_BYTES = 4L * 1024 * 1024
@@ -45,14 +52,46 @@ object ConsoleLog {
         private val file: OutputStream
     ) : OutputStream() {
 
+        private val clock = java.time.format.DateTimeFormatter
+            .ofPattern("HH:mm:ss.SSS")
+            .withZone(java.time.ZoneId.systemDefault())
+
+        private var atLineStart = true
+
         override fun write(byte: Int) {
             console.write(byte)
-            runCatching { file.write(byte) }
+            runCatching {
+                stamp()
+                file.write(byte)
+                if (byte == NEWLINE) atLineStart = true
+            }
         }
 
         override fun write(bytes: ByteArray, from: Int, length: Int) {
             console.write(bytes, from, length)
-            runCatching { file.write(bytes, from, length) }
+            runCatching {
+                // Written a line at a time into the file so each one can be stamped, while the
+                // console still gets the whole array in one call — a line split across two writes
+                // would otherwise collect a timestamp in its middle.
+                var at = from
+                val end = from + length
+                while (at < end) {
+                    stamp()
+                    var cut = at
+                    while (cut < end && bytes[cut] != NEWLINE.toByte()) cut++
+                    val upTo = if (cut < end) cut + 1 else end
+                    file.write(bytes, at, upTo - at)
+                    if (cut < end) atLineStart = true
+                    at = upTo
+                }
+            }
+        }
+
+        private fun stamp() {
+            if (!atLineStart) return
+            file.write(clock.format(java.time.Instant.now()).toByteArray())
+            file.write(' '.code)
+            atLineStart = false
         }
 
         override fun flush() {
