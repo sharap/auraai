@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="TrackMatcherTest[desktop]" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:42.065Z" hostname="fedora" time="0.017">
+  <properties/>
+  <testcase name="aHashCanBePointedAtATrackFromOutside[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="theVersionsAreToldApartByLength[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="aHashResolvedByTagsIsRememberedForNextTime[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.0"/>
+  <testcase name="aLibraryWithTwoCopiesOfATrackPicksOneOfThemAndKeepsPicking[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.002"/>
+  <testcase name="aLocalTrackWithNoTitleIsNotMatchedByTagsButStillByItsHash[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="theClosestLengthWinsAndTiesGoToTheFirstListed[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.0"/>
+  <testcase name="aKeyThatNamesNothingResolvesToNothing[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="aPathIsAsGoodAnIdentifierAsANumber[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="theTagsAndTheLengthDecideWhenThereIsNoHash[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.0"/>
+  <testcase name="theSameListensResolveOnceTheTrackArrives[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="aHashThatDoesNotMatchDoesNotVetoTheTags[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.0"/>
+  <testcase name="theSameBytesNeedNoWeighing[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.001"/>
+  <testcase name="aTrackThisLibraryHasNotGotResolvesToNothing[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.0"/>
+  <testcase name="whatCannotBePlacedIsKeptAndNotDropped[desktop]" classname="music.ai.recommend.sync.TrackMatcherTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

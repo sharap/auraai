@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="PlaylistTransportTest[desktop]" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:40.058Z" hostname="fedora" time="0.035">
+  <properties/>
+  <testcase name="threeKindsOfFileShareOneFolderAndOneProgressMap[desktop]" classname="music.ai.recommend.sync.PlaylistTransportTest" time="0.023"/>
+  <testcase name="aChangeOfAKindThisVersionDoesNotKnowIsCountedAndSkipped[desktop]" classname="music.ai.recommend.sync.PlaylistTransportTest" time="0.001"/>
+  <testcase name="aChangeFromTwoYearsAgoIsStillRead[desktop]" classname="music.ai.recommend.sync.PlaylistTransportTest" time="0.001"/>
+  <testcase name="aChangeCrossesTheFolderAndComesBackTheSame[desktop]" classname="music.ai.recommend.sync.PlaylistTransportTest" time="0.004"/>
+  <testcase name="aDeviceDoesNotReadItsOwnChangesBack[desktop]" classname="music.ai.recommend.sync.PlaylistTransportTest" time="0.001"/>
+  <testcase name="theOutboxKeepsWhatTheFolderWouldNotTake[desktop]" classname="music.ai.recommend.sync.PlaylistTransportTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

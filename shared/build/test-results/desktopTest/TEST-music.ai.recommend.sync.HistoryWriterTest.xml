@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="HistoryWriterTest[desktop]" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:38.395Z" hostname="fedora" time="0.018">
+  <properties/>
+  <testcase name="numberingCarriesOnFromWhereItLeftOff[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.001"/>
+  <testcase name="aBatchJustAfterMidnightGoesIntoTheNewDaysFile[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.0"/>
+  <testcase name="twentyRecordsAreWorthWritingOnTheirOwn[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.003"/>
+  <testcase name="theDateIsTheUtcCivilDate[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.0"/>
+  <testcase name="afterThatItBatches[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.002"/>
+  <testcase name="theFirstBatchOfARunGoesOutAtOnce[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.001"/>
+  <testcase name="nothingWaitingWritesNothing[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.0"/>
+  <testcase name="oneBatchPerFlushAndTheRecordsSurviveIt[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.002"/>
+  <testcase name="theFileIsNamedForTheDayOfWriting[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.002"/>
+  <testcase name="aFolderThatWillNotTakeTheBatchCostsADelayAndNotARecord[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.001"/>
+  <testcase name="forcingWritesWhateverIsWaiting[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.0"/>
+  <testcase name="anEveningOfListeningComesToAHandfulOfWrites[desktop]" classname="music.ai.recommend.sync.HistoryWriterTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

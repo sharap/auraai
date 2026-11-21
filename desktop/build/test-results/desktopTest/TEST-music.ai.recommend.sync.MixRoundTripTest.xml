@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="MixRoundTripTest[desktop]" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:54.358Z" hostname="fedora" time="0.026">
+<testsuite name="MixRoundTripTest[desktop]" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:59:56.432Z" hostname="fedora" time="0.024">
   <properties/>
-  <testcase name="oneMixGoesOutOnceAndTheNextOneGoesOutAtOnce[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.011"/>
+  <testcase name="oneMixGoesOutOnceAndTheNextOneGoesOutAtOnce[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.01"/>
   <testcase name="aMixForAnotherDayIsNotTodaysMix[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.003"/>
   <testcase name="aMixNamingTracksThisLibraryDoesNotHaveIsNotTaken[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.002"/>
   <testcase name="theDeviceThatAdoptedDoesNotPublishItBack[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.002"/>
   <testcase name="theMixThisDeviceAskedForBeatsTheOneThatArrived[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.003"/>
-  <testcase name="aMixIsNotTakenInBeforeTheLibraryIsRead[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.002"/>
+  <testcase name="aMixIsNotTakenInBeforeTheLibraryIsRead[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.001"/>
   <testcase name="whatOneDeviceBuiltTheOtherShows[desktop]" classname="music.ai.recommend.sync.MixRoundTripTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

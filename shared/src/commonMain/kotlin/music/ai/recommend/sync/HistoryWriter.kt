@@ -82,15 +82,13 @@ class HistoryWriter(
 
         /** The civil date, in UTC; see [BatchWriter.utcDate]. */
         /**
- * Public only because its test is in another module, for now.
+ * Internal again, and this time it stays.
  *
- * It was `internal`, and within the sync code it still could be: the three files that call it —
- * [BatchWriter], [HistoryReader] and this one — all moved in here together, which was the point of
- * moving `sync/` as one group. What did not move is `HistoryWriterTest`, which lives in the Android
- * app's test source set and pins the boundaries this function gets wrong easily: the last
- * millisecond of a year, the first of the next, a negative instant before 1970. When the sync tests
- * move to this module's own `commonTest` this goes back to `internal`.
+ * Everything that calls it is in this module: [BatchWriter], [HistoryReader], this file, and
+ * `HistoryWriterTest`, which pins the boundaries this function gets wrong easily — the last
+ * millisecond of a year, the first of the next, a negative instant before 1970. It was public for
+ * one commit, while that test still lived in the Android app and `internal` could not reach it.
  */
-fun utcDate(atMs: Long): Triple<Int, Int, Int> = BatchWriter.utcDate(atMs)
+internal fun utcDate(atMs: Long): Triple<Int, Int, Int> = BatchWriter.utcDate(atMs)
     }
 }

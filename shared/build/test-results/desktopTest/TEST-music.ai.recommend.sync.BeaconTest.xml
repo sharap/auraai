@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="BeaconTest[desktop]" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:37.623Z" hostname="fedora" time="0.553">
+  <properties/>
+  <testcase name="rubbish on the port is ignored[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.081"/>
+  <testcase name="two announcements never share a nonce[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.243"/>
+  <testcase name="wanting nothing is said by saying nothing[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.035"/>
+  <testcase name="a stale announcement is not where a device is now[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.01"/>
+  <testcase name="an announcement says who and where[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.004"/>
+  <testcase name="an announcement asks for what the device is short of, freshly each time[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.074"/>
+  <testcase name="an announcement fits a datagram with room to spare[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.008"/>
+  <testcase name="a changed byte is not an announcement[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.041"/>
+  <testcase name="it says nothing to anybody else[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.029"/>
+  <testcase name="an errand is carried and says nothing to anybody else[desktop]" classname="music.ai.recommend.sync.BeaconTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

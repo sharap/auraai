@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="PlaylistRoundTripTest[desktop]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:45:54.619Z" hostname="fedora" time="0.03">
+<testsuite name="PlaylistRoundTripTest[desktop]" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:59:56.457Z" hostname="fedora" time="0.026">
   <properties/>
   <testcase name="theShelfDescribesWhatThisMachineHasAndFindsItAgain[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.003"/>
-  <testcase name="twoDevicesThatEachHadPlaylistsEndUpWithBoth[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.01"/>
+  <testcase name="twoDevicesThatEachHadPlaylistsEndUpWithBoth[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.009"/>
   <testcase name="nothingIsSeededBeforeTheLibraryIsRead[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.001"/>
   <testcase name="nothingHappensWithoutAFolder[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.001"/>
-  <testcase name="aTrackTheOtherDeviceDoesNotHaveIsSimplyNotShownYet[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.003"/>
-  <testcase name="aChangeMadeAfterTheSeedTravelsToo[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.003"/>
+  <testcase name="aTrackTheOtherDeviceDoesNotHaveIsSimplyNotShownYet[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.002"/>
+  <testcase name="aChangeMadeAfterTheSeedTravelsToo[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.002"/>
   <testcase name="aRemovalOnOneDeviceReachesTheOther[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.003"/>
   <testcase name="whatWasAlreadyThereIsSeededOnceAndOnlyOnce[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.002"/>
   <testcase name="theOrderOneDeviceDraggedReachesTheOther[desktop]" classname="music.ai.recommend.sync.PlaylistRoundTripTest" time="0.003"/>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="PlaylistLogTest[desktop]" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:39.925Z" hostname="fedora" time="0.056">
+  <properties/>
+  <testcase name="theOutboxSeesOnlyThisDevicesOwnAndOnlyPastTheWatermark[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.032"/>
+  <testcase name="aLineFromSomewhereElseCostsOnlyItself[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.01"/>
+  <testcase name="anEmptyAppendIsNotAFailure[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.0"/>
+  <testcase name="aLogThatCannotBeWrittenSaysSoRatherThanLosingTheChanges[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.001"/>
+  <testcase name="theCounterIsOneMoreThanAnythingInIt[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.0"/>
+  <testcase name="whatIsWrittenIsReadBack[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.001"/>
+  <testcase name="theSameChangeIsNotTakenTwice[desktop]" classname="music.ai.recommend.sync.PlaylistLogTest" time="0.006"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

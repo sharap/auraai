@@ -25,6 +25,12 @@ plugins {
  */
 kotlin {
     android {
+        // No host test compilation here, deliberately. The AGP 9 multiplatform plugin leaves it off
+        // until asked, and asking would buy a second run of the same tests: both targets compile
+        // the same files out of commonMain, and an Android unit test runs on the host JVM, so it
+        // exercises no Android API that the desktop run does not. The moment that stops being true
+        // — the first `expect` in here with an Android `actual` behind it — is the moment to turn
+        // it on, because then the two runs would be running different code.
         namespace = "music.ai.recommend.shared"
         compileSdk = 37
         minSdk = 23
@@ -47,6 +53,14 @@ kotlin {
             implementation(libs.jcodec)
         }
         commonTest.dependencies {
+            // JUnit 4 rather than kotlin-test, which is what a multiplatform module would normally
+            // use. Both targets are JVM, so it resolves for each of them — the same reason the JDK
+            // is visible in commonMain. What that bought was the move itself: the eighteen sync
+            // tests came over from the Android app without a single edit, which can be proved by
+            // diffing them against what passed before, while converting them to kotlin-test would
+            // have meant reordering a message argument in each file and arguing about whether each
+            // test still tested the same thing. Adding a target that is not JVM would mean
+            // switching, and would say so by failing to compile rather than by passing quietly.
             implementation(libs.junit)
         }
     }

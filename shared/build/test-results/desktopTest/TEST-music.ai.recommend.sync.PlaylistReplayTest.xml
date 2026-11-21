@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="PlaylistReplayTest[desktop]" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:39.993Z" hostname="fedora" time="0.058">
+  <properties/>
+  <testcase name="twoDevicesArrangingTheSameListAtOnceStillAgree[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.01"/>
+  <testcase name="anOrderNeitherAddsNorRemovesATrack[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="theOrderOneDeviceDraggedIsTheOrderOnBoth[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.003"/>
+  <testcase name="aDeletedPlaylistTakesItsTracksWithIt[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="addingWhatIsAlreadyThereChangesNothing[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="theOrderOfTheFilesDoesNotMatter[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.005"/>
+  <testcase name="aRenameIntoAnExistingPlaylistMergesRatherThanOverwrites[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="anOrderForAPlaylistThatIsGoneDoesNotBringItBack[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="arrangingOnePlaylistLeavesTheOthersAndTheirListingAlone[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="whatTheTwoPlatformsCallOneTrackIsOneTrack[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="aLineThisVersionCannotActOnIsDropped[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.006"/>
+  <testcase name="aPlaylistFromTheOtherDeviceCanBeArrangedOnThisOne[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="theCounterIsOneMoreThanAnythingSeen[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="anOrderSurvivesTheRoundTrip[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="twoRenamesOfTheSamePlaylistStillAgree[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="anOperationSurvivesTheRoundTrip[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="aTrackThatArrivedWhileTheListWasBeingDraggedIsAtTheEndOnBothDevices[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="theSameTrackAddedByBothDevicesIsInThePlaylistOnce[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="theCounterDecidesAndNotTheClock[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.004"/>
+  <testcase name="anEmptyPlaylistIsStillAPlaylist[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="aRenameKeepsWhatWasInIt[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="aHeartTappedOnOneDeviceShowsOnTheOther[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <testcase name="aSecondOfSlackIsAllTheSlackThereIs[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.001"/>
+  <testcase name="twoDevicesAtTheSameCounterAreBrokenByTheirName[desktop]" classname="music.ai.recommend.sync.PlaylistReplayTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

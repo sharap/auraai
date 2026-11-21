@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="TrackDescriptionTest[desktop]" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-11-21T00:57:41.993Z" hostname="fedora" time="0.043">
+  <properties/>
+  <testcase name="tagsAreUsedWhenThereAreTags[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.014"/>
+  <testcase name="theFileNameIsReadWhenTheArtistTagIsMissing[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.003"/>
+  <testcase name="aNameWithNothingToSplitBecomesTheTitle[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="everyWordForNoTagsIsNotAnArtist[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="theThreeDashesAllSeparate[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="theExtensionIsNotPartOfTheName[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="aBandActuallyCalledSomethingUnknownIsStillAnArtist[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="theVersionInBracketsStaysPartOfTheTitle[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="onlyTheFirstDashSeparates[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="aCharacterNobodyCanSeeDoesNotMakeItAnotherTrack[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.003"/>
+  <testcase name="twoDevicesDescribingTheSameFileAgree[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.002"/>
+  <testcase name="aTrackNumberIsNotAnArtist[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.001"/>
+  <testcase name="androidsWordForNoTagsIsNotAnArtist[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.0"/>
+  <testcase name="aTitleTagStandsEvenWhenTheNameIsParsed[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.0"/>
+  <testcase name="theTwoPlatformsDescribeTheSameFileTheSameWay[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.004"/>
+  <testcase name="aDashInsideANameIsNotASeparator[desktop]" classname="music.ai.recommend.sync.TrackDescriptionTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
