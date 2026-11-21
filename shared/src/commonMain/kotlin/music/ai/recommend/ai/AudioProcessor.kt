@@ -17,10 +17,23 @@ import kotlin.math.sin
  * Slaney-scaled, area-normalised triangular filters on fractional FFT-bin boundaries, a periodic
  * Hann window, reflect-padded centred frames, and a decibel magnitude scale.
  *
- * The previous version differed on every one of those points — an HTK mel scale from 0 Hz, no
- * filter normalisation, filter edges truncated to whole bins, and a natural logarithm. Against the
- * reference its output correlated only 0.76 and its dynamic range was compressed by a factor of
- * 4.39, i.e. `10 / ln(10)`.
+ * The version this replaces differed on every one of those points — an HTK mel scale from 0 Hz, no
+ * filter normalisation, filter edges truncated to whole bins, a symmetric window, zero padding
+ * instead of repeat-and-reflect, and a natural logarithm. Its 64 mel channels landed on different
+ * frequencies than the reference's (channel 8 centred on 328 Hz against 537 Hz, channel 0 degenerate
+ * at DC), so its output was not merely rescaled but uncorrelated with the real features: measured
+ * over a harmonic test signal the two agreed at r = -0.05, and the dynamic range was compressed
+ * 1.7-fold. The model was being fed an input it had never seen in training.
+ *
+ * Not thread-safe: the working buffers are reused between calls, so one instance featurises one
+ * track at a time.
+ *
+ * This is the desktop port's copy, kept because of two details it had and the phone's did not. It
+ * counts the FFT's bits itself instead of asking `Integer.numberOfTrailingZeros`, which is a JVM
+ * call and would not travel; and it clears the whole sample buffer up front rather than filling
+ * three regions in three places, which makes the invariant readable in one line. The phone's
+ * version was correct — every region was written, checked region by region before this was
+ * decided — but correct in a way that had to be verified rather than seen. The scanner serialises decode and inference behind a single permit.
  */
 class AudioProcessor {
     companion object {
@@ -83,10 +96,13 @@ class AudioProcessor {
 
     init {
         melWeights = createMelFilterBank()
+
+        var fftBits = 0
+        while ((1 shl fftBits) < N_FFT) fftBits++
         for (i in 0 until N_FFT) {
             var reversed = 0
             var value = i
-            for (bit in 0 until Integer.numberOfTrailingZeros(N_FFT)) {
+            for (bit in 0 until fftBits) {
                 reversed = (reversed shl 1) or (value and 1)
                 value = value shr 1
             }
@@ -139,10 +155,8 @@ class AudioProcessor {
      */
     private fun fillCentredFrameBuffer(audioData: FloatArray) {
         val source = frameBuffer
-        if (audioData.isEmpty()) {
-            source.fill(0f)
-            return
-        }
+        source.fill(0f)
+        if (audioData.isEmpty()) return
 
         // repeatpad: whole repetitions of the clip, then silence for the remainder.
         var written = 0
@@ -155,7 +169,6 @@ class AudioProcessor {
             audioData.copyInto(source, PAD, 0, min(audioData.size, NUM_SAMPLES))
             written = min(audioData.size, NUM_SAMPLES)
         }
-        if (written < NUM_SAMPLES) source.fill(0f, PAD + written, PAD + NUM_SAMPLES)
 
         // numpy's "reflect": the edge sample itself is not repeated.
         for (i in 0 until PAD) {
