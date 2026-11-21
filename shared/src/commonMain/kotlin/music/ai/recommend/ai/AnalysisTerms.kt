@@ -20,7 +20,15 @@ package music.ai.recommend.ai
  * apart — a cosine of about 0.95 where 0.9985 is the bar for two embeddings describing the same
  * thing, and the reason carrying them between devices did not work at all.
  */
-const val ANALYSIS_VERSION = 3
+/**
+ * What an embedding was made from, in one number.
+ *
+ * 4: three ten-second windows at roughly a quarter, the middle and three quarters of the track,
+ * averaged — see [Excerpt.startsMs]. 3 was the single window in the middle. A vector from another
+ * version is not comparable with ours and is discarded rather than trusted, which is why bumping
+ * this costs every device a full re-analysis.
+ */
+const val ANALYSIS_VERSION = 4
 
 /** How many numbers one embedding has. CLAP's audio tower projects to 512. */
 const val EMBEDDING_DIMENSIONS = 512

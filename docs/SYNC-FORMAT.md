@@ -205,7 +205,10 @@ A vector is accepted only when **all** of these match the receiving device's own
 
 - the **model** it was produced by, including which variant (quantised or full);
 - the **analysis version**, which is bumped whenever anything that changes an embedding changes;
-- the **excerpt** — the start, in milliseconds, of the ten seconds that were listened to;
+- the **excerpt** — the start, in milliseconds, of the middle one of the three windows that were
+  listened to. One number for three windows because the other two are derived from this one and
+  from nothing else (`Excerpt.startsMs`), so agreeing here is agreeing on all of them; what says
+  how many windows there are and where they sit is the analysis version;
 - the **decoder** that turned the file into samples.
 
 ### Which decoders are shared, and why that is the hard part
@@ -311,6 +314,25 @@ gross one. Hence the rule in `Excerpt.startMs`, which truncates the duration to 
 halving it, so that the answer depends only on which two-second bucket the track's length falls
 into — the one thing two platforms that measure duration differently can still agree on. Android
 reads microseconds from the container; the desktop's tag reader reports whole seconds.
+
+### Three windows, not one
+
+Since analysis version 4 the vector is the average of three ten-second windows — at roughly a
+fifth, the middle and four fifths of the track — rather than the single middle one. Ten seconds is
+a noisy sample: two different windows of the same track agree to a cosine of only about 0.80, so
+one window describes whichever moment it landed on. Averaging three moves a vector to within 0.97
+of the track as a whole, from 0.91, and makes it nearly indifferent to where the cut was made.
+Windows at the extreme edges are worse than the single middle one — intros and fades drag the
+average nowhere — and nineteen windows are no better than three. What it buys in albums is real but
+modest, and took twenty paired subsets of the library to measure without fooling ourselves: purity
+against the genre tag 0.787 to 0.807, three windows ahead in sixteen of twenty.
+
+For this document the important part is what it does **not** change. The record still carries one
+start, because the outer two windows are `middle ± middle / 2` and nothing else: two devices that
+agree on the middle agree on all three. A device that computes a different middle refuses the
+vector exactly as before. What the three windows do cost is one more thing the analysis version has
+to mean — version 3 was one window, version 4 is these three — and a device on the older version is
+not asked to understand the newer vectors, it simply does not accept them.
 
 Where even that does not agree, the mismatch is **detected rather than papered over**: the start
 travels with the vector, and a device that computes a different one analyses the track itself.

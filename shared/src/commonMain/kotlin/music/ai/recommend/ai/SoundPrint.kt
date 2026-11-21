@@ -120,9 +120,11 @@ object SoundPrint {
             val bounds = bounds(handle, file.length()) ?: return null
             if (bounds.bytes <= 0L) return null
             val wanted = minOf(SLICE_BYTES.toLong(), bounds.bytes).toInt()
-            // From the middle, where the excerpt the analysis listens to also comes from. Not the
+            // From the middle, which is also where the middle window of the analysis sits. Not the
             // beginning: that is where a container puts what it has to say about itself, and two
-            // copies of one recording can differ there without differing as sound.
+            // copies of one recording can differ there without differing as sound. This is a print
+            // of the file's own bytes, not of what was decoded, so the analysis listening to three
+            // windows rather than one changes nothing here.
             val at = bounds.at + (bounds.bytes - wanted) / 2
             val slice = ByteArray(wanted)
             handle.seek(at)

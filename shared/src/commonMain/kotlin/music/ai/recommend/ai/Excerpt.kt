@@ -47,6 +47,109 @@ object Excerpt {
         return if (startSeconds <= 0) 0L else startSeconds * 1000
     }
 
+    /** At most how many windows one analysis listens to; see [startsMs]. */
+    const val WINDOWS = 3
+
+    /**
+     * Where each of the windows one analysis listens to starts.
+     *
+     * Three of them, averaged, rather than the one in the middle. Ten seconds is a noisy sample of
+     * a track: two different windows of the same track agree to a cosine of only about 0.80, so a
+     * single window describes whichever moment it happened to land on. Averaging three leaves a
+     * vector that barely depends on where the cut was made — 0.87 to 0.96 under a one-step shift of
+     * every window — and one that sits much closer to the track as a whole: 0.91 to 0.97 against
+     * the mean of nineteen windows.
+     *
+     * What that buys, measured rather than assumed. On a labelled slice of the real library (122
+     * tracks, six genres, paired per track): the class a track is assigned by comparing it with a
+     * description — which is how smart albums get their names — goes from 87 right to 97, eleven
+     * fixed against one broken; the nearest neighbour of the same class from 117 to 121; the
+     * separation between classes from 2.18 to 2.40 sigma. On the whole library, judged by the
+     * albums the production clustering actually makes, the effect is real but modest, and it took
+     * twenty paired subsets to say so honestly — one clustering of one library says as much about
+     * which run it was as about the strategy (see WindowStrategyExperimentTest): purity against the
+     * genre tag 0.787 to 0.807, albums 38 to 44, covered tracks 1047 to 1169, three windows ahead
+     * in sixteen of twenty subsets on purity and on the album count.
+     *
+     * **The spread is deliberate and was measured too.** It works out at roughly a fifth, the
+     * middle and four fifths of the track. Windows at the very edges (5% and 95%)
+     * are worse than the single middle one — intros, fades and silence drag the average nowhere.
+     * Narrowing to 30/50/70 gives most of it up. Nineteen windows are no better than three on the
+     * numbers that matter, and worse at matching a description. Three at roughly a quarter, the
+     * middle and three quarters is the knee of that curve.
+     *
+     * **Why the outer two are derived from the middle** rather than from the duration directly:
+     * everything above [startMs] about the two platforms disagreeing over how long a track is
+     * applies to every window. The middle is quantised so that it only depends on which
+     * two-second bucket the duration falls into, which is what makes a travelling vector
+     * trustworthy; computing the outer windows from the duration again would let them differ where
+     * the middle agrees, and a vector built from different audio would be accepted as
+     * interchangeable. Derived from the middle, agreement on the middle *is* agreement on all
+     * three — so [excerptStartMs][startMs] stays the whole identity of the window set, together
+     * with [ANALYSIS_VERSION], which says what the set is.
+     *
+     * The outer two are not rounded to whole seconds, and do not need to be: they are derived
+     * arithmetic on a number both devices already agree about, not a fresh reading of the file.
+     *
+     * @return one or three starts in ascending order. One for anything shorter than three
+     *   excerpts: under thirty seconds there is no room for three windows that hear different
+     *   music, and three overlapping copies of the same ten seconds would cost three times the
+     *   work for one vector's worth of information.
+     */
+    fun startsMs(durationMs: Long): LongArray = startsAroundMs(startMs(durationMs))
+
+    /**
+     * The same windows, named by the middle one instead of by the track's length.
+     *
+     * This is the entry point a decoder uses. The sync record names a vector by the middle window
+     * as the *decoder* counted it — `SharedDecoder.startMs`, from its own walk of the samples,
+     * because the platform's idea of the duration is a different number and naming the window with
+     * it is how a correct vector comes to be refused. The windows therefore have to be derived
+     * from that same number, or the record would name one window set and the vector be made from
+     * another, and the two devices would accept each other's vectors while listening to different
+     * audio.
+     *
+     * No clamp is needed at the end: with the middle at `d / 2 - 5` seconds, the last window
+     * starts at `1.6 * middle`, which is at most `d - 10` for every track that reaches three
+     * windows at all.
+     */
+    fun startsAroundMs(middleMs: Long): LongArray {
+        // Under ten seconds of middle means under thirty seconds of track — the middle is
+        // `duration / 2 - 5` — and three windows into that is three copies of the same ten
+        // seconds: three times the work for one vector's worth of information.
+        if (middleMs < LENGTH_MS) return longArrayOf(middleMs.coerceAtLeast(0L))
+
+        // Three fifths of the way to the middle, which puts the outer windows at about a fifth and
+        // four fifths of the track — the spread that measured best on the labelled slice. Half,
+        // the obvious choice, is a narrow 24/48/72, and windows at the very edges are worse than
+        // the single middle one: intros, fades and silence drag the average nowhere.
+        val spread = middleMs * 3 / 5
+        return longArrayOf(middleMs - spread, middleMs, middleMs + spread)
+    }
+
+    /**
+     * The one vector that stands for a track, from the vectors of its windows.
+     *
+     * The mean, back to unit length. Here rather than in either scanner because both ports have to
+     * produce the same number for the same track — that is the whole point of the sync — and
+     * "average three unit vectors" is exactly the kind of one-line arithmetic that drifts when it
+     * exists twice.
+     */
+    fun averaged(vectors: List<FloatArray>): FloatArray {
+        require(vectors.isNotEmpty()) { "no window vectors to average" }
+        val size = vectors.first().size
+        val sum = FloatArray(size)
+        for (vector in vectors) {
+            require(vector.size == size) { "window vectors of different sizes: $size and ${vector.size}" }
+            for (i in 0 until size) sum[i] += vector[i]
+        }
+        var norm = 0f
+        for (x in sum) norm += x * x
+        norm = kotlin.math.sqrt(norm)
+        if (norm > 0f) for (i in sum.indices) sum[i] /= norm
+        return sum
+    }
+
     /**
      * How many samples at [sourceRate] are needed to produce [SAMPLES] after resampling.
      *

@@ -82,11 +82,11 @@ object Mp3Excerpt {
         return Excerpt.startMs(layout.durationMs)
     }
 
-    fun decode(file: File): FloatArray {
+    fun decode(file: File, startMs: Long? = null): FloatArray {
         val layout = scan(file) ?: return FloatArray(0)
         if (layout.frames == 0L) return FloatArray(0)
 
-        val startSample = Excerpt.startMs(layout.durationMs) * layout.sampleRate / 1000
+        val startSample = (startMs ?: Excerpt.startMs(layout.durationMs)) * layout.sampleRate / 1000
         val firstFrame = (startSample / layout.samplesPerFrame - WARMUP_FRAMES).coerceAtLeast(0)
         var toDrop = (startSample - firstFrame * layout.samplesPerFrame).toInt()
 

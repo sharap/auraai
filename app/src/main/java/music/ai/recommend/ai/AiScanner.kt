@@ -275,7 +275,7 @@ class AiScanner(
                         if (features == null) {
                             embeddings.refuse(item.song.id, stampOf(item.song.path))
                         } else {
-                            embeddings.put(item.song.id, runInference(features))
+                            embeddings.put(item.song.id, runInference(features, item.windows))
                         }
                     } catch (e: CancellationException) {
                         throw e
@@ -313,8 +313,12 @@ class AiScanner(
         }
     }
 
-    /** What the decoding side hands to the inference side. */
-    private class Prepared(val song: Song, val features: FloatArray?)
+    /**
+     * What the decoding side hands to the inference side: the features of every window of one
+     * track, laid end to end in a shared buffer, and how many of them there are — a track barely
+     * longer than one window has fewer than [Excerpt.WINDOWS].
+     */
+    private class Prepared(val song: Song, val features: FloatArray?, val windows: Int = 0)
 
     /**
      * Decodes and featurises each song, handing the result over one at a time.
@@ -453,7 +457,11 @@ class AiScanner(
         /** Tracks dropped from the backlog because their vector arrived; see [scanSongs]. */
         arrivedMeanwhile: java.util.concurrent.atomic.AtomicInteger
     ) {
-        val buffers = arrayOf(FloatArray(AudioProcessor.FEATURE_SIZE), FloatArray(AudioProcessor.FEATURE_SIZE))
+        // Room for every window of one track in each buffer: three of them now, not one.
+        val buffers = arrayOf(
+            FloatArray(AudioProcessor.FEATURE_SIZE * Excerpt.WINDOWS),
+            FloatArray(AudioProcessor.FEATURE_SIZE * Excerpt.WINDOWS)
+        )
         var slot = 0
         try {
             for (song in songs) {
@@ -467,23 +475,32 @@ class AiScanner(
                     continue
                 }
 
-                val features = try {
-                    val pcm = decodeExcerpt(song)
-                    if (pcm.isEmpty()) null else audioProcessor.extractFeatures(pcm)
+                val buffer = buffers[slot]
+                val windows = try {
+                    var filled = 0
+                    for (start in SharedDecoder.windowsMs(File(song.path), song.duration)) {
+                        val pcm = decodeExcerpt(song, windowStartMs = start)
+                        if (pcm.isEmpty()) continue
+                        audioProcessor.extractFeatures(pcm)
+                            .copyInto(buffer, filled * AudioProcessor.FEATURE_SIZE)
+                        filled++
+                    }
+                    filled
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "Error decoding ${song.title}", e)
-                    null
+                    0
                 }
 
-                if (features == null) {
+                // Not one window would decode: a refusal, the same as before. One window out of
+                // three is not a refusal — it is a track whose vector rests on less audio, which
+                // is what the old scanner produced for every track.
+                if (windows == 0) {
                     channel.send(Prepared(song, null))
                 } else {
-                    val buffer = buffers[slot]
-                    features.copyInto(buffer)
                     slot = 1 - slot
-                    channel.send(Prepared(song, buffer))
+                    channel.send(Prepared(song, buffer, windows))
                 }
             }
         } finally {
@@ -491,18 +508,30 @@ class AiScanner(
         }
     }
 
-    private fun runInference(features: FloatArray): FloatArray {
+    /**
+     * The track's vector: every window through the graph in one batch, then averaged.
+     *
+     * A batch rather than a call per window because the graph declares a dynamic batch dimension
+     * and the framework round trip is the expensive part — measured on the desktop, three windows
+     * together cost 1.8 times one rather than three times. The averaging itself lives in
+     * [Excerpt.averaged], where both ports read it.
+     *
+     * @param windows how many of [features] are filled; the rest of the buffer is last track's.
+     */
+    private fun runInference(features: FloatArray, windows: Int): FloatArray {
+        if (windows <= 0) return FloatArray(EMBEDDING_SIZE)
         val session = ortSession ?: return FloatArray(EMBEDDING_SIZE)
         val env = ortEnv ?: return FloatArray(EMBEDDING_SIZE)
 
         return try {
-            // CLAP expects [batch, 1, frames, mels] -> [1, 1, 1001, 64]
-            val shape = longArrayOf(1, 1, 1001, 64)
-            OnnxTensor.createTensor(env, FloatBuffer.wrap(features), shape).use { tensor ->
+            // CLAP expects [batch, 1, frames, mels] -> [windows, 1, 1001, 64]
+            val shape = longArrayOf(windows.toLong(), 1, 1001, 64)
+            val used = FloatBuffer.wrap(features, 0, windows * AudioProcessor.FEATURE_SIZE).slice()
+            OnnxTensor.createTensor(env, used, shape).use { tensor ->
                 session.run(mapOf("input_features" to tensor)).use { output ->
                     @Suppress("UNCHECKED_CAST")
                     val result = output.get(0).value as Array<FloatArray>
-                    normalize(result[0])
+                    Excerpt.averaged(result.map { normalize(it) })
                 }
             }
         } catch (e: Exception) {
@@ -545,19 +574,28 @@ class AiScanner(
      *
      * @param startUsOverride only an experiment passes it, and it needs the platform path, which
      *   is the one whose window is being measured.
+     * @param windowStartMs which window of the track to take, from [Excerpt.startsMs]. Null means
+     *   the middle one. Unlike [startUsOverride] this goes to the shared decoder as well, because
+     *   every window of a track that travels has to be decoded by the code both devices run.
      */
     private fun decodeExcerpt(
         song: Song,
         stats: DecodeStats? = null,
-        startUsOverride: Long? = null
+        startUsOverride: Long? = null,
+        windowStartMs: Long? = null
     ): FloatArray {
         if (startUsOverride == null && SharedDecoder.handles(song.path)) {
-            val samples = runCatching { SharedDecoder.decode(File(song.path)) }
+            val samples = runCatching { SharedDecoder.decode(File(song.path), windowStartMs) }
                 .getOrElse { FloatArray(0) }
             if (samples.isNotEmpty()) return samples
             Log.w(TAG, "Shared decoder gave nothing for ${song.title}, using the platform one")
         }
-        return decodeAudioChunk(song, Excerpt.LENGTH_MS, stats, startUsOverride)
+        return decodeAudioChunk(
+            song,
+            Excerpt.LENGTH_MS,
+            stats,
+            startUsOverride ?: windowStartMs?.let { it * 1000 }
+        )
     }
 
     /** Counters for the decode, filled in only when a benchmark asks for them. */

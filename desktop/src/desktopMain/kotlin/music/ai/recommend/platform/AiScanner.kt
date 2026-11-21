@@ -334,17 +334,16 @@ actual class AiScanner actual constructor() {
                                 // the one this would compute.
                                 if (dao.hasEmbedding(song.path)) return@withTimeoutOrNull
 
-                                val audioData = decodeExcerpt(song.path, song.duration)
+                                val embedding = embeddingOf(song.path, song.duration)
 
                                 // A track that would not decode is remembered as a refusal, so the
                                 // next scan does not keep retrying it — but as a refusal and not as
                                 // a vector of zeros, so it stays out of the similarity space, is
                                 // never offered to another device as though it had been analysed,
                                 // and is reconsidered if the file is ever replaced by a whole one.
-                                if (audioData.isEmpty()) {
+                                if (embedding.isEmpty()) {
                                     dao.refuseEmbedding(song.path, stampOf(song.path))
                                 } else {
-                                    val embedding = runInference(audioProcessor.extractFeatures(audioData))
                                     dao.insertEmbedding(EmbeddingEntity(song.path, embedding.toList()))
                                 }
                             }
@@ -406,17 +405,27 @@ actual class AiScanner actual constructor() {
         ""
     }
 
-    private fun runInference(features: FloatArray): FloatArray {
+    /**
+     * The track's vector: every window through the graph in one batch, then averaged.
+     *
+     * A batch rather than a call per window because the graph declares a dynamic batch dimension
+     * and three windows together cost about 1.8 times one rather than three times — 263 ms against
+     * 148 measured here. The averaging lives in [Excerpt.averaged], where both ports read it.
+     *
+     * @param windows how many windows are packed into [features].
+     */
+    private fun runInference(features: FloatArray, windows: Int): FloatArray {
+        if (windows <= 0) return FloatArray(EMBEDDING_SIZE)
         val session = ortSession ?: return FloatArray(EMBEDDING_SIZE)
         val env = ortEnv ?: return FloatArray(EMBEDDING_SIZE)
         return try {
-            // CLAP expects [batch, 1, frames, mels] -> [1, 1, 1001, 64]
-            val shape = longArrayOf(1, 1, FRAMES, MELS)
+            // CLAP expects [batch, 1, frames, mels] -> [windows, 1, 1001, 64]
+            val shape = longArrayOf(windows.toLong(), 1, FRAMES, MELS)
             OnnxTensor.createTensor(env, FloatBuffer.wrap(features), shape).use { tensor ->
                 session.run(mapOf("input_features" to tensor)).use { output ->
                     @Suppress("UNCHECKED_CAST")
                     val result = output.get(0).value as Array<FloatArray>
-                    normalize(result[0])
+                    Excerpt.averaged(result.map { normalize(it) })
                 }
             }
         } catch (e: Exception) {
@@ -449,13 +458,40 @@ actual class AiScanner actual constructor() {
      * What is left for ffmpeg is m4a and the rest, whose embeddings stay on this machine until
      * those formats have a shared decoder too.
      */
-    private fun decodeExcerpt(path: String, durationMs: Long): FloatArray {
+    private fun decodeExcerpt(path: String, durationMs: Long, startMs: Long? = null): FloatArray {
         if (SharedDecoder.handles(path)) {
-            val samples = runCatching { SharedDecoder.decode(File(path)) }.getOrElse { FloatArray(0) }
+            val samples = runCatching { SharedDecoder.decode(File(path), startMs) }.getOrElse { FloatArray(0) }
             if (samples.isNotEmpty()) return samples
             println("AiScanner: shared decoder gave nothing for $path, using ffmpeg")
         }
-        return audioDecoder.decodeChunk(path, CHUNK_MS, durationMs)
+        return audioDecoder.decodeChunk(path, CHUNK_MS, durationMs, startMs)
+    }
+
+    /**
+     * The vector that stands for one track: its windows, averaged.
+     *
+     * @return the embedding, or an empty array when not one window would decode — which is what
+     *   makes a refusal a refusal.
+     */
+    private fun embeddingOf(path: String, durationMs: Long): FloatArray {
+        val windows = buildList {
+            for (start in SharedDecoder.windowsMs(File(path), durationMs)) {
+                val samples = decodeExcerpt(path, durationMs, start)
+                if (samples.isNotEmpty()) add(samples)
+            }
+        }
+        if (windows.isEmpty()) return FloatArray(0)
+
+        // Copied window by window, not collected into a list of what extractFeatures returns: that
+        // array is reused between calls — it says so — so a list of three would be three
+        // references to the last window's features, and the average of a track would quietly be
+        // one window of it.
+        val features = FloatArray(windows.size * AudioProcessor.FEATURE_SIZE)
+        for ((index, samples) in windows.withIndex()) {
+            audioProcessor.extractFeatures(samples)
+                .copyInto(features, index * AudioProcessor.FEATURE_SIZE)
+        }
+        return runInference(features, windows.size)
     }
 
     private companion object {

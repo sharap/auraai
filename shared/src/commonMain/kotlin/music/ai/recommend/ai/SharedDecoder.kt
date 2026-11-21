@@ -53,15 +53,32 @@ object SharedDecoder {
     }
 
     /**
+     * The windows to analyse this file by.
+     *
+     * By the decoder's own reading of the length where there is one, because that is the number the
+     * sync record names the vector with; by the platform's [durationMs] otherwise, which is also
+     * the case where the vector stays at home.
+     */
+    fun windowsMs(file: File, durationMs: Long): LongArray =
+        startMs(file)?.let { Excerpt.startsAroundMs(it) } ?: Excerpt.startsMs(durationMs)
+
+    /**
      * @return the excerpt as the model wants it, or an empty array when no shared decoder handles
      *   this file or the file will not decode. An empty answer means "ask the platform", and the
      *   caller then records the platform as what made the vector.
      */
-    fun decode(file: File): FloatArray = when {
-        Mp3Excerpt.handles(file.path) -> Mp3Excerpt.decode(file)
-        FlacExcerpt.handles(file.path) -> FlacExcerpt.decode(file)
-        WavExcerpt.handles(file.path) -> WavExcerpt.decode(file)
-        M4aExcerpt.handles(file.path) -> M4aExcerpt.decode(file)
+    /**
+     * One window of [file], decoded to exactly one excerpt's worth of mono 48 kHz samples.
+     *
+     * @param startMs where the window begins. Null means the one window [Excerpt.startMs] picks,
+     *   which is what a caller that wants a single excerpt asks for; the scanners pass each of
+     *   [Excerpt.startsMs] in turn and average what comes back.
+     */
+    fun decode(file: File, startMs: Long? = null): FloatArray = when {
+        Mp3Excerpt.handles(file.path) -> Mp3Excerpt.decode(file, startMs)
+        FlacExcerpt.handles(file.path) -> FlacExcerpt.decode(file, startMs)
+        WavExcerpt.handles(file.path) -> WavExcerpt.decode(file, startMs)
+        M4aExcerpt.handles(file.path) -> M4aExcerpt.decode(file, startMs)
         else -> FloatArray(0)
     }
 }

@@ -49,12 +49,12 @@ object M4aExcerpt {
      * @return exactly [Excerpt.SAMPLES] mono samples at [Excerpt.SAMPLE_RATE], or fewer if the
      *   track is genuinely shorter than the excerpt, or an empty array if it will not decode.
      */
-    fun decode(file: File): FloatArray = try {
+    fun decode(file: File, startMs: Long? = null): FloatArray = try {
         RandomAccessFile(file, "r").use { raf ->
             val track = track(raf) ?: return FloatArray(0)
             if (track.sampleRate <= 0 || track.config.isEmpty()) return FloatArray(0)
 
-            val startSample = Excerpt.startMs(track.durationMs) * track.sampleRate / 1000
+            val startSample = (startMs ?: Excerpt.startMs(track.durationMs)) * track.sampleRate / 1000
             val needed = Excerpt.sourceSamplesNeeded(track.sampleRate)
             // The priming is audio the encoder added in front of the music; the window is measured
             // from the music.

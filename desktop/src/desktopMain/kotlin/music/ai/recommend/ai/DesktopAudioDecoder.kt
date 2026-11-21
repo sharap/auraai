@@ -53,9 +53,16 @@ class DesktopAudioDecoder {
      * @param durationMs how much audio to return, normally [Excerpt.LENGTH_MS].
      * @param trackDurationMs the track's full length, so the excerpt can be taken from the middle;
      *   0 when the scanner could not read it, in which case ffprobe is asked.
+     * @param startMs where the window begins. Null means the middle, the way the reference scanner
+     *   picks it; the scanner passes each of [Excerpt.startsMs] in turn.
      * @return mono 48 kHz samples, or an empty array if the track could not be decoded.
      */
-    fun decodeChunk(path: String, durationMs: Long, trackDurationMs: Long = 0L): FloatArray {
+    fun decodeChunk(
+        path: String,
+        durationMs: Long,
+        trackDurationMs: Long = 0L,
+        startMs: Long? = null
+    ): FloatArray {
         if (!isAvailable) throw DecodeUnavailable("ffmpeg not found in PATH")
 
         val targetSamples = (SAMPLE_RATE * durationMs / 1000).toInt()
@@ -66,7 +73,7 @@ class DesktopAudioDecoder {
             // The middle of the track, the way the reference scanner picks it. Seeking to a fixed
             // 20 s instead meant every embedding described whatever happened to be playing there —
             // usually still the intro — and anything shorter than 20 s decoded to nothing at all.
-            val startSeconds = startOffsetSeconds(path, trackDurationMs)
+            val startSeconds = startMs?.let { it / 1000.0 } ?: startOffsetSeconds(path, trackDurationMs)
             val channels = probeChannels(path)
 
             // Asked for longer than wanted, because exactly how many samples ffmpeg hands over for

@@ -61,13 +61,13 @@ object FlacExcerpt {
      * @return exactly [Excerpt.SAMPLES] mono samples at [Excerpt.SAMPLE_RATE], or fewer if the
      *   track is genuinely shorter than the excerpt, or an empty array if it will not decode.
      */
-    fun decode(file: File): FloatArray = try {
+    fun decode(file: File, startMs: Long? = null): FloatArray = try {
         RandomAccessFile(file, "r").use { raf ->
             val stream = header(raf) ?: return FloatArray(0)
             if (stream.totalSamples <= 0L || stream.sampleRate <= 0) return FloatArray(0)
             if (stream.channels !in 1..MAX_CHANNELS) return FloatArray(0)
 
-            val startSample = Excerpt.startMs(stream.durationMs) * stream.sampleRate / 1000
+            val startSample = (startMs ?: Excerpt.startMs(stream.durationMs)) * stream.sampleRate / 1000
             val needed = Excerpt.sourceSamplesNeeded(stream.sampleRate)
 
             // The last seek point at or before the window, when the file has a seek table. Its

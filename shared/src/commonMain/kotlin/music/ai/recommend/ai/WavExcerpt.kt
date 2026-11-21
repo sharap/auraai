@@ -34,12 +34,12 @@ object WavExcerpt {
      * @return exactly [Excerpt.SAMPLES] mono samples at [Excerpt.SAMPLE_RATE], or fewer if the
      *   track is genuinely shorter than the excerpt, or an empty array if it will not read.
      */
-    fun decode(file: File): FloatArray = try {
+    fun decode(file: File, startMs: Long? = null): FloatArray = try {
         RandomAccessFile(file, "r").use { raf ->
             val wav = shape(raf) ?: return FloatArray(0)
             if (wav.frames <= 0L || wav.sampleRate <= 0 || wav.channels <= 0) return FloatArray(0)
 
-            val startSample = Excerpt.startMs(wav.durationMs) * wav.sampleRate / 1000
+            val startSample = (startMs ?: Excerpt.startMs(wav.durationMs)) * wav.sampleRate / 1000
             if (startSample >= wav.frames) return FloatArray(0)
             val needed = Excerpt.sourceSamplesNeeded(wav.sampleRate)
             val available = (wav.frames - startSample).coerceAtMost(needed.toLong()).toInt()

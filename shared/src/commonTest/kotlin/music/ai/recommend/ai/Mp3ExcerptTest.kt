@@ -1,6 +1,8 @@
 package music.ai.recommend.ai
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -93,5 +95,28 @@ class Mp3ExcerptTest {
         assertTrue(!Mp3Excerpt.handles("/music/a.flac"))
         assertTrue(!Mp3Excerpt.handles("/music/mp3"))
         assertTrue(!Mp3Excerpt.handles(""))
+    }
+
+    /**
+     * The window can be asked for explicitly, and asking for the one the rule would pick anyway
+     * gives the same samples — which is what lets the three-window scan reuse this decoder without
+     * changing what a single-window vector was made from.
+     */
+    @Test
+    fun askingForTheWindowTheRulePicksChangesNothing() {
+        val byRule = Mp3Excerpt.decode(fixture)
+        val explicit = Mp3Excerpt.decode(fixture, Mp3Excerpt.startMs(fixture))
+        assertArrayEquals(byRule, explicit, 0f)
+    }
+
+    @Test
+    fun anotherWindowIsAnotherTenSeconds() {
+        val middle = Mp3Excerpt.decode(fixture)
+        val fromTheStart = Mp3Excerpt.decode(fixture, 0L)
+        assertEquals(Excerpt.SAMPLES, fromTheStart.size)
+        assertFalse(
+            "a window at 0 should not be the window in the middle",
+            middle.contentEquals(fromTheStart)
+        )
     }
 }
