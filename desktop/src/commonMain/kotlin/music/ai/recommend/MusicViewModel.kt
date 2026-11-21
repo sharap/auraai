@@ -9,6 +9,7 @@ import music.ai.recommend.ai.WaveSession
 import music.ai.recommend.ai.WaveSessions
 import music.ai.recommend.ai.WaveState
 import music.ai.recommend.ai.WaveTuning
+import music.ai.recommend.ai.choosingOverTheWave
 import music.ai.recommend.ai.mixLibrary
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -799,8 +800,23 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
     }
 
     fun playSong(song: Song, fromList: List<Song> = emptyList(), fromWave: Boolean = false) {
-        // Picking a track by hand ends the stream: it is no longer the wave's queue.
-        if (!fromWave && _waveMode.value != null) stopWave()
+        // Choosing something else ends the stream; moving along inside it does not.
+        //
+        // The difference is whether the queue is being replaced. A list passed in is a choice —
+        // an album, a playlist, the library — and so is a track that is not in the queue at all.
+        // Everything else is the wave working: `next` advancing on its own, the skip button, a
+        // tap on a track further down the queue. A skip above all, since that is how a wave is
+        // steered; stopping on one would have been the opposite of the feature.
+        //
+        // This was wrong in the first cut of the desktop wave, and wrong in a way that looked like
+        // the wave itself not working: every automatic advance goes through this function, so the
+        // stream died on the first track change and left the five tracks the start had queued,
+        // which RepeatQueue then played round and round.
+        if (!fromWave && _waveMode.value != null &&
+            choosingOverTheWave(song.path, _queue.value.map { it.path }, fromList.isNotEmpty())
+        ) {
+            stopWave()
+        }
         if (fromList.isNotEmpty()) {
             _queue.value = fromList
         } else if (!_queue.value.any { it.id == song.id }) {
@@ -1594,6 +1610,7 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
                 }
                 val songs = first.mapNotNull { songsByPath[it.track] }
                 if (songs.isEmpty()) return@launch
+                sequentialForWave()
                 playSong(songs.first(), songs, fromWave = true)
                 observeWave()
                 persistWave()
@@ -1744,6 +1761,20 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
         persistWave()
     }
 
+    /**
+     * Two playback modes contradict a steered stream, so starting a wave leaves them.
+     *
+     * Shuffle picks from the queue at random, which throws away the order the wave just chose and
+     * can offer the same track twice; repeat-one never leaves the track at all, so nothing ever
+     * steers. The mode is shown in the player, and the listener can set it back — this is a visible
+     * change to a visible setting rather than the wave quietly ignoring it.
+     */
+    private fun sequentialForWave() {
+        if (_playbackMode.value == PlaybackMode.Shuffle || _playbackMode.value == PlaybackMode.RepeatOne) {
+            _playbackMode.value = PlaybackMode.RepeatQueue
+        }
+    }
+
     /** Ends the stream, leaving the queue as it is: what is in it was still chosen for the listener. */
     fun stopWave() {
         waveJob?.cancel()
@@ -1874,6 +1905,7 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
                 _waveMode.value = WaveMode.valueOf(session.mode)
                 _waveDescription.value = session.description
                 resumable = null
+                sequentialForWave()
                 playSong(songs.first(), songs, fromWave = true)
                 observeWave()
                 persistWave()
