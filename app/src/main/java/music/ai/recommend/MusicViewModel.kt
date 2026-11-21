@@ -1850,7 +1850,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // The taste profile, which is the same signal the daily mix starts from: what has been
             // played recently, with skips counting against and favourites counting for.
             WaveMode.TASTE -> withContext(Dispatchers.Default) {
-                val listens = playHistory.recent().map { MixListen<Long>(it.songId, it.playedAt, it.fraction) }
+                val listens = playHistory.recent().map { MixListen<Long>(it.track, it.playedAt, it.fraction) }
                 val weights = DailyMix.tasteWeights(listens, _favoriteSongIds.value, System.currentTimeMillis())
                     .filterValues { it > 0f }
                     .filterKeys { it in vectors }
@@ -1879,8 +1879,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // Only what the wave queued steers it. Whatever was playing when the wave started
                 // is closed by the same mechanism, and a wave asked to sound like that track would
                 // otherwise take its own seed for a skip and head straight away from it.
-                if (event.songId !in state.played) return@collect
-                val track = waveTrackById[event.songId] ?: return@collect
+                if (event.track !in state.played) return@collect
+                val track = waveTrackById[event.track] ?: return@collect
                 val fraction = Wave.fractionOf(event.playedMs, event.durationMs)
                 waveState = Wave.react(state, track, fraction)
                 persistWave()

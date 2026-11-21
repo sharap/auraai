@@ -111,7 +111,7 @@ class DailyMixBuilder(
         if (analysed.size < MIN_LIBRARY) return@withContext DailyPlaylist(today, emptyList())
 
         val lastPlayed = history.lastPlayed()
-        val listens = history.recent().map { MixListen<Long>(it.songId, it.playedAt, it.fraction) }
+        val listens = history.recent().map { MixListen<Long>(it.track, it.playedAt, it.fraction) }
         val tracks = analysed.map { song ->
             MixTrack<Long>(
                 track = song.id,

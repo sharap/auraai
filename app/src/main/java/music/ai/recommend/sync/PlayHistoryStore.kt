@@ -28,7 +28,7 @@ class PlayHistoryStore(
         history.notYetExported(afterId, limit).map {
             OwnListen(
                 rowId = it.rowId,
-                track = it.event.songId,
+                track = it.event.track,
                 playedAt = it.event.playedAt,
                 playedMs = it.event.playedMs,
                 durationMs = it.event.durationMs

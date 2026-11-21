@@ -7,8 +7,11 @@ import org.junit.Test
 class PlayTrackerTest {
 
     private val now = 1_700_000_000_000L
-    private val events = mutableListOf<PlayEvent>()
-    private val tracker = PlayTracker { events += it }
+    private val events = mutableListOf<PlayEvent<Long>>()
+    // Long identities, because the numbers read as what they are. The tracker never looks at
+    // them; the ports' own call sites are what prove the type parameter, and the compiler checks
+    // those.
+    private val tracker = PlayTracker<Long> { events += it }
 
     /**
      * The wave steers on these events and tops its queue up from them, so a track dropped after a
@@ -17,12 +20,12 @@ class PlayTrackerTest {
      */
     @Test
     fun aTrackDroppedAfterASecondIsStillReported() {
-        tracker.started(songId = 7, durationMs = 200_000, now = now)
+        tracker.started(track = 7, durationMs = 200_000, now = now)
         tracker.progress(1_200)
         tracker.finished(now + 1_200)
 
         assertEquals(1, events.size)
-        assertEquals(7L, events.first().songId)
+        assertEquals(7L, events.first().track)
         assertTrue("a second of three minutes is a skip", events.first().fraction < 0.3f)
     }
 
@@ -34,18 +37,18 @@ class PlayTrackerTest {
 
     @Test
     fun startingTheNextTrackClosesTheOneBefore() {
-        tracker.started(songId = 1, durationMs = 100_000, now = now)
+        tracker.started(track = 1, durationMs = 100_000, now = now)
         tracker.progress(90_000)
-        tracker.started(songId = 2, durationMs = 100_000, now = now + 90_000)
+        tracker.started(track = 2, durationMs = 100_000, now = now + 90_000)
 
-        assertEquals(listOf(1L), events.map { it.songId })
+        assertEquals(listOf(1L), events.map { it.track })
         assertEquals(0.9f, events.first().fraction, 0.001f)
     }
 
     /** Pauses and repeats must not add up: the furthest position reached is what counts. */
     @Test
     fun theFurthestPositionIsWhatCounts() {
-        tracker.started(songId = 3, durationMs = 100_000, now = now)
+        tracker.started(track = 3, durationMs = 100_000, now = now)
         tracker.progress(50_000)
         tracker.progress(10_000)
         tracker.finished(now + 60_000)

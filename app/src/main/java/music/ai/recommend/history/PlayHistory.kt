@@ -12,14 +12,6 @@ import music.ai.recommend.db.PlayEventDao
 import music.ai.recommend.db.PlayEventEntity
 
 /** One finished listen. [fraction] is how much of the track was reached, 0..1. */
-data class PlayEvent(
-    val songId: Long,
-    val playedAt: Long,
-    val playedMs: Long,
-    val durationMs: Long
-) {
-    val fraction: Float get() = if (durationMs <= 0) 0f else (playedMs.toFloat() / durationMs).coerceIn(0f, 1f)
-}
 
 /**
  * The listening history, written by the playback service and read when the daily playlist is
@@ -29,25 +21,25 @@ class PlayHistory private constructor(context: Context) {
 
     private val dao: PlayEventDao = AppDatabase.getDatabase(context.applicationContext).playEventDao()
 
-    private val _events = MutableSharedFlow<PlayEvent>(extraBufferCapacity = 16)
+    private val _events = MutableSharedFlow<PlayEvent<Long>>(extraBufferCapacity = 16)
 
     /**
      * Listens as they finish, for anything that has to react at once rather than read the history
      * later — the wave steers on these. The playback service and the UI live in the same process,
      * so this is a direct hand-off and not a trip through the database.
      */
-    val events: SharedFlow<PlayEvent> = _events.asSharedFlow()
+    val events: SharedFlow<PlayEvent<Long>> = _events.asSharedFlow()
 
     /**
      * Hands the event to whoever is listening now, and keeps it if it was long enough to be a
      * listen. A track left after a second says plenty about the moment — the wave reacts to it —
      * but it is the player settling as often as it is a verdict, so the history does not keep it.
      */
-    suspend fun record(event: PlayEvent): Unit = withContext(Dispatchers.IO) {
+    suspend fun record(event: PlayEvent<Long>): Unit = withContext(Dispatchers.IO) {
         _events.tryEmit(event)
         if (event.playedMs < MIN_LISTEN_MS) return@withContext
         try {
-            dao.insert(PlayEventEntity(event.songId, event.playedAt, event.playedMs, event.durationMs, ""))
+            dao.insert(PlayEventEntity(event.track, event.playedAt, event.playedMs, event.durationMs, ""))
         } catch (e: Exception) {
             Log.e(TAG, "Could not record a listen", e)
         }
@@ -60,12 +52,12 @@ class PlayHistory private constructor(context: Context) {
      * what is playing here and now, and a listen from this morning's commute is history rather
      * than a verdict. They are written in one go, since they arrive in batches.
      */
-    suspend fun recordFromOtherDevice(deviceId: String, events: List<PlayEvent>): Int =
+    suspend fun recordFromOtherDevice(deviceId: String, events: List<PlayEvent<Long>>): Int =
         withContext(Dispatchers.IO) {
             if (deviceId.isEmpty() || events.isEmpty()) return@withContext 0
             try {
                 dao.insertAll(events.map {
-                    PlayEventEntity(it.songId, it.playedAt, it.playedMs, it.durationMs, deviceId)
+                    PlayEventEntity(it.track, it.playedAt, it.playedMs, it.durationMs, deviceId)
                 })
                 events.size
             } catch (e: Exception) {
@@ -75,14 +67,14 @@ class PlayHistory private constructor(context: Context) {
         }
 
     /** One of this device's own listens, with the row id that says how far the outbox has got. */
-    data class Exportable(val rowId: Long, val event: PlayEvent)
+    data class Exportable(val rowId: Long, val event: PlayEvent<Long>)
 
     /** This device's own listens past [afterId], oldest first, for the sync outbox. */
     suspend fun notYetExported(afterId: Long, limit: Int): List<Exportable> =
         withContext(Dispatchers.IO) {
             try {
                 dao.notYetExported(afterId, limit).map {
-                    Exportable(it.id, PlayEvent(it.songId, it.playedAt, it.playedMs, it.durationMs))
+                    Exportable(it.id, PlayEvent<Long>(it.songId, it.playedAt, it.playedMs, it.durationMs))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Could not read what is left to export", e)
@@ -114,11 +106,11 @@ class PlayHistory private constructor(context: Context) {
     }
 
     /** Events from the last [days] days, newest first. */
-    suspend fun recent(days: Int = PROFILE_DAYS, now: Long = System.currentTimeMillis()): List<PlayEvent> =
+    suspend fun recent(days: Int = PROFILE_DAYS, now: Long = System.currentTimeMillis()): List<PlayEvent<Long>> =
         withContext(Dispatchers.IO) {
             try {
                 dao.since(now - days * DAY_MS).map {
-                    PlayEvent(it.songId, it.playedAt, it.playedMs, it.durationMs)
+                    PlayEvent<Long>(it.songId, it.playedAt, it.playedMs, it.durationMs)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Could not read the history", e)

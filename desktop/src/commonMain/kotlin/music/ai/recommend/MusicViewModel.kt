@@ -102,7 +102,8 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
      * Turns playback into finished listens. The player reports positions; this decides what counts
      * as a listen and what counts as a skip, which is what the playlist of the day is built from.
      */
-    private val playTracker = PlayTracker { event -> recordListen(event) }
+    // Paths: this port identifies a track by where its file is; see PlayEvent.
+    private val playTracker = PlayTracker<String> { event -> recordListen(event) }
     private val db = getAppDatabase()
 
     private val _folders = MutableStateFlow<List<Folder>>(emptyList())
@@ -1512,11 +1513,11 @@ class MusicViewModel : ViewModel(), PlaybackRemote {
         }
     }
 
-    private fun recordListen(event: PlayEvent) {
+    private fun recordListen(event: PlayEvent<String>) {
         viewModelScope.launch(Dispatchers.Default) {
             try {
                 db.musicDao().appendPlayEvent(
-                    PlayEventEntity(event.songPath, event.playedAt, event.playedMs, event.durationMs)
+                    PlayEventEntity(event.track, event.playedAt, event.playedMs, event.durationMs)
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
