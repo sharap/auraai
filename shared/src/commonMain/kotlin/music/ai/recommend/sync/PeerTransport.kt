@@ -119,8 +119,12 @@ class PeerTransport(
      * the same cores. Said as a fact about now rather than as a window of seconds, because a
      * window would have to guess the gap between one round of records and the next — and that gap
      * belongs to the network, which is the one thing here nobody can measure in advance.
+     *
+     * A conversation and not a dial: this used to say yes while [exchange] was running at all,
+     * which includes four seconds inside `connect()` against an address nobody answers. See
+     * [PeerClient.sync]'s `open`.
      */
-    fun conversationInFlight(): Boolean = talking.get() || (server?.inFlight() ?: 0) > 0
+    fun conversationInFlight(): Boolean = conversing.get() > 0 || (server?.inFlight() ?: 0) > 0
 
     /** How many conversations this device has answered; see [State.served]. */
     fun conversationsServed(): Int = served.get()
@@ -128,8 +132,18 @@ class PeerTransport(
     /** How many conversations happened in either direction; see [conversations]. */
     fun conversationsHad(): Int = conversations.get()
 
-    /** Whether a conversation is going on right now; see [exchange]. */
+    /** Whether an exchange is running right now; see [exchange]. */
     private val talking = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Conversations open this second, dialled, with the other device answering. */
+    private val conversing = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** When the typed address may be dialled again, and how often it has failed; see [talk]. */
+    @Volatile
+    private var typedQuietUntil = 0L
+
+    @Volatile
+    private var typedFailures = 0
 
     private val served = java.util.concurrent.atomic.AtomicInteger(0)
 
@@ -240,9 +254,24 @@ class PeerTransport(
         return true
     }
 
+    /**
+     * Dials the typed address on the next exchange whatever it has been doing.
+     *
+     * For the two moments the owner is present: pressing sync, and typing the address in. Both
+     * mean "try now", and a pass that answered "not for another two minutes" to a button would be
+     * a button that does nothing.
+     */
+    fun insistOnTypedAddress() {
+        typedFailures = 0
+        typedQuietUntil = 0L
+    }
+
     fun stop() {
         served.set(0)
         conversations.set(0)
+        conversing.set(0)
+        typedFailures = 0
+        typedQuietUntil = 0L
         server?.stop()
         beacon?.stop()
         server = null
@@ -282,12 +311,23 @@ class PeerTransport(
         val own = files() ?: return emptyList()
         beacon?.announce()
 
-        val fresh = System.currentTimeMillis() - FORGET_PEERS_MS
+        val now = System.currentTimeMillis()
+        val fresh = now - FORGET_PEERS_MS
         val targets = LinkedHashMap<String, Int>()
+        // The address the owner typed, unless it has been refusing to answer. Dialled on every
+        // pass it used to be, and a pass happens every few seconds while an analysis is running:
+        // against a phone that is asleep or off the network that is a four-second `connect()`
+        // over and over, which costs this device far more than it costs the one not answering.
+        // Backed off to a minute and then two, and back to every pass the moment one gets
+        // through — so an address that works is dialled exactly as eagerly as before.
+        var typedHost: String? = null
         typedAddress?.trim()?.takeIf { it.isNotEmpty() }?.let { typed ->
             val host = typed.substringBeforeLast(':', typed)
             val port = typed.substringAfterLast(':', "").toIntOrNull() ?: PeerProtocol.PORT
-            targets[host] = port
+            if (now >= typedQuietUntil) {
+                typedHost = host
+                targets[host] = port
+            }
         }
         synchronized(seen) {
             seen.values.removeAll { it.seenAt < fresh }
@@ -305,10 +345,20 @@ class PeerTransport(
                 files = own,
                 key = key,
                 records = records(),
-                network = network
+                network = network,
+                open = { on -> if (on) conversing.incrementAndGet() else conversing.decrementAndGet() }
             )
             outcomes.add(outcome)
             lastOutcome = outcome
+            if (host == typedHost) {
+                if (outcome.peerDeviceId != null) {
+                    typedFailures = 0
+                    typedQuietUntil = 0L
+                } else {
+                    typedFailures++
+                    typedQuietUntil = System.currentTimeMillis() + quietAfter(typedFailures)
+                }
+            }
             // A dial that got as far as the other device naming itself is a conversation, whether
             // or not it carried anything. One that never opened is not, and must not be: a scan
             // waiting for vectors would read it as "nobody is coming" when nobody was even asked.
@@ -330,6 +380,20 @@ class PeerTransport(
         // tunnel down.
         tunnelled = outcomes.none { it.trouble == null } && outcomes.any { it.routed == false }
         return outcomes
+    }
+
+    /**
+     * How long the typed address is left alone after failing this many times in a row.
+     *
+     * The first failure costs nothing — one more try on the next pass, in case it was a moment —
+     * and after that a minute, then two. Two minutes is the longest anything here waits: the other
+     * device may be reachable by this address and no other, so the ceiling is how late a sync
+     * nobody is watching may be, not how long a dead address deserves.
+     */
+    private fun quietAfter(failures: Int): Long = when {
+        failures <= 1 -> 0L
+        failures == 2 -> 60_000L
+        else -> 120_000L
     }
 
     private companion object {

@@ -67,10 +67,23 @@ object PeerClient {
         records: PeerRecords? = null,
         /** Where the local devices are, for a platform whose routing table says otherwise. */
         network: LocalNetwork? = null,
-        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS
+        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+        /**
+         * Called with true when the other device has answered and the conversation is really open,
+         * and with false when it is over. A dial that never connects never calls it at all.
+         *
+         * The distinction matters to whoever steps aside for a conversation — the analysis does,
+         * because vectors arriving are work it would otherwise repeat. Four seconds inside
+         * `connect()` against an address nobody answers is not a conversation, and treating it as
+         * one had the scan stand aside for a phone that was not there: measured over one 36-minute
+         * scan, 154 dials, every one of them failed, 100 pauses and 200 seconds of waiting during
+         * which not a single vector moved in either direction.
+         */
+        open: (Boolean) -> Unit = {}
     ): Outcome {
         var outcome = Outcome()
         val socket = Socket()
+        var opened = false
         try {
             // Before it is connected, which is the only moment this can be done at all. With a
             // VPN up and this line missing, the tunnel accepts the connection itself and the
@@ -91,6 +104,8 @@ object PeerClient {
             val peer = hello.deviceId
             if (peer == deviceId) return outcome.copy(trouble = "talking to ourselves")
             outcome = outcome.copy(peerDeviceId = peer)
+            opened = true
+            runCatching { open(true) }
 
             outcome = take(link, files, peer, outcome)
             if (outcome.trouble != null) return outcome
@@ -104,6 +119,7 @@ object PeerClient {
             return outcome.copy(trouble = e.message ?: e.javaClass.simpleName)
         } finally {
             runCatching { socket.close() }
+            if (opened) runCatching { open(false) }
         }
     }
 

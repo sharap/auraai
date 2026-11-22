@@ -2359,6 +2359,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setPeerAddress(text: String) {
         prefs.edit().putString(KEY_SYNC_PEER, text.trim()).apply()
         refreshSyncSummary()
+        // Whatever the old address had been doing is no longer about this one; see
+        // PeerTransport.insistOnTypedAddress.
+        peerTransport?.insistOnTypedAddress()
         viewModelScope.launch { syncPass(force = true, takeIn = true) }
     }
 
@@ -2905,6 +2908,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun syncNow() {
         if (_syncSummary.value.busy) return
         _syncSummary.value = _syncSummary.value.copy(busy = true)
+        // The owner is here and asking, so an address that has been failing is tried again now
+        // rather than when its own patience runs out.
+        peerTransport?.insistOnTypedAddress()
         viewModelScope.launch {
             syncPass(force = true, takeIn = true)
             _syncSummary.value = _syncSummary.value.copy(busy = false)

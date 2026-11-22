@@ -2,6 +2,7 @@ package music.ai.recommend.sync
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -723,6 +724,142 @@ class PeerTransportTest {
         } finally {
             hers.deleteRecursively()
             his.deleteRecursively()
+        }
+    }
+
+    /**
+     * An accepted socket that has not said hello is not a conversation.
+     *
+     * It matters because of who asks: the analysis stands aside while a conversation is open, on
+     * the grounds that vectors arriving are work it would otherwise repeat. A VPN endpoint answers
+     * on the other device's behalf and then holds the connection for the whole read timeout —
+     * twenty seconds of nothing — and an analysis that stepped aside for that would be waiting for
+     * somebody who never called.
+     */
+    @Test
+    fun `a socket that says nothing is not a conversation`() {
+        val root = temporary()
+        try {
+            val server = serverFor(File(root, "aura/v1"), alice, key)
+            assertTrue(server.start())
+            try {
+                java.net.Socket("127.0.0.1", server.boundPort).use {
+                    // Long enough for the accept loop to have taken it and started its thread.
+                    repeat(6) {
+                        Thread.sleep(50)
+                        assertEquals(0, server.inFlight())
+                    }
+                }
+            } finally {
+                server.stop()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /** And one that has said hello is, for as long as it lasts. */
+    @Test
+    fun `a conversation counts from the hello to the goodbye`() {
+        val root = temporary()
+        try {
+            val server = serverFor(File(root, "aura/v1"), alice, key)
+            assertTrue(server.start())
+            try {
+                val socket = java.net.Socket("127.0.0.1", server.boundPort)
+                socket.use {
+                    val link = PeerLink.connect(it.getInputStream(), it.getOutputStream(), key)
+                    assertNotNull(link)
+                    assertTrue(link!!.send(PeerProtocol.write(PeerProtocol.Request.Hello(bob))))
+                    // The reply is the proof the hello was taken: the count is raised before it is
+                    // sent, so there is nothing to wait for here.
+                    assertNotNull(link.receive()?.let(PeerProtocol::readReply))
+                    assertEquals(1, server.inFlight())
+                    link.send(PeerProtocol.write(PeerProtocol.Request.Bye))
+                }
+                // And it is given back. Polled, because the serving thread ends in its own time.
+                var left = 20
+                while (left-- > 0 && server.inFlight() > 0) Thread.sleep(50)
+                assertEquals(0, server.inFlight())
+            } finally {
+                server.stop()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * Dialling is not conversing, however long the dial takes.
+     *
+     * A socket in the hands of something that accepts and then says nothing keeps this device in
+     * [PeerClient.sync] for the whole read timeout. Measured before this was true: over one
+     * 36-minute scan the desktop made 154 dials, every one of them failed, and the analysis stood
+     * aside a hundred times for two hundred seconds without a single vector moving either way.
+     */
+    @Test
+    fun `a dial nobody answers is not a conversation`() {
+        val root = temporary()
+        val silent = java.net.ServerSocket(0)
+        try {
+            val transport = PeerTransport(
+                alice,
+                { DirectoryPeerFiles(File(root, "aura/v1"), alice) }
+            )
+            transport.setPhrase("мементо мори")
+            // Never joined: the dial is stuck until the read times out, and the point of the test
+            // is what this device says while it is.
+            Thread { transport.exchange("127.0.0.1:${silent.localPort}") }
+                .apply { isDaemon = true }
+                .start()
+            repeat(8) {
+                Thread.sleep(50)
+                assertFalse(transport.conversationInFlight())
+            }
+        } finally {
+            runCatching { silent.close() }
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * An address that will not answer is left alone for a while, and tried at once when asked.
+     *
+     * The owner types an address for a network that eats broadcasts, and it is then dialled on
+     * every pass — which during an analysis is every few seconds, each one four seconds inside
+     * `connect()` when the other device is asleep. The back-off costs nothing when the address
+     * works, because one answer clears it.
+     */
+    @Test
+    fun `an address that keeps failing is not dialled on every pass`() {
+        val root = temporary()
+        // A port nobody is on: taken and given back, so the number is real and refuses at once.
+        val port = java.net.ServerSocket(0).use { it.localPort }
+        try {
+            val dials = java.util.concurrent.atomic.AtomicInteger(0)
+            val transport = PeerTransport(
+                alice,
+                { DirectoryPeerFiles(File(root, "aura/v1"), alice) },
+                note = { line -> if (line.startsWith("Peer 127.0.0.1")) dials.incrementAndGet() }
+            )
+            transport.setPhrase("мементо мори")
+            val dead = "127.0.0.1:$port"
+
+            // The first failure buys one more try, in case it was a moment.
+            transport.exchange(dead)
+            transport.exchange(dead)
+            assertEquals(2, dials.get())
+
+            // After that the address is left alone, however many passes happen.
+            repeat(5) { transport.exchange(dead) }
+            assertEquals(2, dials.get())
+
+            // Unless the owner is here and asking.
+            transport.insistOnTypedAddress()
+            transport.exchange(dead)
+            assertEquals(3, dials.get())
+        } finally {
+            root.deleteRecursively()
         }
     }
 }

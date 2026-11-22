@@ -60,6 +60,9 @@ class PeerServer(
 
     private val connections = AtomicInteger(0)
 
+    /** Of those, the ones that have got as far as a hello; see [inFlight]. */
+    private val conversations = AtomicInteger(0)
+
     @Volatile
     private var socket: ServerSocket? = null
 
@@ -98,8 +101,13 @@ class PeerServer(
      * Asked by the scan, which steps aside while one is: on a phone the analysis has every core
      * busy, and a device that is being handed four thousand vectors is better off taking them than
      * computing the ones it is being handed.
+     *
+     * Conversations and not connections. A socket that has been accepted and has said nothing is
+     * not a peer — a VPN endpoint answers on the other device's behalf and then holds the
+     * connection for the twenty seconds of the read timeout — and the scan stepping aside for one
+     * of those is waiting for somebody who never called.
      */
-    fun inFlight(): Int = connections.get()
+    fun inFlight(): Int = conversations.get()
 
     fun stop() {
         val opened = socket
@@ -181,6 +189,7 @@ class PeerServer(
                             return
                         }
                         peer = request.deviceId
+                        conversations.incrementAndGet()
                         PeerProtocol.Reply.Hello(deviceId)
                     }
                     PeerProtocol.Request.List -> PeerProtocol.Reply.Listing(files.own())
@@ -237,6 +246,7 @@ class PeerServer(
             trouble = e.message ?: e.javaClass.simpleName
         } finally {
             runCatching { client.close() }
+            if (peer != null) conversations.decrementAndGet()
             onServed(Served(peer, given, taken, trouble))
         }
     }

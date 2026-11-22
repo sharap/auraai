@@ -343,10 +343,10 @@ class AiScanner(
      * With a rendezvous channel that also stops the decoder after at most one more track, since
      * its send waits for a receive that is not coming yet.
      *
-     * Polled briskly rather than once a second, because the signal includes this device's own
-     * dial attempts and under a tunnel those fail in milliseconds, several times a second. Landing
-     * inside one is rare, but when it happens the pause should cost what the attempt cost and not
-     * a round number of seconds.
+     * Polled briskly rather than once a second, because a conversation can be over in a fraction
+     * of one: the pause should cost what the conversation cost and not a round number of seconds.
+     * This device's own dial attempts are not conversations and are not waited for at all; see
+     * `PeerClient.sync`.
      *
      * @return how long it stood aside, so that the estimate of the time remaining stays an
      *   estimate about analysing and not about waiting.
@@ -359,6 +359,7 @@ class AiScanner(
         if (!PeerPresence.conversationInFlight()) return 0L
         val from = System.currentTimeMillis()
         var held = embeddings.ids().size
+        val start = held
         var movedAt = from
         var rounds = 0
         while (!isStopping && PeerPresence.conversationInFlight() && rounds++ < ASIDE_ROUNDS) {
@@ -370,7 +371,7 @@ class AiScanner(
             if (now > held) {
                 held = now
                 movedAt = System.currentTimeMillis()
-            } else if (System.currentTimeMillis() - movedAt >= ASIDE_QUIET_MS) {
+            } else if (System.currentTimeMillis() - movedAt >= quietAllowed(held > start)) {
                 // The socket is open and nothing is coming down it. That is what the other device
                 // disappearing looks like from here — a dropped peer holds a connection for the
                 // read timeout, twenty seconds, and standing idle through those is exactly the
@@ -382,6 +383,21 @@ class AiScanner(
         Log.i(TAG, "Stood aside for $waited ms; $held vectors held when the analysis resumed")
         return waited
     }
+
+    /**
+     * How long an open conversation may go on sending nothing before the analysis resumes.
+     *
+     * Two answers, because the question is two questions. A conversation that has already handed
+     * something over is a handover with a gap in it, and cutting that short would make the scan
+     * recompute what is on its way: it gets the full [ASIDE_QUIET_MS]. A conversation that has
+     * brought nothing yet is usually a conversation that never will — this device dialling out, or
+     * a peer collecting rather than giving — and waiting three seconds for each of those is what
+     * made a scan stand aside a hundred times for two hundred seconds without a single vector
+     * arriving. It gets [ASIDE_EMPTY_MS], which is long enough for the first record of a real
+     * handover to show up and short enough to be invisible when none does.
+     */
+    private fun quietAllowed(somethingArrived: Boolean): Long =
+        if (somethingArrived) ASIDE_QUIET_MS else ASIDE_EMPTY_MS
 
     /**
      * Waits while vectors are still arriving from the other device, and no longer.
@@ -906,6 +922,16 @@ class AiScanner(
          * through when there are tracks here to analyse.
          */
         private const val ASIDE_QUIET_MS = 3_000L
+
+        /**
+         * The same tolerance for a conversation that has not handed anything over yet.
+         *
+         * Six hundred milliseconds, against the 0.35 s a round of fifty vectors takes: one slow
+         * round, so a handover about to start is still recognised as one, and nothing like the
+         * three seconds that a dial out or a peer collecting from here used to cost the analysis.
+         * See [quietAllowed].
+         */
+        private const val ASIDE_EMPTY_MS = 600L
 
         /**
          * Something has arrived, so wait for the stream to really stop. Ten seconds of quiet,
